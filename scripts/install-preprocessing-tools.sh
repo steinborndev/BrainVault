@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Installs the preprocessing toolchain (SPEC.md §5, TASKS-M1 §3). The apt packages need
+# root, so this script uses sudo and will prompt for a password. Idempotent — safe to
+# re-run. After it finishes, `npm run smoke -- --tools` (or detectTools) should report
+# every tool present.
+#
+set -euo pipefail
+
+echo "==> System packages (apt, needs sudo)"
+sudo apt-get update
+sudo apt-get install -y \
+  poppler-utils \
+  ocrmypdf \
+  tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
+  pandoc \
+  libimage-exiftool-perl
+
+echo "==> Python extractors (pip, user site)"
+# python-pptx / openpyxl / odfpy back scripts/extract-office.py for pptx/xlsx/odf.
+python3 -m pip install --user --upgrade python-pptx openpyxl odfpy
+
+echo "==> defuddle-cli (npm, for URL/web extraction)"
+# Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
+npm install -g defuddle-cli
+
+echo "==> Verifying"
+missing=0
+for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle; do
+  if command -v "$tool" >/dev/null 2>&1; then
+    printf '  ok   %s\n' "$tool"
+  else
+    printf '  MISS %s\n' "$tool"
+    missing=1
+  fi
+done
+
+if [ "$missing" -ne 0 ]; then
+  echo "Some tools are still missing — see above." >&2
+  exit 1
+fi
+echo "All preprocessing tools present."
