@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+
+# Operational state — never committed (SPEC.md §8: SQLite holds runtime state only)
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Credentials — must never enter the repo (CLAUDE.md hard rule 3)
+.env
+.env.*
+*.token
+
+# Windows / editor noise
+*:Zone.Identifier
+.DS_Store
+*.log

@@ -1,0 +1,19 @@
+{
+  "name": "vault-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local ingestion service + dashboard on top of a claude-obsidian vault",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace server",
+    "typecheck": "npm run typecheck --workspace server",
+    "lint": "npm run lint --workspace server",
+    "ingest": "npm run ingest --workspace server --"
+  }
+}

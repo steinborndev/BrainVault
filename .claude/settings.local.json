@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(lsb_release -a)",
+      "Bash([ -s \"$HOME/.nvm/nvm.sh\" ])",
+      "Bash(npm -v)",
+      "Bash(git --version)",
+      "Bash(claude --version)"
+    ]
+  }
+}
