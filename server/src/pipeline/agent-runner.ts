@@ -101,23 +101,63 @@ export function buildAgentEnv(
 }
 
 export function buildOptions(opts: RunAgentOptions, abortController: AbortController): Options {
+  const ctx = { vaultRoot: opts.vaultRoot }
   return {
     cwd: opts.vaultRoot,
     env: buildAgentEnv(opts.auth),
-    // Must include 'project' or the vault's CLAUDE.md and its skills never load —
-    // without it the `ingest` skill does not exist and the run is a plain chat.
+    // Loads the vault's CLAUDE.md. NOTE: this does NOT turn skills on — that is
+    // what `skills` below is for. The M0 ingest proved it: with settingSources
+    // alone, Skill({skill:'wiki-ingest'}) errored and the agent fell back to
+    // reading SKILL.md and improvising.
     settingSources: ['project'],
+    // The vault ships `.claude-plugin/plugin.json` — claude-obsidian IS a Claude
+    // Code plugin, and its skills live in `skills/`, which is not a location the
+    // CLI scans on its own. Loading the vault as a local plugin is what registers
+    // `wiki-ingest` et al. as invocable skills; `settingSources: ['project']` alone
+    // does not (measured — the agent saw only the CLI's bundled skills).
+    plugins: [{ type: 'local', path: opts.vaultRoot }],
+    // "This is the single place to turn skills on" (SDK docs).
+    skills: 'all',
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
       append: AUTOMATION_SYSTEM_PROMPT,
     },
-    // 'default' + canUseTool, NOT 'acceptEdits': see permissions.ts — acceptEdits
-    // would auto-accept edits anywhere, which is not the rule we have to enforce.
     permissionMode: 'default',
-    canUseTool: async (toolName, input) =>
-      decidePermission({ vaultRoot: opts.vaultRoot }, toolName, input),
-    // Defense in depth; canUseTool denies these too.
+    // THE enforcement point. canUseTool is advisory and was measured to be invoked
+    // zero times against this SDK; a PreToolUse hook is invoked and does block.
+    // See permissions.ts header and server/src/cli/permprobe.ts.
+    hooks: {
+      PreToolUse: [
+        {
+          hooks: [
+            async (input) => {
+              const { tool_name, tool_input } = input as {
+                tool_name: string
+                tool_input: unknown
+              }
+              const decision = decidePermission(
+                ctx,
+                tool_name,
+                (tool_input ?? {}) as Record<string, unknown>,
+              )
+              return {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: decision.behavior === 'allow' ? 'allow' : 'deny',
+                  permissionDecisionReason:
+                    decision.behavior === 'deny' ? decision.message : 'allowed by vault policy',
+                },
+              }
+            },
+          ],
+        },
+      ],
+    },
+    // Redundant second layer: kept because it costs nothing, but it is NOT the
+    // boundary — do not rely on it.
+    canUseTool: async (toolName, input) => decidePermission(ctx, toolName, input),
+    // Removes the web tools from the model's context entirely.
     disallowedTools: [...WEB_TOOLS],
     abortController,
   }
