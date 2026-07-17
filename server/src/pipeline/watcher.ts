@@ -33,6 +33,11 @@ export interface StartWatcherOptions {
   readonly batchMaxMs?: number
   /** `awaitWriteFinish` stability threshold in ms. Default 2 s; lowered in tests. */
   readonly stabilityMs?: number
+  /**
+   * Force chokidar polling. Windows mounts (`/mnt/*`, 9p/drvfs) don't deliver inotify
+   * events, so events never fire without it. Defaults to auto-on for `/mnt/` paths.
+   */
+  readonly usePolling?: boolean
 }
 
 /** Reads a `url:`/`source:` field from a markdown file's YAML frontmatter, if any. */
@@ -93,12 +98,17 @@ export function startWatcher(opts: StartWatcherOptions): Watcher {
     capTimer ??= setTimeout(flush, maxMs) // opened on the window's first file, not reset
   }
 
+  // Windows mounts (9p/drvfs) don't deliver inotify events, so poll there or nothing fires.
+  const usePolling = opts.usePolling ?? folder.startsWith('/mnt/')
   const watcher = chokidar.watch(folder, {
     ignoreInitial: false, // files already sitting in the inbox at startup should be taken
     awaitWriteFinish: { stabilityThreshold: opts.stabilityMs ?? 2000, pollInterval: 50 },
     ignored: (p) => path.basename(p).startsWith('.'), // skip dotfiles / partials
     depth: 10,
+    usePolling,
+    ...(usePolling ? { interval: 500, binaryInterval: 1000 } : {}),
   })
+  if (usePolling) log('info', `polling mode (Windows mount) for ${folder}`)
 
   watcher.on('add', (filePath) => {
     buffer.push({ filePath, name: path.basename(filePath) })

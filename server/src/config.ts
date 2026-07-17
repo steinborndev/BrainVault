@@ -45,6 +45,12 @@ export interface ServerConfig {
   readonly authMode: HttpAuthMode
   /** Present only in `token` mode. Never logged. */
   readonly authToken?: string
+  /**
+   * Force chokidar polling on/off. Windows mounts (`/mnt/*`, 9p/drvfs) don't deliver
+   * inotify events, so the watcher must poll there; left unset it auto-enables for
+   * `/mnt/` paths (see watcher). Override with `WATCH_POLLING=true|false`.
+   */
+  readonly watchPolling?: boolean
 }
 
 export interface Config {
@@ -140,6 +146,7 @@ const schema = z.object({
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().optional(),
   HTTP_AUTH_MODE: z.enum(['local-single-user', 'token']).optional(),
   HTTP_AUTH_TOKEN: z.string().min(1).optional(),
+  WATCH_POLLING: z.enum(['true', 'false', '1', '0', 'yes', 'no']).optional(),
 })
 
 /** Verifies the path is a real claude-obsidian vault, not just any directory. */
@@ -201,6 +208,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     MAX_UPLOAD_BYTES: presence(merged['MAX_UPLOAD_BYTES']),
     HTTP_AUTH_MODE: presence(merged['HTTP_AUTH_MODE']),
     HTTP_AUTH_TOKEN: presence(merged['HTTP_AUTH_TOKEN']),
+    WATCH_POLLING: presence(merged['WATCH_POLLING']),
   })
 
   if (!parsed.success) {
@@ -230,6 +238,9 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   const credential = parsed.data[envVar] as string
 
   const authMode: HttpAuthMode = parsed.data.HTTP_AUTH_MODE ?? 'local-single-user'
+  const watchPolling = parsed.data.WATCH_POLLING
+    ? ['true', '1', 'yes'].includes(parsed.data.WATCH_POLLING)
+    : undefined
   const server: ServerConfig = {
     host: parsed.data.HOST ?? DEFAULT_HOST,
     port: parsed.data.PORT ?? DEFAULT_PORT,
@@ -239,6 +250,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     ...(authMode === 'token' && parsed.data.HTTP_AUTH_TOKEN
       ? { authToken: parsed.data.HTTP_AUTH_TOKEN }
       : {}),
+    ...(watchPolling !== undefined ? { watchPolling } : {}),
   }
 
   return {

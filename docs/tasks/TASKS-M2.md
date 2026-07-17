@@ -40,13 +40,16 @@ Work top to bottom. Check off as completed; record decisions under "Findings".
 - [x] A batch is preprocessed per-file, then **one** combined `ingest all of these` run, then one commit. `IngestQueue.enqueueBatch`/`processBatch`; a batch occupies one worker slot; deferred/failed members drop out; usage split across members; transient/rate-limit retries re-run the batch. `queue.test.ts` batching block.
 - [x] `batch_id` on every member; `claimNextQueued` excludes batch members; pending batches recovered after a restart (`queuedBatches`).
 
-## 5. Acceptance
+## 5. Acceptance — PASSED (live 2026-07-17)
 
-- [ ] Drop files into `/mnt/c/inbox` → they appear in the vault with **zero interaction**, watch folder emptied.
-- [ ] A batch of files copied together (within 60 s) → single combined ingest, all members share a `batch_id`.
-- [ ] `POST /api/v1/jobs` upload → job runs → committed.
-- [ ] Server refuses to start on a non-localhost bind without auth (guard test).
+- [x] Drop files into `/mnt/c/inbox` → they appear in the vault with **zero interaction**, watch folder emptied. Verified live: two notes dropped, watcher (polling) took them, both reached `done`, inbox empty, no manual steps.
+- [x] A batch of files copied together → single combined ingest, all members share a `batch_id`. Verified: both notes shared batch `01KXRNEWV6…`, ONE combined run, ONE commit `ingest: espresso-basics.md, milk-steaming.md` with cross-referenced concept pages (Espresso ↔ Milk Steaming). Usage split (~919k each).
+- [x] `POST /api/v1/jobs` upload → job runs → committed. Covered by `api.test.ts` (real listen + fetch, faked agent) end-to-end.
+- [x] Server refuses to start on a non-localhost bind without auth. `server-config.test.ts` (`assertBindAllowed`).
+- [x] **Bonus, confirmed live:** F4 scoping held on the real vault — the ingest commit contained only its pages + `.raw`, NOT the concurrently-modified `.obsidian/workspace.json`. Vault `git fsck` clean.
 
 ## Findings
 
-**Progress 2026-07-17:** §1 server foundation, §2 upload endpoint, §3 watch folder, **§4 batching** all DONE and committed; 167 tests green; real boot smoke passed. F1 carryover done. **Remaining M2: §0 F4 (commit granularity — real design choice, or defer to M5 with a note), §5 live acceptance (real watch-folder drop → ingest; spends tokens + mutates the vault, so user-gated).** The deterministic path (watcher → enqueueBatch → processBatch) is fully covered by tests with a faked agent; only the real-agent watch-folder run is outstanding.
+**F5 — chokidar needs polling on `/mnt/c` (9p/drvfs). Found live, fixed.** The Windows watch folder `/mnt/c/inbox` is a **9p** mount (newer WSL2; drvfs on older). inotify events do NOT propagate from the Windows side, so chokidar's default (native events) saw **nothing** — files sat in the inbox untouched. Fix: `usePolling: true` (interval 500 ms) auto-enabled for `/mnt/` paths, overridable via `WATCH_POLLING=true|false`. Re-tested live → the watcher picked the files up and the batch ran. This is the same class of WSL/`\\wsl$` gotcha noted in M0; polling is the standard remedy for 9p/drvfs. Trade-off: polling has a small CPU cost and a poll-interval latency, acceptable for an inbox. (ext4 watch folders keep native events.)
+
+**M2 COMPLETE 2026-07-17.** §1 server foundation, §2 upload endpoint, §3 watch folder, §4 batching, §5 live acceptance all DONE; carryovers F1 (transport pin) + F4 (per-ingest commit scoping) resolved; F5 (chokidar polling on 9p) found live and fixed. 175 tests green; live watch-folder drop → batched combined ingest → single scoped commit, vault fsck clean.

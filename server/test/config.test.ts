@@ -135,6 +135,34 @@ describe('loadConfig — env file handling', () => {
   })
 })
 
+describe('loadConfig — server config', () => {
+  const base = (extra: Record<string, string>) => ({
+    envFile: false as const,
+    env: { VAULT_ROOT: vault, CLAUDE_CODE_OAUTH_TOKEN: 'tok', ...extra },
+  })
+
+  it('defaults host/port/watchFolder and leaves watchPolling unset (auto)', () => {
+    const { server } = loadConfig(base({}))
+    expect(server.host).toBe('127.0.0.1')
+    expect(server.port).toBe(8420)
+    expect(server.watchFolder).toBe('/mnt/c/inbox')
+    expect(server.authMode).toBe('local-single-user')
+    expect(server.watchPolling).toBeUndefined()
+  })
+
+  it('parses WATCH_POLLING true/false', () => {
+    expect(loadConfig(base({ WATCH_POLLING: 'true' })).server.watchPolling).toBe(true)
+    expect(loadConfig(base({ WATCH_POLLING: 'false' })).server.watchPolling).toBe(false)
+  })
+
+  it('honours HOST/PORT/WATCH_FOLDER overrides', () => {
+    const { server } = loadConfig(base({ HOST: '0.0.0.0', PORT: '9000', WATCH_FOLDER: '/mnt/m/drop' }))
+    expect(server.host).toBe('0.0.0.0')
+    expect(server.port).toBe(9000)
+    expect(server.watchFolder).toBe('/mnt/m/drop')
+  })
+})
+
 describe('loadConfig — VAULT_ROOT validation', () => {
   it('requires VAULT_ROOT', () => {
     expect(() => loadConfig({ envFile: false, env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' } })).toThrow(

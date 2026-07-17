@@ -34,7 +34,11 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth })
   queue.start()
 
-  const watcher = startWatcher({ queue, config })
+  const watcher = startWatcher({
+    queue,
+    config,
+    ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
+  })
 
   const app = await buildServer({ config, store, queue })
   await app.listen({ host: config.server.host, port: config.server.port })
