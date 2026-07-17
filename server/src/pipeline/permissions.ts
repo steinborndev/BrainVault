@@ -35,8 +35,31 @@
 import path from 'node:path'
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
 
-/** Web tools are hard-denied for ingest runs (SPEC.md §9; autoresearch re-enables them in M4). */
+/** Web tools are hard-denied except in the `research` profile (SPEC.md §9, §6.4 autoresearch). */
 export const WEB_TOOLS = ['WebSearch', 'WebFetch'] as const
+
+/** Vault-mutating tools — denied in the read-only `query` profile (SPEC.md §5). */
+export const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'] as const
+
+/**
+ * The kind of run, which decides web egress and vault writes (SPEC.md §5, §6.3, §6.4):
+ *  - `ingest`   — writes to the vault, no web (the M1 default)
+ *  - `query`    — READ-ONLY: no web, no vault writes (the chat runner)
+ *  - `research` — writes to the vault AND has web egress (autoresearch only)
+ *
+ * `maintenance` (lint / hot-cache / save) shares the `ingest` profile: writes, no web.
+ */
+export type RunProfile = 'ingest' | 'query' | 'research'
+
+/** Whether a profile is allowed to reach the web. Only `research` is. */
+export function profileAllowsWeb(profile: RunProfile): boolean {
+  return profile === 'research'
+}
+
+/** Whether a profile may mutate the vault. `query` may not (read-only). */
+export function profileAllowsVaultWrite(profile: RunProfile): boolean {
+  return profile !== 'query'
+}
 
 /** Tools whose input names a path we must confine to the vault. */
 const PATH_INPUT_KEYS = ['file_path', 'path', 'notebook_path'] as const
@@ -70,6 +93,8 @@ const BASH_DENY: ReadonlyArray<{ readonly pattern: RegExp; readonly why: string 
 export interface PermissionContext {
   /** Absolute, resolved vault root. */
   readonly vaultRoot: string
+  /** The run profile; defaults to `ingest` when omitted (back-compat with M1 call sites). */
+  readonly profile?: RunProfile
 }
 
 /** True when `candidate` is inside `root` (or is `root` itself). */
@@ -131,10 +156,23 @@ export function decidePermission(
   toolName: string,
   input: Record<string, unknown>,
 ): PermissionResult {
-  if ((WEB_TOOLS as readonly string[]).includes(toolName)) {
+  const profile = ctx.profile ?? 'ingest'
+
+  if ((WEB_TOOLS as readonly string[]).includes(toolName) && !profileAllowsWeb(profile)) {
     return {
       behavior: 'deny',
-      message: `${toolName} is not available during ingest: ingest runs have no web egress (SPEC.md §9). Work only from the provided source file.`,
+      message: `${toolName} is not available in a ${profile} run: only autoresearch has web egress (SPEC.md §9). Work only from the vault.`,
+    }
+  }
+
+  // Read-only (query) runs may not mutate the vault: the chat runner answers from the
+  // wiki and must not let wiki-query's "file the answer back" behaviour write (SPEC.md §5;
+  // saving is the explicit /save action). The sandbox (no vault write) is the hard floor;
+  // this makes the refusal explicit and legible in the log.
+  if (!profileAllowsVaultWrite(profile) && (WRITE_TOOLS as readonly string[]).includes(toolName)) {
+    return {
+      behavior: 'deny',
+      message: `${toolName} is not available in a read-only query run: the chat runner does not modify the vault (SPEC.md §5). Use "Session in Vault sichern" to persist an answer.`,
     }
   }
 

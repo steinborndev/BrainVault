@@ -15,20 +15,27 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import type { Config } from '../config.js'
 import type { JobStore } from '../db/jobs.js'
+import type { ChatStore } from '../db/chat.js'
 import type { IngestQueue } from '../pipeline/queue.js'
 import type { EventBus } from '../pipeline/events.js'
+import type { QueryRunner } from '../pipeline/query-runner.js'
 import { registerAuth } from './auth.js'
 import { registerHealthRoute } from './routes/health.js'
 import { registerJobsRoute } from './routes/jobs.js'
 import { registerEventsRoute } from './routes/events.js'
 import { registerStatsRoute } from './routes/stats.js'
+import { registerQueryRoute } from './routes/query.js'
 
 export interface AppContext {
   readonly config: Config
   readonly store: JobStore
+  /** Chat sessions + messages store (M4). */
+  readonly chat: ChatStore
   readonly queue: IngestQueue
   /** Live-update bus shared with the queue/store; the SSE route is its only subscriber. */
   readonly events: EventBus
+  /** Read-only query runner; injectable so tests mock it (defaults to the real SDK runner). */
+  readonly runQuery?: QueryRunner
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
 }
@@ -56,6 +63,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerJobsRoute(app, ctx)
   registerEventsRoute(app, ctx)
   registerStatsRoute(app, ctx)
+  registerQueryRoute(app, ctx)
 
   await registerFrontend(app)
 

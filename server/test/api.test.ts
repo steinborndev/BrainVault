@@ -6,8 +6,11 @@ import type { AddressInfo } from 'node:net'
 import type { FastifyInstance } from 'fastify'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
+import { ChatStore } from '../src/db/chat.js'
 import { IngestQueue } from '../src/pipeline/queue.js'
 import { EventBus } from '../src/pipeline/events.js'
+import type { QueryRunInput } from '../src/pipeline/query-runner.js'
+import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
 import { buildServer } from '../src/api/server.js'
 import type { Config } from '../src/config.js'
 import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
@@ -29,9 +32,21 @@ const NO_TOOLS: ToolAvailability = {
 
 let db: Db
 let store: JobStore
+let chat: ChatStore
 let queue: IngestQueue
 let events: EventBus
 let app: FastifyInstance
+// A controllable stand-in for the read-only query runner (no real SDK in tests).
+let queryImpl: (input: QueryRunInput) => Promise<AgentRunResult>
+const okResult = (result: string): AgentRunResult => ({
+  ok: true,
+  result,
+  usage: { tokensIn: 10, tokensOut: 5, costUsd: 0.01 },
+  durationMs: 1,
+  numTurns: 1,
+  sessionId: 'sdk-session-1',
+  timedOut: false,
+})
 let vaultRoot: string
 let baseUrl: string
 
@@ -54,6 +69,8 @@ beforeEach(async () => {
   db = openDb(MEMORY_DB)
   events = new EventBus()
   store = new JobStore(db, events)
+  chat = new ChatStore(db)
+  queryImpl = async () => okResult('answer with [[Some Page]] cited')
   vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'))
   queue = new IngestQueue({
     store,
@@ -84,7 +101,15 @@ beforeEach(async () => {
     },
   })
   queue.start()
-  app = await buildServer({ config: makeConfig(), store, queue, events, logger: false })
+  app = await buildServer({
+    config: makeConfig(),
+    store,
+    chat,
+    queue,
+    events,
+    runQuery: (input) => queryImpl(input),
+    logger: false,
+  })
   await app.listen({ host: '127.0.0.1', port: 0 })
   baseUrl = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`
 })
@@ -294,5 +319,101 @@ describe('GET /api/v1/events (SSE)', () => {
     }
     controller.abort()
     expect(seen).toContain('event: job')
+  })
+})
+
+describe('POST /api/v1/query + sessions', () => {
+  it('answers, resolves citations to real pages, and persists the session', async () => {
+    // A real wiki page so the [[Compound Interest]] citation resolves to a path.
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Compound Interest.md'), '# Compound Interest')
+    queryImpl = async () => okResult('Interest compounds — see [[Compound Interest]] and [[Nonexistent Page]].')
+
+    const res = await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'What is compound interest?' }),
+    })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      sessionId: string
+      message: { role: string; content: string }
+      citations: Array<{ label: string; path: string | null }>
+    }
+    expect(body.message.role).toBe('assistant')
+    const resolved = body.citations.find((c) => c.label === 'Compound Interest')
+    expect(resolved?.path).toBe('wiki/concepts/Compound Interest.md')
+    const unresolved = body.citations.find((c) => c.label === 'Nonexistent Page')
+    expect(unresolved?.path).toBeNull() // degrades to plain text, never a broken link
+
+    // The session persisted the user + assistant messages.
+    const detail = (await (await fetch(`${baseUrl}/api/v1/sessions/${body.sessionId}`)).json()) as {
+      messages: Array<{ role: string }>
+    }
+    expect(detail.messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+  })
+
+  it('continues an existing session and resumes the SDK session', async () => {
+    let resumed: string | undefined
+    queryImpl = async (input) => {
+      resumed = input.resumeSessionId
+      return okResult('follow-up answer')
+    }
+    const first = (await (
+      await fetch(`${baseUrl}/api/v1/query`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ question: 'first' }),
+      })
+    ).json()) as { sessionId: string }
+
+    await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'second', sessionId: first.sessionId }),
+    })
+    expect(resumed).toBe('sdk-session-1') // the SDK session id from the first turn
+
+    const missing = await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'x', sessionId: 'nope' }),
+    })
+    expect(missing.status).toBe(404)
+  })
+
+  it('lists, renames, and deletes sessions', async () => {
+    const created = (await (
+      await fetch(`${baseUrl}/api/v1/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'my chat' }),
+      })
+    ).json()) as { session: { id: string; title: string } }
+    expect(created.session.title).toBe('my chat')
+
+    await fetch(`${baseUrl}/api/v1/sessions/${created.session.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'renamed' }),
+    })
+    const list = (await (await fetch(`${baseUrl}/api/v1/sessions`)).json()) as {
+      sessions: Array<{ id: string; title: string }>
+    }
+    expect(list.sessions.find((s) => s.id === created.session.id)?.title).toBe('renamed')
+
+    const del = await fetch(`${baseUrl}/api/v1/sessions/${created.session.id}`, { method: 'DELETE' })
+    expect(del.status).toBe(200)
+    const gone = await fetch(`${baseUrl}/api/v1/sessions/${created.session.id}`)
+    expect(gone.status).toBe(404)
+  })
+
+  it('rejects an empty question', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: '  ' }),
+    })
+    expect(res.status).toBe(400)
   })
 })
