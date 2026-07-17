@@ -97,4 +97,19 @@ CREATE TABLE settings (
 );
 `
 
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, up: V1 }]
+/**
+ * v2 — chat (M4). The `sessions`/`messages` tables from v1 are the store; a chat session
+ * additionally remembers the SDK session id of its last query run so a follow-up can
+ * `resume` it and keep context (SPEC.md §5). `updated_at` gives the session list a sort key
+ * that moves when a new message lands. Both columns are nullable/defaulted, so v1 rows and
+ * the seeded data migrate without backfill.
+ */
+const V2 = `
+ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
+ALTER TABLE sessions ADD COLUMN updated_at TEXT;
+`
+
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, up: V1 },
+  { version: 2, up: V2 },
+]

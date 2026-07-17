@@ -97,6 +97,80 @@ export interface Health {
   jobs: Record<string, number>
 }
 
+/** A resolved page citation for a chat answer (server/src/pipeline/citations.ts). */
+export interface Citation {
+  label: string
+  /** Vault-relative page path, or null if the cited page couldn't be resolved. */
+  path: string | null
+}
+
+export type MessageRole = 'user' | 'assistant' | 'system'
+
+export interface ChatMessage {
+  id: number
+  session_id: string
+  role: MessageRole
+  content: string
+  /** JSON string of Citation[] as stored, or null. Parse with parseCitations(). */
+  citations: string | null
+  ts: string
+}
+
+export interface Session {
+  id: string
+  user_id: string
+  title: string | null
+  sdk_session_id: string | null
+  created_at: string
+  updated_at: string | null
+  /** Present on list responses. */
+  message_count?: number
+  last_ts?: string | null
+}
+
+export interface QueryResponse {
+  sessionId: string
+  message: ChatMessage
+  citations: Citation[]
+  usage: { tokensIn: number; tokensOut: number; costUsd: number }
+  authMode: 'oauth' | 'api-key'
+}
+
+// ---- Maintenance (server/src/pipeline/lint-report.ts, maintenance.ts) ----
+
+export interface LintFinding {
+  text: string
+  page: Citation | null
+}
+
+export interface LintSection {
+  title: string
+  findings: LintFinding[]
+}
+
+export interface LintReport {
+  date: string | null
+  summary: Record<string, number>
+  sections: LintSection[]
+  totalFindings: number
+}
+
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+
+export interface MaintenanceResult {
+  ok: boolean
+  kind: MaintenanceKind
+  /** The SSE channel its live log streamed on, e.g. `maintenance:lint`. */
+  channel: string
+  pages: string[]
+  usage: { tokensIn: number; tokensOut: number; costUsd: number }
+  error?: string
+  /** The agent's final text (summary / fallback when no structured report). */
+  answer?: string
+  lint?: LintReport
+  reportPath?: string
+}
+
 /** SSE event payloads (server/src/api/routes/events.ts). */
 export type BusEvent =
   | { kind: 'job'; job: Job }

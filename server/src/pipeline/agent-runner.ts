@@ -8,8 +8,15 @@
  */
 
 import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { AUTOMATION_SYSTEM_PROMPT } from './system-prompt.js'
-import { decidePermission, WEB_TOOLS } from './permissions.js'
+import { AUTOMATION_SYSTEM_PROMPT, QUERY_SYSTEM_PROMPT } from './system-prompt.js'
+import {
+  decidePermission,
+  profileAllowsVaultWrite,
+  profileAllowsWeb,
+  WEB_TOOLS,
+  WRITE_TOOLS,
+  type RunProfile,
+} from './permissions.js'
 import { CREDENTIAL_ENV_VARS, type CredentialEnvVar } from '../config.js'
 
 /** Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 15 min)"). */
@@ -64,6 +71,18 @@ export interface RunAgentOptions {
   readonly onMessage?: (message: SDKMessage) => void
   /** Caller-owned abort (e.g. job cancellation). Composed with the timeout. */
   readonly signal?: AbortSignal
+  /**
+   * The run profile (SPEC.md §5): `ingest` (default) writes to the vault with no web;
+   * `query` is read-only with no web; `research` writes AND has web egress. It selects the
+   * permission policy, the disallowed tools, the sandbox write allowlist, and the system
+   * prompt — so a query run structurally cannot mutate the vault or reach the web.
+   */
+  readonly profile?: RunProfile
+  /**
+   * SDK session id to resume (query follow-ups keep context, SPEC.md §5). Omit to start a
+   * fresh session. The resumed session's id is returned in the result either way.
+   */
+  readonly resumeSessionId?: string
 }
 
 const EMPTY_USAGE: AgentUsage = { tokensIn: 0, tokensOut: 0, costUsd: 0 }
@@ -101,7 +120,14 @@ export function buildAgentEnv(
 }
 
 export function buildOptions(opts: RunAgentOptions, abortController: AbortController): Options {
-  const ctx = { vaultRoot: opts.vaultRoot }
+  const profile: RunProfile = opts.profile ?? 'ingest'
+  const ctx = { vaultRoot: opts.vaultRoot, profile }
+  // Web tools stay out of context unless this is a research run; a read-only query run
+  // also drops the write tools so the model never even attempts a vault mutation.
+  const disallowedTools = [
+    ...(profileAllowsWeb(profile) ? [] : WEB_TOOLS),
+    ...(profileAllowsVaultWrite(profile) ? [] : WRITE_TOOLS),
+  ]
   return {
     cwd: opts.vaultRoot,
     env: buildAgentEnv(opts.auth),
@@ -118,10 +144,15 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
     plugins: [{ type: 'local', path: opts.vaultRoot }],
     // "This is the single place to turn skills on" (SDK docs).
     skills: 'all',
+    // Resume a prior SDK session so query follow-ups keep context (SPEC.md §5). Ignored
+    // (undefined) for a fresh run.
+    ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
-      append: AUTOMATION_SYSTEM_PROMPT,
+      // A read-only query gets the read-only prompt; ingest/research keep the automation
+      // prompt (both write pages and must not stall on a question).
+      append: profile === 'query' ? QUERY_SYSTEM_PROMPT : AUTOMATION_SYSTEM_PROMPT,
     },
     /**
      * OS-level confinement — the only thing that makes "writes only under
@@ -146,7 +177,9 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
       // the parameter, and created the canary outside the vault on its second try.
       // At false the parameter is ignored entirely and every command is sandboxed.
       allowUnsandboxedCommands: false,
-      filesystem: { allowWrite: [opts.vaultRoot] },
+      // A read-only query run gets NO vault write path — the OS sandbox is the hard floor
+      // for "chat does not modify the vault" (SPEC.md §5). ingest/research write the vault.
+      filesystem: { allowWrite: profileAllowsVaultWrite(profile) ? [opts.vaultRoot] : [] },
     },
     permissionMode: 'default',
     // THE enforcement point. canUseTool is advisory and was measured to be invoked
@@ -182,8 +215,8 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
     // Redundant second layer: kept because it costs nothing, but it is NOT the
     // boundary — do not rely on it.
     canUseTool: async (toolName, input) => decidePermission(ctx, toolName, input),
-    // Removes the web tools from the model's context entirely.
-    disallowedTools: [...WEB_TOOLS],
+    // Removes web (and, for a read-only query, write) tools from the model's context.
+    disallowedTools,
     abortController,
   }
 }

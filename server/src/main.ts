@@ -8,8 +8,11 @@ import { pathToFileURL } from 'node:url'
 import { loadConfig, describeConfig, assertBindAllowed, ConfigError, type Config } from './config.js'
 import { openDb, defaultDbPath } from './db/index.js'
 import { JobStore } from './db/jobs.js'
+import { ChatStore } from './db/chat.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
+import { MaintenanceRunner } from './pipeline/maintenance.js'
+import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
@@ -35,8 +38,19 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // stats, and the SSE route (via the app) is the sole subscriber (SPEC.md §6.5).
   const events = new EventBus()
   const store = new JobStore(db, events)
-  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth, events })
+  const chat = new ChatStore(db)
+  // One commit mutex shared by the ingest queue and the maintenance runner so their commits
+  // never interleave (one vault writer at a time, TASKS-M4 §2).
+  const commitMutex = new Mutex()
+  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth, events, commitMutex })
   queue.start()
+
+  const maintenance = new MaintenanceRunner({
+    vaultRoot: config.vaultRoot,
+    auth: config.auth,
+    events,
+    commitMutex,
+  })
 
   const watcher = startWatcher({
     queue,
@@ -44,7 +58,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
   })
 
-  const app = await buildServer({ config, store, queue, events })
+  const app = await buildServer({ config, store, chat, queue, events, maintenance })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
 
