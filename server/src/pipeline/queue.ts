@@ -286,8 +286,11 @@ export class IngestQueue {
     }
     this.toolsCache ??= await this.detectToolsFn()
 
-    if (job.source === 'url') {
-      if (!job.url) throw new Error('url job has no url')
+    // A URL job is identified by carrying a url, NOT by `source`: `source` is the channel
+    // (drop | watch | url), so a URL dropped via the dashboard/CLI has source 'drop' but
+    // is still a web job. Keying off `source` here mis-routed it as a file (the M1 test's
+    // one failure) — the presence of `url` is the correct discriminator.
+    if (job.url) {
       return this.preprocessUrlFn({ jobId: job.id, url: job.url, vaultRoot: this.vaultRoot, jobDir, tools: this.toolsCache })
     }
     if (!job.original_name) throw new Error('file job has no original_name')

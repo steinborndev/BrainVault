@@ -138,6 +138,37 @@ describe('happy path', () => {
     expect(logMessages.some((m) => m.includes('hot cache noted'))).toBe(true)
   })
 
+  it('routes a URL job by its url, not its source channel (regression)', async () => {
+    // A URL dropped via the CLI/dashboard has source 'drop' but must still preprocess as
+    // a web job. Injecting preprocessUrlFn avoids real network.
+    let urlSeen: string | undefined
+    const q = new IngestQueue({
+      store,
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      detectToolsFn: async () => NO_TOOLS,
+      commit: async () => ({ committed: true, hash: 'h', committedPages: ['wiki/x.md'] }),
+      refreshHotCache: async () => 'noop',
+      runIngest: async () => okResult(),
+      preprocessUrlFn: async (input) => {
+        urlSeen = input.url
+        fs.mkdirSync(input.jobDir, { recursive: true })
+        return {
+          type: 'web',
+          deferred: false,
+          manifestPath: path.join(input.jobDir, 'manifest.json'),
+          primaryArtifact: `.raw/${input.jobId}/normalized.md`,
+          manifest: {} as never,
+        }
+      },
+    })
+    q.start()
+    const { job } = q.enqueueUrl({ url: 'https://example.com/x', source: 'drop' })
+    await q.onIdle()
+    expect(urlSeen).toBe('https://example.com/x')
+    expect(store.getOrThrow(job.id).status).toBe('done')
+  })
+
   it('skips ingest for a duplicate', async () => {
     let runs = 0
     const q = makeQueue({ runIngest: async () => (runs++, okResult()) })
