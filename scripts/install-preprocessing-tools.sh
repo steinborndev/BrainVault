@@ -16,9 +16,15 @@ sudo apt-get install -y \
   pandoc \
   libimage-exiftool-perl
 
-echo "==> Python extractors (pip, user site)"
+echo "==> Python extractors (pip)"
 # python-pptx / openpyxl / odfpy back scripts/extract-office.py for pptx/xlsx/odf.
-python3 -m pip install --user --upgrade python-pptx openpyxl odfpy
+# `--user` is invalid inside a virtualenv (pyenv/venv/conda), so only add it when we are
+# NOT in one — otherwise install into the active environment directly.
+PIP_USER_FLAG="--user"
+if python3 -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)' 2>/dev/null; then
+  PIP_USER_FLAG=""  # inside a virtualenv
+fi
+python3 -m pip install ${PIP_USER_FLAG} --upgrade python-pptx openpyxl odfpy
 
 echo "==> defuddle (npm, for URL/web extraction)"
 # Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
