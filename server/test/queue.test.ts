@@ -87,9 +87,8 @@ function makeQueue(over: QueueOverrides = {}): IngestQueue {
     detectToolsFn: async () => NO_TOOLS,
     commit: async (_root, message) => {
       commitCalls.push(message)
-      return { committed: true, hash: 'abcd1234ef' }
+      return { committed: true, hash: 'abcd1234ef', committedPages: ['wiki/concepts/Foo.md'] }
     },
-    listChangedPages: async () => ['wiki/concepts/Foo.md'],
     refreshHotCache: async () => 'hot cache noted',
     setTimeoutFn: (fn) => void pausedTimers.push(fn),
     runIngest: over.runIngest ?? (async () => okResult()),

@@ -28,7 +28,7 @@ import { sha256File } from './hash.js'
 import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, changedWikiPages, type CommitResult } from './git.js'
+import { commitVault, type CommitResult } from './git.js'
 import { Mutex } from '../util/mutex.js'
 
 export type FailureClass = 'rate_limit' | 'transient' | 'permanent'
@@ -56,8 +56,6 @@ export interface IngestQueueOptions {
   readonly preprocessUrlFn?: typeof preprocessUrl
   readonly detectToolsFn?: () => Promise<ToolAvailability>
   readonly commit?: (vaultRoot: string, message: string) => Promise<CommitResult>
-  /** Lists changed wiki pages for `created_pages`. Injectable so tests avoid real git. */
-  readonly listChangedPages?: (vaultRoot: string) => Promise<string[]>
   /** Hot-cache refresh hook; returns a note logged against the job. See file note in queue.ts. */
   readonly refreshHotCache?: (vaultRoot: string) => Promise<string>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
@@ -105,7 +103,6 @@ export class IngestQueue {
   private readonly preprocessUrlFn: typeof preprocessUrl
   private readonly detectToolsFn: () => Promise<ToolAvailability>
   private readonly commit: (vaultRoot: string, message: string) => Promise<CommitResult>
-  private readonly listChangedPages: (vaultRoot: string) => Promise<string[]>
   private readonly refreshHotCache: (vaultRoot: string) => Promise<string>
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
 
@@ -129,7 +126,6 @@ export class IngestQueue {
     this.preprocessUrlFn = opts.preprocessUrlFn ?? preprocessUrl
     this.detectToolsFn = opts.detectToolsFn ?? detectTools
     this.commit = opts.commit ?? commitVault
-    this.listChangedPages = opts.listChangedPages ?? changedWikiPages
     this.refreshHotCache =
       opts.refreshHotCache ??
       (async () =>
@@ -324,16 +320,16 @@ export class IngestQueue {
     })
 
     if (res.ok) {
-      const pages = await this.changedPages(job.id)
       this.store.transition(job.id, 'done', {
         patch: {
           tokensIn: res.usage.tokensIn,
           tokensOut: res.usage.tokensOut,
           costUsd: res.usage.costUsd,
-          createdPages: pages,
         },
-        log: `ingest complete: ${pages.length} wiki page(s) changed over ${res.numTurns} turns`,
+        log: `ingest complete over ${res.numTurns} turns`,
       })
+      // created_pages comes from the actual commit (see commitVault): the only
+      // authoritative record of what landed, correct even at concurrency 2.
       await this.commitStep(job)
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(job.id, 'info', note)
@@ -377,24 +373,20 @@ export class IngestQueue {
     const label = job.original_name ?? job.url ?? job.id
     try {
       const result = await this.commitMutex.runExclusive(() => this.commit(this.vaultRoot, `ingest: ${label}`))
-      this.store.log(
-        job.id,
-        'info',
-        result.committed ? `committed ${result.hash?.slice(0, 8)}` : `not committed: ${result.note ?? 'no changes'}`,
-      )
+      if (result.committed) {
+        this.store.setCreatedPages(job.id, result.committedPages)
+        this.store.log(
+          job.id,
+          'info',
+          `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} wiki page(s))`,
+        )
+      } else {
+        this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
+      }
     } catch (err) {
       // A commit failure must not undo a completed ingest — the pages are on disk and the
       // next successful job's `git add -A` will sweep them in. Surface it, don't fail.
       this.store.log(job.id, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
-    }
-  }
-
-  private async changedPages(jobId: string): Promise<string[]> {
-    try {
-      return await this.listChangedPages(this.vaultRoot)
-    } catch (err) {
-      this.store.log(jobId, 'warn', `could not list changed wiki pages: ${(err as Error).message}`)
-      return []
     }
   }
 

@@ -301,6 +301,11 @@ export class JobStore {
     this.db.prepare('UPDATE jobs SET raw_path = ? WHERE id = ?').run(rawPath, id)
   }
 
+  /** Records the wiki pages this ingest committed (read back from the commit itself). */
+  setCreatedPages(id: string, pages: readonly string[]): void {
+    this.db.prepare('UPDATE jobs SET created_pages = ? WHERE id = ?').run(JSON.stringify(pages), id)
+  }
+
   /** Appends a line to the job's log (agent stream + pipeline events, SPEC.md §8). */
   log(id: string, level: LogLevel, message: string): void {
     this.db
