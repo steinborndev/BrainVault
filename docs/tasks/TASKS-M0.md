@@ -75,7 +75,7 @@ Work top to bottom. Check off tasks as they complete. Record findings inline und
 
 - [x] All acceptance criteria of SPEC.md §10 M0 met — **yes.** SPEC.md §10's M0 criterion — *"Eine PDF wird per CLI-Aufruf des Services korrekt eingepflegt (Seiten + Index + Hot Cache)"* — met twice (English `s41578…`, German `DOC_DE_001…`), both via `npm run ingest`, both with 0 broken links. Both risk probes documented. **Every item on this task list is now ticked**, including 5.3 (the language rule), which was the one item still open at the previous milestone-close attempt and is now verified against a real German source.
 - [x] Findings section below completed; open follow-ups converted into TASKS-M1.md entries — `docs/tasks/TASKS-M1.md` created; §0 carries the remaining M0 follow-ups, §1 the four spec corrections M0 evidence demands. (Two of the original §0 items — the language rule and the runtime auto-commit-opt-out check — were completed by the German ingest and are struck there.)
-- [ ] Tag repo `m0` — **ready to tag; awaiting the user's go-ahead** (tagging is an outward-ish, hard-to-undo repo action, and one open decision remains: whether the four owed spec corrections in TASKS-M1 §1 should be applied to SPEC.md/CLAUDE.md before or after the tag).
+- [x] Tag repo `m0` — annotated tag `m0` created on `a9367ee` (user-approved). Decision: tag the as-is state now; the four owed spec corrections (TASKS-M1 §1) land in M1. Vault `.obsidian` view-state committed too (`ed00472`); both trees clean.
 
 ## Findings
 
