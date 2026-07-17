@@ -31,7 +31,7 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 0. Carried over from M3/M4 (do these as part of M5 — details in TASKS-M4/M3 Findings)
 
-- [ ] **Lint async rework + hard kill (BIGGEST carryover).** A real full-wiki lint hung **>21 min** (past the 15-min run timeout) because the DragonScale semantic-tiling pass runs embeddings via a long bash call that blocks the SDK message iterator, so `abortController.abort()` never fires. Mitigation applied (lint prompt skips tiling) but NOT re-verified. **Fix:** make maintenance runs **async/job-style** — return a run id immediately, stream the live log over the bus (the UI already reads `maintenance:<kind>` channels), poll a result endpoint — instead of holding the HTTP request for 20+ min. AND give agent runs a **hard, tool-interrupting kill** (per-tool timeout or subprocess kill) so a stuck bash can't outlive the run timeout. This likely generalizes to the ingest runner too.
+- [x] **Lint async rework + hard kill (BIGGEST carryover).** DONE in code on `feat/m5-maintenance-async` (see Finding F1). (a) **Hard kill:** agent runs now spawn the SDK CLI through `Options.spawnClaudeCodeProcess` in a detached process group (`pipeline/agent-spawn.ts`) and the runner escalates timeout/abort → graceful abort → group `SIGKILL` after a 5 s grace, reaping the CLI + any stuck `bash`/`python3` descendants (generalizes to ingest — it's in `runAgent`). (b) **Async/job:** `POST /maintenance/*` returns `202 {id,channel,status}` immediately; the run executes in the background; `GET /maintenance/runs/:id` polls the result; live log still streams over `maintenance:<kind>`. Frontend Wartung tab polls via `useMaintenanceRun`. Server 198 tests green (+ new `agent-spawn` group-kill test), web builds. **Still pending (user-gated):** one real agent run that forces a long `bash sleep` to confirm the detached spawner + group-SIGKILL end-to-end, and a `permprobe` re-run (permission/spawn wiring changed).
 - [ ] **`.raw/.manifest.json` commit-scoping residual.** wiki-ingest writes `.raw/.manifest.json` (delta tracker) but the ingest commit pathspec (`BOOKKEEPING_PATHS` in `pipeline/queue.ts`) doesn't stage it → `git status` in the vault stays permanently dirty. Fix: add it to `BOOKKEEPING_PATHS`, or `.gitignore` it in the vault. (A hot-cache run swept it in once, but future ingests re-dirty it.)
 - [ ] **Save-to-vault** (`POST /sessions/:id/save`, SPEC §6.3 "Session in Vault sichern") — the `/save` flow, a write-enabled agent run + commit. Consider resuming the chat's `sdk_session_id` and prompting `/save`. Deferred from M4.
 - [ ] **Autoresearch not yet run with a real agent** (only mocked). Verify end-to-end once (web egress path) with a small topic; watch cost.
@@ -75,4 +75,39 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## Findings
 
-- (M5 findings go here)
+### F1 — Lint-hang root cause + hard-kill design (SDK-abort spike, 2026-07-18)
+
+**Root cause (confirmed, zero-token spike `scratchpad/spike-abort.mjs`):** the SDK
+(`@anthropic-ai/claude-agent-sdk` v0.3.212) spawns its CLI subprocess with
+`spawn(cmd, args, { stdio:['pipe','pipe','pipe'], signal, env, windowsHide:true })` —
+**no `detached`** (the token `detached` does not appear anywhere in `sdk.mjs`). On
+`abortController.abort()` Node's `{signal}` option sends the default `killSignal`
+(SIGTERM) to the **direct CLI child only**; the SDK's own SIGTERM→SIGKILL escalation
+(`sdk.mjs` ~offset 10771) and its `process.on('exit')` reaper also target only that
+one PID. **Grandchildren are never process-group-killed.** So a long-running
+`bash → python3` embeddings call (DragonScale semantic tiling) is orphaned by the
+abort and keeps running — this is the >21-min lint "hang". The spike proved:
+- Scenario A (SDK style, `spawn({signal})` → abort): child dies, **grandchild survives**.
+- Scenario B (`spawn({detached:true})` → `process.kill(-pid,'SIGKILL')`): **whole tree reaped.**
+
+**Fix lever (SDK-sanctioned):** `Options.spawnClaudeCodeProcess?: (SpawnOptions) => SpawnedProcess`
+(`sdk.d.ts:2014`). `ChildProcess` already satisfies `SpawnedProcess`. Provide a custom
+spawner that mirrors the default (`stdio:['pipe','pipe','pipe']`, forward `options.signal`,
+same cwd/env) **plus `detached:true`** so the CLI becomes its own process-group leader,
+and hand the runner the child's PID. On the hard deadline the runner escalates:
+`abort()` (graceful, lets the CLI flush its result/usage) → short grace → if still alive,
+`process.kill(-pid,'SIGKILL')` reaps CLI + bash + python. Track live PIDs and group-kill
+them on server shutdown too (our custom spawns are NOT in the SDK's internal reaper set).
+This lives in the agent runner, so it **generalizes to ingest** as required, and it
+touches the permission wiring's neighbourhood → **re-run `permprobe.ts` after implementing.**
+
+**Still needs a real (token-costing, user-gated) end-to-end check:** one run whose prompt
+forces a long `bash sleep`, to confirm the custom detached spawner works with the real SDK
+stream and the group-SIGKILL reaps an actual CLI-spawned grandchild. Deferred until the
+implementation lands.
+
+**Async/job model (separate, additive):** move `POST /maintenance/*` off the synchronous
+`await`-the-whole-run hold (`routes/maintenance.ts:16-32`) to return `{runId, channel}`
+immediately, stream the live log over the existing `maintenance:<kind>` bus, and poll a
+new `GET /maintenance/runs/:id`. This frees the HTTP request + worker slot regardless of
+the hard-kill; the two fixes are independent and both wanted.
