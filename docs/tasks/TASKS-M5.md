@@ -39,9 +39,10 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 1. systemd user service + autostart (SPEC.md §3.1) — DoD-critical
 
-- [ ] Ship a `vault-service.service` systemd **user** unit (+ install script under `scripts/`). `systemctl --user enable vault-service` so it starts with WSL; `WantedBy=default.target`, `loginctl enable-linger` note so it survives without an active login. Env from `~/.config/vault-service/env` + `VAULT_ROOT`. Restart-on-failure.
-- [ ] **DoD test:** WSL restart → the service comes back up on `127.0.0.1:8420`, queue resumes any `queued` jobs, watcher re-attaches. Document the exact steps.
-- [ ] Gotcha (from memory): after a kill, orphaned tsx→node children can hold port 8420 — the unit's stop/kill must reap the node child, not just the tsx wrapper. Prefer running the built JS (or `tsx` with proper signal forwarding) under systemd.
+- [x] `vault-service.service` systemd **user** unit template + `scripts/install-systemd.sh`. The install script resolves the repo path and the **real node binary** (nvm's node is not on systemd's PATH) and bakes both into the unit, sets `PATH` to include the node dir + system dirs (bwrap/socat/python3), passes `VAULT_ROOT` (credential still loads from `~/.config/vault-service/env`), `Restart=on-failure`, `enable`s it, prints the `loginctl enable-linger` + start steps. Verified: installed, started via systemd, MainPID is `node dist/main.js`, `/health` 200, watcher on `/mnt/c/inbox`, clean `systemctl --user restart`.
+- [x] **Gotcha resolved:** the unit runs the **built JS** as a single `node dist/main.js` process (new server `build` → `tsconfig.build.json`, and `start:prod`). Confirmed a SIGTERM reaps it cleanly and frees port 8420 — no tsx/npm wrapper, no orphan. `KillMode=control-group` also reaps any in-flight agent-run descendants with the service (complements F1).
+- [x] **Queue/in-flight resume:** on start the queue reconciles jobs stranded in `preprocessing`/`ingesting` by an abrupt stop → `failed` ("interrupted by a service restart", retryable) via `JobStore.recoverInterrupted()`; `queued` jobs resume automatically; watcher re-attaches. We do NOT auto-replay an interrupted `ingesting` job (may have partially written the vault — hard rule 1); it's one-click retryable instead.
+- [ ] **DoD test (user-gated):** in Windows run `wsl --shutdown`, reopen WSL, then `curl http://127.0.0.1:8420/api/v1/health` must respond WITHOUT a manual start. Requires `loginctl enable-linger "$USER"` first (so the user manager runs without an active login). Steps are printed by the install script.
 
 ## 2. Settings UI + `GET/PUT /api/v1/settings` (SPEC.md §6.4, §6.5)
 
@@ -100,6 +101,10 @@ and hand the runner the child's PID. On the hard deadline the runner escalates:
 them on server shutdown too (our custom spawns are NOT in the SDK's internal reaper set).
 This lives in the agent runner, so it **generalizes to ingest** as required, and it
 touches the permission wiring's neighbourhood → **re-run `permprobe.ts` after implementing.**
+
+**`permprobe` re-run (2026-07-18): PASS** — after the spawn/permission wiring change, a real
+agent run still gets `canary outside vault: blocked` (0 denials — the sandbox blocks the write
+at the kernel level: "Read-only file system"), skills invocable. Hard rule 4 intact.
 
 **Still needs a real (token-costing, user-gated) end-to-end check:** one run whose prompt
 forces a long `bash sleep`, to confirm the custom detached spawner works with the real SDK
