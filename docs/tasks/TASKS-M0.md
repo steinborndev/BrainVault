@@ -69,9 +69,9 @@ Work top to bottom. Check off tasks as they complete. Record findings inline und
 
 ## 6. Milestone close
 
-- [ ] All acceptance criteria of SPEC.md §10 M0 met
-- [ ] Findings section below completed; open follow-ups converted into TASKS-M1.md entries
-- [ ] Tag repo `m0`
+- [x] All acceptance criteria of SPEC.md §10 M0 met — **yes, as stated.** SPEC.md §10's M0 criterion is: *"Eine PDF wird per CLI-Aufruf des Services korrekt eingepflegt (Seiten + Index + Hot Cache)"* — met: `npm run ingest -- <pdf>` → 15 pages, `index.md`/`hot.md`/`log.md`/`overview.md` + sub-indexes updated, 216 wikilinks, 0 broken, vault commit `313715e`. Both risk probes documented (§10's second requirement, per this task file's goal line). **One task-list item is NOT met and is deliberately not ticked: 5.3, the language rule** — the source PDF was English-only, so the rule was never exercised. It is not part of §10's acceptance wording, but it is part of this task list, so M0 closes with it explicitly open and carried to TASKS-M1 §0.
+- [x] Findings section below completed; open follow-ups converted into TASKS-M1.md entries — `docs/tasks/TASKS-M1.md` created; §0 carries the five open M0 items, §1 the four spec corrections M0 evidence demands.
+- [ ] Tag repo `m0` — pending the user's call on whether to close M0 with the language rule untested.
 
 ## Findings
 
