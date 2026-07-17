@@ -25,6 +25,28 @@ export const DEFAULT_ENV_FILE = path.join(os.homedir(), '.config', 'vault-servic
 
 export type AuthMode = 'oauth' | 'api-key'
 
+/**
+ * HTTP auth mode for the dashboard/API (distinct from the Anthropic credential above).
+ * v1 ships only `local-single-user` (pass-through). `token` is the seam the localhost
+ * guard (SPEC.md §9) requires before a non-localhost bind is permitted.
+ */
+export type HttpAuthMode = 'local-single-user' | 'token'
+
+export const DEFAULT_HOST = '127.0.0.1'
+export const DEFAULT_PORT = 8420
+export const DEFAULT_WATCH_FOLDER = '/mnt/c/inbox'
+export const DEFAULT_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+
+export interface ServerConfig {
+  readonly host: string
+  readonly port: number
+  readonly watchFolder: string
+  readonly maxUploadBytes: number
+  readonly authMode: HttpAuthMode
+  /** Present only in `token` mode. Never logged. */
+  readonly authToken?: string
+}
+
 export interface Config {
   readonly vaultRoot: string
   readonly auth: {
@@ -33,6 +55,26 @@ export interface Config {
     readonly credential: string
     readonly envVar: CredentialEnvVar
   }
+  readonly server: ServerConfig
+}
+
+/** True for a loopback bind — the only bind allowed without an HTTP auth token (hard rule 2). */
+export function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost'
+}
+
+/**
+ * Enforces hard rule 2 / SPEC.md §9: a non-loopback bind is refused unless an HTTP auth
+ * mode with a token is active. Called at server startup, never silently weakened.
+ */
+export function assertBindAllowed(server: ServerConfig): void {
+  if (isLoopbackHost(server.host)) return
+  if (server.authMode === 'token' && (server.authToken?.length ?? 0) > 0) return
+  throw new ConfigError(
+    `refusing to bind ${server.host}:${server.port}: a non-localhost bind requires an HTTP auth ` +
+      `mode with a token (SPEC.md §9). Set HTTP_AUTH_MODE=token and HTTP_AUTH_TOKEN=<secret>, ` +
+      `or bind ${DEFAULT_HOST} (the default).`,
+  )
 }
 
 export class ConfigError extends Error {
@@ -92,6 +134,12 @@ const schema = z.object({
     .min(1, 'VAULT_ROOT must not be empty'),
   CLAUDE_CODE_OAUTH_TOKEN: z.string().min(1).optional(),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  HOST: z.string().min(1).optional(),
+  PORT: z.coerce.number().int().positive().max(65535).optional(),
+  WATCH_FOLDER: z.string().min(1).optional(),
+  MAX_UPLOAD_BYTES: z.coerce.number().int().positive().optional(),
+  HTTP_AUTH_MODE: z.enum(['local-single-user', 'token']).optional(),
+  HTTP_AUTH_TOKEN: z.string().min(1).optional(),
 })
 
 /** Verifies the path is a real claude-obsidian vault, not just any directory. */
@@ -147,6 +195,12 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     VAULT_ROOT: presence(merged['VAULT_ROOT']),
     CLAUDE_CODE_OAUTH_TOKEN: presence(merged['CLAUDE_CODE_OAUTH_TOKEN']),
     ANTHROPIC_API_KEY: presence(merged['ANTHROPIC_API_KEY']),
+    HOST: presence(merged['HOST']),
+    PORT: presence(merged['PORT']),
+    WATCH_FOLDER: presence(merged['WATCH_FOLDER']),
+    MAX_UPLOAD_BYTES: presence(merged['MAX_UPLOAD_BYTES']),
+    HTTP_AUTH_MODE: presence(merged['HTTP_AUTH_MODE']),
+    HTTP_AUTH_TOKEN: presence(merged['HTTP_AUTH_TOKEN']),
   })
 
   if (!parsed.success) {
@@ -175,9 +229,22 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   const envVar = present[0] as CredentialEnvVar
   const credential = parsed.data[envVar] as string
 
+  const authMode: HttpAuthMode = parsed.data.HTTP_AUTH_MODE ?? 'local-single-user'
+  const server: ServerConfig = {
+    host: parsed.data.HOST ?? DEFAULT_HOST,
+    port: parsed.data.PORT ?? DEFAULT_PORT,
+    watchFolder: parsed.data.WATCH_FOLDER ?? DEFAULT_WATCH_FOLDER,
+    maxUploadBytes: parsed.data.MAX_UPLOAD_BYTES ?? DEFAULT_MAX_UPLOAD_BYTES,
+    authMode,
+    ...(authMode === 'token' && parsed.data.HTTP_AUTH_TOKEN
+      ? { authToken: parsed.data.HTTP_AUTH_TOKEN }
+      : {}),
+  }
+
   return {
     vaultRoot: validateVaultRoot(parsed.data.VAULT_ROOT),
     auth: { mode: envVar === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'oauth' : 'api-key', credential, envVar },
+    server,
   }
 }
 
@@ -193,5 +260,8 @@ export function describeConfig(config: Config): Record<string, string> {
     authMode: config.auth.mode,
     credentialSource: config.auth.envVar,
     credential: `<redacted, ${config.auth.credential.length} chars>`,
+    bind: `${config.server.host}:${config.server.port}`,
+    watchFolder: config.server.watchFolder,
+    httpAuth: config.server.authMode,
   }
 }

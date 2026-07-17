@@ -148,6 +148,11 @@ export class IngestQueue {
     return this.paused
   }
 
+  /** Live queue state for the health/overview endpoints (SPEC.md §6.1). */
+  stats(): { readonly inFlight: number; readonly paused: boolean; readonly concurrency: number } {
+    return { inFlight: this.inFlight, paused: this.paused, concurrency: this.concurrency }
+  }
+
   /**
    * Enqueues a file. Computes its SHA-256 (dedupe), records the job, and — unless it is a
    * duplicate — copies the original into `.raw/<job-id>/` where preprocessing expects it.

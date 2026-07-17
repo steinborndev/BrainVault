@@ -192,6 +192,20 @@ export class JobStore {
       .all(status) as JobRow[]
   }
 
+  /** Most-recently-created jobs first — for the Ingestion tab (SPEC.md §6.2). */
+  recent(limit = 100): JobRow[] {
+    return this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?').all(limit) as JobRow[]
+  }
+
+  /** Job counts grouped by status — for the dashboard/health overview (SPEC.md §6.1). */
+  counts(): Record<string, number> {
+    const rows = this.db.prepare('SELECT status, COUNT(*) n FROM jobs GROUP BY status').all() as Array<{
+      status: string
+      n: number
+    }>
+    return Object.fromEntries(rows.map((r) => [r.status, r.n]))
+  }
+
   /**
    * Atomically claims the oldest `queued` job by moving it to `preprocessing`, returning
    * it — or undefined if the queue is empty. The SELECT and UPDATE run in one
