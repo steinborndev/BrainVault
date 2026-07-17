@@ -160,6 +160,20 @@ describe('decidePermission — Bash', () => {
   it('denies Bash with a non-string command', () => {
     expect(decidePermission(ctx, 'Bash', { command: 42 })).toMatchObject({ behavior: 'deny' })
   })
+
+  it('refuses the dangerouslyDisableSandbox escape hatch', () => {
+    // Observed for real: with the sandbox enabled but allowUnsandboxedCommands left
+    // at its default (true), the agent hit a write denial and simply set this
+    // parameter on its next attempt, creating the canary outside the vault.
+    // sandbox.allowUnsandboxedCommands: false is what actually neutralises it;
+    // this refusal makes the attempt visible rather than silent.
+    const result = decidePermission(ctx, 'Bash', {
+      command: 'touch /tmp/x',
+      dangerouslyDisableSandbox: true,
+    })
+    expect(result.behavior).toBe('deny')
+    if (result.behavior === 'deny') expect(result.message).toContain('dangerouslyDisableSandbox')
+  })
 })
 
 describe('extractPaths', () => {

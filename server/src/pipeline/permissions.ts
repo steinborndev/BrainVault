@@ -139,6 +139,19 @@ export function decidePermission(
   }
 
   if (toolName === 'Bash') {
+    // Belt and braces alongside `sandbox.allowUnsandboxedCommands: false`. The Bash
+    // tool ships a `dangerouslyDisableSandbox` escape hatch; an agent that hits a
+    // write denial reaches for it (observed). The sandbox setting is what actually
+    // neutralises it — this refusal just makes the attempt visible in the log.
+    if (input['dangerouslyDisableSandbox'] === true) {
+      return {
+        behavior: 'deny',
+        message:
+          'Refused: dangerouslyDisableSandbox is not permitted. Every command runs inside the ' +
+          'vault sandbox; work within VAULT_ROOT instead of stepping outside it.',
+      }
+    }
+
     const command = input['command']
     if (typeof command !== 'string') {
       return { behavior: 'deny', message: 'Bash called without a string command.' }

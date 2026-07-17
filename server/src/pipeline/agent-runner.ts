@@ -123,6 +123,31 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
       preset: 'claude_code',
       append: AUTOMATION_SYSTEM_PROMPT,
     },
+    /**
+     * OS-level confinement — the only thing that makes "writes only under
+     * VAULT_ROOT" (CLAUDE.md hard rule 4) a real boundary rather than a claim.
+     *
+     * The tool-level hook below cannot cover Bash: deciding what an arbitrary
+     * shell string writes is not tractable, and the validated ingest needs general
+     * bash. A deny-everything probe confirmed `touch /tmp/canary` succeeded with
+     * the hook alone. bubblewrap enforces it in the kernel instead.
+     *
+     * `failIfUnavailable: true` is explicit (it is also the default when `enabled`
+     * is passed here): if the sandbox cannot be created, the run must fail loudly
+     * rather than silently execute unconfined.
+     */
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      // Without this the sandbox is decorative: the Bash tool ships a
+      // `dangerouslyDisableSandbox` parameter and it is permitted by DEFAULT
+      // (`allowUnsandboxedCommands` defaults to true). Measured — with the sandbox
+      // enabled but this left at its default, the agent hit the write denial, set
+      // the parameter, and created the canary outside the vault on its second try.
+      // At false the parameter is ignored entirely and every command is sandboxed.
+      allowUnsandboxedCommands: false,
+      filesystem: { allowWrite: [opts.vaultRoot] },
+    },
     permissionMode: 'default',
     // THE enforcement point. canUseTool is advisory and was measured to be invoked
     // zero times against this SDK; a PreToolUse hook is invoked and does block.
