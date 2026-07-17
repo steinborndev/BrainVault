@@ -164,9 +164,22 @@ export class IngestQueue {
   }
 
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
-   * batches whose members are still queued are reconstructed into pending units. */
+   * batches whose members are still queued are reconstructed into pending units. Jobs
+   * stranded mid-flight by an abrupt stop are first reconciled to `failed` (retryable). */
   start(): void {
     this.running = true
+    const recovered = this.store.recoverInterrupted()
+    if (recovered.length > 0) {
+      this.events?.publish({
+        kind: 'log',
+        log: {
+          jobId: 'queue',
+          ts: new Date().toISOString(),
+          level: 'warn',
+          message: `recovered ${recovered.length} interrupted job(s) after restart → failed (retryable)`,
+        },
+      })
+    }
     this.reloadPendingBatches()
     this.pump()
   }

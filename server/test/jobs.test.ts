@@ -41,6 +41,35 @@ describe('create', () => {
   })
 })
 
+describe('recoverInterrupted', () => {
+  it('fails jobs stranded mid-flight and leaves queued/terminal ones alone', () => {
+    const queued = store.create({ ...pdf, sha256: 'q' }).job
+    const pre = store.create({ ...pdf, sha256: 'p' }).job
+    store.transition(pre.id, 'preprocessing')
+    const ing = store.create({ ...pdf, sha256: 'i' }).job
+    store.transition(ing.id, 'preprocessing')
+    store.transition(ing.id, 'ingesting')
+    const done = store.create({ ...pdf, sha256: 'd' }).job
+    store.transition(done.id, 'preprocessing')
+    store.transition(done.id, 'ingesting')
+    store.transition(done.id, 'done')
+
+    const recovered = store.recoverInterrupted()
+
+    expect(recovered.sort()).toEqual([pre.id, ing.id].sort())
+    expect(store.getOrThrow(pre.id).status).toBe('failed')
+    expect(store.getOrThrow(ing.id).status).toBe('failed')
+    expect(store.getOrThrow(ing.id).error).toMatch(/interrupted by a service restart/)
+    // Recovered jobs are retryable (failed → queued is allowed).
+    expect(ALLOWED_TRANSITIONS.failed).toContain('queued')
+    // Untouched:
+    expect(store.getOrThrow(queued.id).status).toBe('queued')
+    expect(store.getOrThrow(done.id).status).toBe('done')
+    // Idempotent: a second pass finds nothing active.
+    expect(store.recoverInterrupted()).toEqual([])
+  })
+})
+
 describe('transition', () => {
   it('walks the happy path and stamps timestamps', () => {
     const { job } = store.create({ ...pdf, sha256: 'h' })

@@ -274,6 +274,31 @@ export class JobStore {
     return claim()
   }
 
+  /**
+   * Reconciles jobs stranded in an active state (`preprocessing`/`ingesting`) by an abrupt
+   * stop — a WSL restart, a crash, a SIGKILL. The worker that owned them is gone, so they can
+   * never progress on their own. Mark them `failed` with an interrupted reason: this makes
+   * them diagnosable and one-click retryable (SPEC.md §10 M5), which is how in-flight work
+   * "resumes" after a restart. We deliberately do NOT auto-re-run them — an `ingesting` job
+   * may have partially written the vault, and silently replaying a mid-commit write risks
+   * vault integrity (hard rule 1). `queued` jobs are untouched; the queue resumes those itself.
+   * Returns the ids recovered. Idempotent (a second call finds nothing active).
+   */
+  recoverInterrupted(): string[] {
+    const stuck = this.db
+      .prepare("SELECT id FROM jobs WHERE status IN ('preprocessing', 'ingesting')")
+      .all() as Array<{ id: string }>
+    const recovered: string[] = []
+    for (const { id } of stuck) {
+      this.transition(id, 'failed', {
+        patch: { error: 'interrupted by a service restart before it finished — retry to run it again' },
+        log: 'recovered after service restart: job was mid-flight when the service stopped',
+      })
+      recovered.push(id)
+    }
+    return recovered
+  }
+
   /** Queued batch members grouped by batch_id — for reconstructing pending batches after a restart. */
   queuedBatches(): Array<{ batchId: string; memberIds: string[] }> {
     const rows = this.db
