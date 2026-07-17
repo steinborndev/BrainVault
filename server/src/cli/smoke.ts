@@ -10,6 +10,7 @@
  */
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
+import { pathToFileURL } from 'node:url'
 import { loadConfig, describeConfig, ConfigError } from '../config.js'
 import { buildAgentEnv } from '../pipeline/agent-runner.js'
 
@@ -81,9 +82,17 @@ async function main(): Promise<number> {
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err: unknown) => {
-    console.error('unexpected failure:', err)
-    process.exit(1)
-  })
+// Only run when invoked as a program. Without this guard, importing the module
+// from a test executes main() and calls process.exit(), which vitest flags as an
+// unhandled error and warns can produce false positives.
+const isDirectRun =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isDirectRun) {
+  main()
+    .then((code) => process.exit(code))
+    .catch((err: unknown) => {
+      console.error('unexpected failure:', err)
+      process.exit(1)
+    })
+}
