@@ -1,0 +1,39 @@
+# systemd USER unit for BrainVault (vault-service) — TASKS-M5 §1.
+# This is a TEMPLATE: scripts/install-systemd.sh substitutes @PLACEHOLDERS@ with real
+# paths (the repo location and the resolved node binary) and installs the result to
+# ~/.config/systemd/user/vault-service.service. Do not install this file directly.
+[Unit]
+Description=BrainVault ingestion service (vault-service)
+Documentation=https://github.com/steinborndev/BrainVault
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@/server
+# Run the BUILT JS as a single node process (not tsx/npm) so systemd's main PID IS the
+# server — a tsx/npm wrapper leaves an orphaned node child that keeps holding port 8420
+# (TASKS-M5 §1 gotcha). Rebuild with `npm run build` after code changes.
+ExecStart=@NODE@ dist/main.js
+Environment=NODE_ENV=production
+# nvm's node is NOT on systemd's minimal PATH, and the Agent SDK spawns its CLI via
+# `spawn('node', …)`. Put the resolved node dir first, then the system dirs that hold the
+# sandbox deps (bwrap, socat) and preprocessing tools (python3, bash).
+Environment=PATH=@NODEDIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# VAULT_ROOT is a config value (hard rule 1), passed here — it is intentionally NOT in the
+# credential env file. The Anthropic credential loads from ~/.config/vault-service/env, which
+# the app reads itself; do not put the token in this unit.
+Environment=VAULT_ROOT=@VAULT_ROOT@
+# Optional overrides (uncomment / edit as needed):
+# Environment=WATCH_FOLDER=/mnt/c/inbox
+# Environment=PORT=8420
+Restart=on-failure
+RestartSec=3
+# Reap the whole control group on stop: any in-flight agent run and its bash/python
+# descendants (detached process groups stay inside this cgroup) are killed with the service,
+# complementing the runner's hard kill. SIGTERM first, then SIGKILL after the timeout.
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
