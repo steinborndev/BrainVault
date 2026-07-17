@@ -14,7 +14,7 @@ import type {
   ChatMessage,
   QueryResponse,
   Citation,
-  MaintenanceResult,
+  MaintenanceRun,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -119,20 +119,23 @@ export const api = {
   deleteSession: (id: string): Promise<{ ok: boolean }> =>
     fetch(`${BASE}/sessions/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),
 
-  // ---- Maintenance ----
+  // ---- Maintenance (async: POST starts a run, GET polls its result) ----
 
-  lint: (): Promise<MaintenanceResult> =>
-    fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceResult>),
+  lint: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceRun>),
 
-  hotCache: (): Promise<MaintenanceResult> =>
-    fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceResult>),
+  hotCache: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceRun>),
 
-  research: (topic: string): Promise<MaintenanceResult> =>
+  research: (topic: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/research`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ topic }),
-    }).then(json<MaintenanceResult>),
+    }).then(json<MaintenanceRun>),
+
+  maintenanceRun: (id: string): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

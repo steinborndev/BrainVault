@@ -434,8 +434,31 @@ describe('POST /api/v1/query + sessions', () => {
   })
 })
 
-describe('POST /api/v1/maintenance', () => {
-  it('runs lint and returns a structured, parsed report', async () => {
+describe('POST /api/v1/maintenance (async job-style)', () => {
+  type StartedRun = { id: string; channel: string; status: string; kind: string }
+  type PolledRun = {
+    status: 'running' | 'done' | 'error'
+    error?: string
+    result?: {
+      ok: boolean
+      lint?: { summary: Record<string, number>; sections: Array<{ title: string; findings: unknown[] }>; totalFindings: number }
+      reportPath?: string
+    }
+  }
+
+  /** Polls the run endpoint until it settles (or a bounded number of tries elapses). */
+  async function pollRun(id: string): Promise<PolledRun> {
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${baseUrl}/api/v1/maintenance/runs/${id}`)
+      expect(r.status).toBe(200)
+      const body = (await r.json()) as PolledRun
+      if (body.status !== 'running') return body
+      await new Promise((res) => setTimeout(res, 5))
+    }
+    throw new Error('maintenance run did not settle in time')
+  }
+
+  it('accepts a lint run immediately, then polls a structured, parsed report', async () => {
     // The lint agent writes a report file; the runner reads + parses it.
     maintAgent = async () => {
       fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
@@ -455,23 +478,24 @@ describe('POST /api/v1/maintenance', () => {
       return okResult('lint done')
     }
 
+    // POST returns at once with a run id — it does NOT hold the request for the run.
     const res = await fetch(`${baseUrl}/api/v1/maintenance/lint`, { method: 'POST' })
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      ok: boolean
-      channel: string
-      lint?: { summary: Record<string, number>; sections: Array<{ title: string; findings: unknown[] }>; totalFindings: number }
-      reportPath?: string
-    }
-    expect(body.ok).toBe(true)
-    expect(body.channel).toBe('maintenance:lint')
-    expect(body.lint?.summary['Pages scanned']).toBe(94)
-    expect(body.lint?.totalFindings).toBe(2)
-    expect(body.lint?.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
-    expect(body.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:lint')
+    expect(started.status).toBe('running')
+    expect(started.id).toBeTruthy()
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+    expect(run.result?.lint?.summary['Pages scanned']).toBe(94)
+    expect(run.result?.lint?.totalFindings).toBe(2)
+    expect(run.result?.lint?.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
+    expect(run.result?.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
   })
 
-  it('research requires a topic; hot-cache runs', async () => {
+  it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -480,7 +504,17 @@ describe('POST /api/v1/maintenance', () => {
     expect(bad.status).toBe(400)
 
     const hot = await fetch(`${baseUrl}/api/v1/maintenance/hot-cache`, { method: 'POST' })
-    expect(hot.status).toBe(200)
-    expect(((await hot.json()) as { ok: boolean }).ok).toBe(true)
+    expect(hot.status).toBe(202)
+    const started = (await hot.json()) as StartedRun
+    expect(started.status).toBe('running')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+  })
+
+  it('returns 404 for an unknown run id', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/runs/does-not-exist`)
+    expect(res.status).toBe(404)
   })
 })

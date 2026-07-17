@@ -160,8 +160,6 @@ export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
 export interface MaintenanceResult {
   ok: boolean
   kind: MaintenanceKind
-  /** The SSE channel its live log streamed on, e.g. `maintenance:lint`. */
-  channel: string
   pages: string[]
   usage: { tokensIn: number; tokensOut: number; costUsd: number }
   error?: string
@@ -169,6 +167,25 @@ export interface MaintenanceResult {
   answer?: string
   lint?: LintReport
   reportPath?: string
+}
+
+export type MaintenanceRunStatus = 'running' | 'done' | 'error'
+
+/**
+ * An async maintenance run. POST returns this at `running`; the client polls
+ * `GET /maintenance/runs/:id` until it settles and `result` appears (server-side
+ * `MaintenanceRunner`, TASKS-M5 §0).
+ */
+export interface MaintenanceRun {
+  id: string
+  kind: MaintenanceKind
+  /** SSE channel carrying the live log, e.g. `maintenance:lint`. */
+  channel: string
+  status: MaintenanceRunStatus
+  startedAt: string
+  finishedAt?: string
+  result?: MaintenanceResult
+  error?: string
 }
 
 /** SSE event payloads (server/src/api/routes/events.ts). */
