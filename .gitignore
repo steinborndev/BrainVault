@@ -17,3 +17,6 @@ data/
 *:Zone.Identifier
 .DS_Store
 *.log
+
+# Test source documents (not ours to commit; CLAUDE.md: no generated artifacts)
+*.pdf
