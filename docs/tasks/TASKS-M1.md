@@ -14,12 +14,14 @@ These are open items from `TASKS-M0.md` — not new work, but they belong here r
 - [ ] **Diagnose `scripts/detect-transport.sh`.** It hangs past its own 120 s timeout and never returns; the M0 agent fell back to the filesystem transport and continued. Anything that later depends on transport detection will inherit this stall.
 - [ ] **Re-run `server/src/cli/permprobe.ts` after any SDK upgrade or permission-wiring change.** It is the only check that can catch "the SDK stopped consulting our guard" — unit tests structurally cannot. Expect `canary outside vault: blocked` and `claude-obsidian:wiki-ingest` present.
 
-## 1. Spec corrections owed (M0 evidence, SPEC.md is authoritative so these need the user's sign-off)
+## 1. Spec corrections owed — APPLIED 2026-07-17 (user-approved)
 
-- [ ] **SPEC.md §3.1 is wrong about skill loading.** It states `settingSources: ['project']` is what loads the claude-obsidian skills. It is not: the vault is a Claude Code *plugin* (`.claude-plugin/plugin.json`), its `skills/` directory is not a location the CLI scans, and with `settingSources` alone the agent saw only the CLI's bundled skills and improvised from `SKILL.md`. Correct mechanism: `plugins: [{ type: 'local', path: vaultRoot }]` + `skills: 'all'`. Measured impact of the fix: 143→55 turns, 12.7M→5.4M tokens, 13→15 pages.
-- [ ] **SPEC.md §4.2 and §11.1 hardcode `/mnt/d`, which does not exist on this machine.** Watch-folder default `/mnt/d/inbox` and fallback `/mnt/d/vault`. Available drives: C (475 GB free), M (1.4 TB), T (772 GB); R and S are ≥98 % full. M2 needs a real default before the watcher is built.
-- [ ] **SPEC.md §11.1's Obsidian risk is refuted as written.** It predicted 9p *slowness*; reality is that Obsidian for Windows cannot open a WSL vault at all (`EISDIR … watch`, won't-fix). Resolved by running Obsidian inside WSL via WSLg. Also: the section's locking concern is unfounded — `wiki-lock.sh` passes every test on drvfs.
-- [ ] **CLAUDE.md hard rule 4 needs rewording.** "bash restricted to a whitelist of the vault's `scripts/*.sh`" is not what we do, and not what the ingest permits: 14 of 68 bash calls in the validated run were `find`/`ls`/`cat`/`python3`. Decided wording: vault-write scoping and no-web-egress are the hard guarantees (now OS-enforced via bubblewrap); the bash denylist is defense in depth.
+All four corrections are done and committed to `SPEC.md`/`CLAUDE.md`. Kept here for the record.
+
+- [x] **SPEC.md §3.1 + §7 table: skill loading.** Corrected: the vault is a Claude Code plugin; `settingSources: ['project']` loads only its CLAUDE.md — skills need `plugins: [{ type: 'local', path: vaultRoot }]` + `skills: 'all'`. Measured impact: 143→55 turns.
+- [x] **SPEC.md §3, §4.2: `/mnt/d` does not exist** (C/M/T available). Watch-folder default corrected to `/mnt/c/inbox`.
+- [x] **SPEC.md §3 note + §11.1: Obsidian over `\\wsl$` does not open at all** (`EISDIR … watch`, won't-fix), not merely "slow". Resolved via Obsidian-in-WSLg. Locking concern on drvfs is unfounded.
+- [x] **CLAUDE.md hard rule 4 reworded** to match reality: OS-sandbox-enforced write scoping; `canUseTool` is not consulted (enforcement is PreToolUse hook + sandbox with `allowUnsandboxedCommands: false`); bash denylist is defense in depth, not a `scripts/*.sh` whitelist. Points at `permprobe.ts`.
 
 ## 2. Queue and job lifecycle
 
