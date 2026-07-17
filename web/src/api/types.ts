@@ -165,6 +165,8 @@ export interface MaintenanceResult {
   pages: string[]
   usage: { tokensIn: number; tokensOut: number; costUsd: number }
   error?: string
+  /** The agent's final text (summary / fallback when no structured report). */
+  answer?: string
   lint?: LintReport
   reportPath?: string
 }

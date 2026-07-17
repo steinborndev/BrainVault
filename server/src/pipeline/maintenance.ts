@@ -47,9 +47,11 @@ export interface MaintenanceResult {
   readonly pages: string[]
   readonly usage: AgentRunResult['usage']
   readonly error?: string
-  /** Present for a successful lint run: the parsed report. */
+  /** The agent's final text — a summary/fallback the UI can render as markdown. */
+  readonly answer?: string
+  /** Present for a lint run: the parsed report (from the written file, or the answer text). */
   readonly lint?: LintReport
-  /** Where the lint report was written (vault-relative), if found. */
+  /** Where the lint report was written (vault-relative), if a file was found. */
   readonly reportPath?: string
 }
 
@@ -75,7 +77,22 @@ export class MaintenanceRunner {
   }
 
   lint(): Promise<MaintenanceResult> {
-    return this.run('lint', 'lint the wiki', 'ingest')
+    // Be explicit: run the skill, WRITE the report file (the dashboard reads it back), and
+    // report-only — never auto-fix, so a lint can't silently rewrite content pages.
+    return this.run(
+      'lint',
+      'Use the wiki-lint skill to health-check the entire wiki and WRITE the full report to ' +
+        'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD). Report only — do NOT auto-fix or ' +
+        'modify any existing wiki page. Keep the standard report sections (Orphan Pages, Dead Links, ' +
+        'Missing Pages, Frontmatter Gaps, Stale Claims, Cross-Reference Gaps). ' +
+        // Mitigation for an observed >20-min hang: the DragonScale Mechanism 3 "semantic tiling"
+        // path runs embeddings via a long bash call that blocks the SDK iterator, so the run
+        // timeout can't fire until it returns. The read-based checks above are what the report
+        // needs; skip the heavy embedding pass.
+        'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass — ' +
+        'use only the read-based checks (Read/Grep/Glob).',
+      'ingest',
+    )
   }
 
   research(topic: string): Promise<MaintenanceResult> {
@@ -125,14 +142,30 @@ export class MaintenanceRunner {
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')
       this.events.publish({ kind: 'stats' })
 
-      const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage }
+      const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage, answer: res.result }
       if (kind === 'lint') {
-        const parsed = this.readLatestLintReport()
-        if (parsed) return { ...base, lint: parsed.report, reportPath: parsed.path }
+        // Prefer the written report file; fall back to parsing the agent's inline answer, so
+        // a run that summarised in text instead of writing a file still yields structure.
+        const fromFile = this.readLatestLintReport()
+        if (fromFile && fromFile.report.totalFindings > 0) {
+          return { ...base, lint: fromFile.report, reportPath: fromFile.path }
+        }
+        const fromText = this.parseReportText(res.result)
+        if (fromFile) return { ...base, lint: fromFile.report, reportPath: fromFile.path }
+        if (fromText.totalFindings > 0 || fromText.sections.length > 0) return { ...base, lint: fromText }
       }
       log('info', `maintenance: ${kind} complete`)
       return base
     })
+  }
+
+  /** Parses a lint report out of arbitrary answer text (fallback when no file was written). */
+  private parseReportText(text: string): LintReport {
+    const pageIndex = indexWikiPages(this.vaultRoot)
+    return parseLintReport(text, (label) => ({
+      label,
+      path: pageIndex.get(label.toLowerCase()) ?? null,
+    }))
   }
 
   /** Finds and parses the newest `wiki/meta/lint-report-*.md` the run just wrote. */

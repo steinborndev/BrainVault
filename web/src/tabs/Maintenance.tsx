@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type { LintReport, MaintenanceResult } from '../api/types.ts'
 import { JobLog } from '../components/JobLog.tsx'
+import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 
 export function Maintenance(): React.ReactElement {
@@ -41,6 +42,11 @@ export function Maintenance(): React.ReactElement {
         {lint.isPending && <JobLog jobId="maintenance:lint" seed={false} />}
         {lint.isError && <div className="toast err">{(lint.error as Error).message}</div>}
         {lint.data?.ok && lint.data.lint && <LintView report={lint.data.lint} reportPath={lint.data.reportPath} vaultName={vaultName} />}
+        {lint.data?.ok && !lint.data.lint && lint.data.answer && (
+          <div className="md-fallback">
+            <Markdown source={lint.data.answer} />
+          </div>
+        )}
         {lint.data && !lint.data.ok && <div className="toast err">{lint.data.error ?? 'Lint fehlgeschlagen'}</div>}
       </div>
 
