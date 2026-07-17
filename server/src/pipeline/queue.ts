@@ -29,8 +29,12 @@ import { sha256File } from './hash.js'
 import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, type CommitResult } from './git.js'
+import { commitVault, type CommitResult, type CommitOptions } from './git.js'
+import { extractWrittenPaths } from './written-paths.js'
 import { Mutex } from '../util/mutex.js'
+
+/** Bookkeeping paths that ride along with every commit — script-written, regenerable, shared. */
+const BOOKKEEPING_PATHS = ['.vault-meta'] as const
 
 export type FailureClass = 'rate_limit' | 'transient' | 'permanent'
 
@@ -67,7 +71,7 @@ export interface IngestQueueOptions {
   readonly preprocessFile?: typeof preprocess
   readonly preprocessUrlFn?: typeof preprocessUrl
   readonly detectToolsFn?: () => Promise<ToolAvailability>
-  readonly commit?: (vaultRoot: string, message: string) => Promise<CommitResult>
+  readonly commit?: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   /** Hot-cache refresh hook; returns a note logged against the job. See file note in queue.ts. */
   readonly refreshHotCache?: (vaultRoot: string) => Promise<string>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
@@ -114,7 +118,7 @@ export class IngestQueue {
   private readonly preprocessFile: typeof preprocess
   private readonly preprocessUrlFn: typeof preprocessUrl
   private readonly detectToolsFn: () => Promise<ToolAvailability>
-  private readonly commit: (vaultRoot: string, message: string) => Promise<CommitResult>
+  private readonly commit: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   private readonly refreshHotCache: (vaultRoot: string) => Promise<string>
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
 
@@ -385,6 +389,7 @@ export class IngestQueue {
     const prompt = `ingest ${pre.primaryArtifact}`
     this.store.log(job.id, 'info', `ingest attempt ${attempt}: ${prompt}`)
 
+    const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
       prompt,
@@ -393,6 +398,7 @@ export class IngestQueue {
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(job.id, 'info', line)
+        for (const p of extractWrittenPaths(m, this.vaultRoot)) written.add(p)
       },
     })
 
@@ -407,7 +413,8 @@ export class IngestQueue {
       })
       // created_pages comes from the actual commit (see commitVault): the only
       // authoritative record of what landed, correct even at concurrency 2.
-      await this.commitStep(job)
+      const pathspec = [...written, path.posix.join('.raw', job.id), ...BOOKKEEPING_PATHS]
+      await this.commitStep(job, pathspec)
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(job.id, 'info', note)
       return
@@ -446,10 +453,12 @@ export class IngestQueue {
     )
   }
 
-  private async commitStep(job: JobRow): Promise<void> {
+  private async commitStep(job: JobRow, pathspec: string[]): Promise<void> {
     const label = job.original_name ?? job.url ?? job.id
     try {
-      const result = await this.commitMutex.runExclusive(() => this.commit(this.vaultRoot, `ingest: ${label}`))
+      const result = await this.commitMutex.runExclusive(() =>
+        this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
+      )
       if (result.committed) {
         this.store.setCreatedPages(job.id, result.committedPages)
         this.store.log(
@@ -514,6 +523,7 @@ export class IngestQueue {
     const prompt = `ingest all of these:\n${ready.map((r) => `- ${r.artifact}`).join('\n')}`
     this.store.log(lead, 'info', `batch combined ingest of ${ready.length} artifact(s), attempt ${attempt}`)
 
+    const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
       prompt,
@@ -522,6 +532,7 @@ export class IngestQueue {
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(lead, 'info', line)
+        for (const p of extractWrittenPaths(m, this.vaultRoot)) written.add(p)
       },
     })
 
@@ -541,7 +552,12 @@ export class IngestQueue {
           log: `batch ingest complete (member ${i + 1}/${n}, ${res.numTurns} turns)`,
         })
       })
-      await this.batchCommit(ready.map((r) => r.id), names)
+      const pathspec = [
+        ...written,
+        ...ready.map((r) => path.posix.join('.raw', r.id)),
+        ...BOOKKEEPING_PATHS,
+      ]
+      await this.batchCommit(ready.map((r) => r.id), names, pathspec)
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(lead, 'info', note)
       return
@@ -577,10 +593,12 @@ export class IngestQueue {
   }
 
   /** One commit for a whole batch; every member is attributed the same committed pages. */
-  private async batchCommit(memberIds: string[], names: string[]): Promise<void> {
+  private async batchCommit(memberIds: string[], names: string[], pathspec: string[]): Promise<void> {
     const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
     try {
-      const result = await this.commitMutex.runExclusive(() => this.commit(this.vaultRoot, `ingest: ${label}`))
+      const result = await this.commitMutex.runExclusive(() =>
+        this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
+      )
       if (result.committed) {
         for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
         this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)

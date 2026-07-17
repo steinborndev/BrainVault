@@ -9,6 +9,7 @@
  * alongside the wiki pages — matching how the M0 ingests were committed by hand.
  */
 
+import fs from 'node:fs'
 import path from 'node:path'
 import { runTool } from './preprocess/tools.js'
 
@@ -43,18 +44,40 @@ function wikiPagesFrom(files: string): string[] {
     .map((p) => p.split(path.sep).join(path.posix.sep))
 }
 
+export interface CommitOptions {
+  /**
+   * Vault-relative paths to stage for THIS commit (F4). Staging only a job's own paths
+   * keeps a `git revert` of one ingest from disturbing a concurrently-committed sibling.
+   * Omit to stage everything (`git add -A`, legacy/coarse behaviour). If a targeted stage
+   * matches nothing on disk, we fall back to `git add -A` so the tree never silently keeps
+   * uncommitted changes.
+   */
+  readonly pathspec?: readonly string[]
+}
+
 /**
- * Stages everything and commits. Returns `committed: false` (not an error) when there is
- * nothing to stage — at concurrency 2 a sibling job may have already swept the shared
- * changes into its own commit. Callers serialize this behind a mutex.
+ * Stages and commits. Returns `committed: false` (not an error) when there is nothing to
+ * stage. Callers serialize this behind a mutex.
  *
- * `committedPages` is read back from the commit itself (`git show`), NOT from a pre-commit
- * status snapshot: `git add -A` can sweep in a file written after any snapshot, so only
- * the commit is authoritative about what actually landed. Every page is committed exactly
- * once, so the union of `committedPages` across jobs attributes every page exactly once.
+ * `committedPages` is read back from the commit itself (`git show`), NOT a pre-commit
+ * status snapshot, so it is authoritative about what actually landed.
  */
-export async function commitVault(vaultRoot: string, message: string): Promise<CommitResult> {
-  await git(vaultRoot, ['add', '-A'])
+export async function commitVault(
+  vaultRoot: string,
+  message: string,
+  opts: CommitOptions = {},
+): Promise<CommitResult> {
+  const targeted = (opts.pathspec ?? []).filter((p) => fs.existsSync(path.join(vaultRoot, p)))
+  if (opts.pathspec !== undefined && targeted.length > 0) {
+    await git(vaultRoot, ['add', '--', ...targeted])
+    const staged = await git(vaultRoot, ['diff', '--cached', '--name-only'])
+    // Nothing matched (e.g. pages were written by a route we didn't observe) → stage all,
+    // so the working tree never silently accumulates changes.
+    if (staged.trim() === '') await git(vaultRoot, ['add', '-A'])
+  } else {
+    await git(vaultRoot, ['add', '-A'])
+  }
+
   const staged = await git(vaultRoot, ['status', '--porcelain'])
   if (staged.trim() === '') {
     return {

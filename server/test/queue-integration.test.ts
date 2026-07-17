@@ -60,14 +60,19 @@ afterEach(() => {
 
 describe('M1 acceptance: 10 mixed files at concurrency 2 (deterministic)', () => {
   it('all reach done, every page is committed, and the vault stays consistent', async () => {
-    // Fake agent: writes a unique page per ingest, like the real skill does.
+    // Fake agent: writes a unique page per ingest AND reports it as a Write tool call the
+    // way the real agent does (filesystem transport), so F4 path-scoping can stage it.
     let pageSeq = 0
-    const runIngest: IngestRunner = async () => {
+    const runIngest: IngestRunner = async (opts) => {
       const n = pageSeq++
       // Small async gap so runs genuinely overlap at concurrency 2.
       await new Promise((r) => setTimeout(r, 5))
       const page = path.join(vaultRoot, 'wiki', 'concepts', `Page-${n}.md`)
       fs.writeFileSync(page, `# Page ${n}\n\nIngested content ${n}.\n`)
+      opts.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: page } }] },
+      } as never)
       return {
         ok: true,
         result: `wrote Page-${n}`,
@@ -134,13 +139,39 @@ describe('M1 acceptance: 10 mixed files at concurrency 2 (deterministic)', () =>
     for (let n = 0; n < 10; n++) {
       expect(attributed).toContain(`wiki/concepts/Page-${n}.md`)
     }
+
+    // 7. F4: each ingest commit contains exactly its OWN page — no sibling sweeping.
+    const ingestHashes = git(vaultRoot, 'log', '--format=%H', '--grep=ingest: ')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+    expect(ingestHashes.length).toBe(10) // one commit per ingest, none swept together
+    for (const h of ingestHashes) {
+      const files = git(vaultRoot, 'show', '--name-only', '--pretty=format:', h).trim().split('\n')
+      const pages = files.filter((f) => f.startsWith('wiki/concepts/Page-'))
+      expect(pages).toHaveLength(1)
+    }
+
+    // 8. Reverting one ingest removes only its page; siblings are untouched.
+    const target = 'wiki/concepts/Page-3.md'
+    const targetHash = ingestHashes.find((h) =>
+      git(vaultRoot, 'show', '--name-only', '--pretty=format:', h).includes(target),
+    )!
+    git(vaultRoot, 'revert', '--no-edit', targetHash)
+    expect(fs.existsSync(path.join(vaultRoot, target))).toBe(false)
+    expect(fs.existsSync(path.join(vaultRoot, 'wiki', 'concepts', 'Page-4.md'))).toBe(true)
   })
 
   it('processes a batch with a duplicate: the dup is skipped, the rest complete', async () => {
     let pageSeq = 0
-    const runIngest: IngestRunner = async () => {
+    const runIngest: IngestRunner = async (opts) => {
       const n = pageSeq++
-      fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', `B-${n}.md`), `# B ${n}\n`)
+      const page = path.join(vaultRoot, 'wiki', 'concepts', `B-${n}.md`)
+      fs.writeFileSync(page, `# B ${n}\n`)
+      opts.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: page } }] },
+      } as never)
       return {
         ok: true,
         result: 'ok',
