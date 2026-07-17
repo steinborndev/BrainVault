@@ -16,6 +16,7 @@ import { ulid } from 'ulid'
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
 import type { BatchItem } from '../../pipeline/queue.js'
+import { JobStore, type JobStatus } from '../../db/jobs.js'
 import { isShortcut, readShortcutUrl } from '../../pipeline/shortcut.js'
 
 interface EnqueuedRef {
@@ -33,7 +34,7 @@ function stagingDir(): string {
 }
 
 export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
-  const { queue, store } = ctx
+  const { queue, store, events } = ctx
 
   app.post('/api/v1/jobs', async (req, reply) => {
     const enqueued: EnqueuedRef[] = []
@@ -125,5 +126,51 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
     const job = store.get(id)
     if (job === undefined) return reply.code(404).send({ error: 'no such job' })
     return { job, logs: store.logs(id) }
+  })
+
+  // Clear finished jobs from the history ("Verlauf leeren", SPEC.md §6.2). With `?status=`
+  // only that status is cleared (so the UI can clear just the active filter); otherwise all
+  // at-rest jobs go. Active jobs (queued/preprocessing/ingesting) are never touched, and the
+  // vault is untouched — this only prunes operational rows (hard rule 1).
+  app.delete('/api/v1/jobs', async (req, reply) => {
+    const { status } = req.query as { status?: string }
+    if (status !== undefined && !JobStore.CLEARABLE_STATUSES.includes(status as JobStatus)) {
+      return reply.code(400).send({
+        error: `status must be one of ${JobStore.CLEARABLE_STATUSES.join(', ')} (active jobs cannot be cleared)`,
+      })
+    }
+    const removed = store.clearHistory(status as JobStatus | undefined)
+    // No per-job delete event exists; a stats signal nudges connected clients to refetch.
+    if (removed > 0) events.publish({ kind: 'stats' })
+    return reply.code(200).send({ removed })
+  })
+
+  // Manual retry of a failed/deferred job (SPEC.md §6.2 "Erneut versuchen"). Emits an SSE
+  // `job` update via the store transition inside queue.retryJob.
+  app.post('/api/v1/jobs/:id/retry', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    if (store.get(id) === undefined) return reply.code(404).send({ error: 'no such job' })
+    try {
+      const job = queue.retryJob(id)
+      return reply.code(202).send({ job })
+    } catch (err) {
+      return reply.code(409).send({ error: (err as Error).message })
+    }
+  })
+
+  // Cancel a queued job (→ cancelled). A job already being preprocessed/ingested is left to
+  // finish — we never kill an agent mid-write, which could leave the vault half-written
+  // (hard rule 1). Emits an SSE `job` update via the transition.
+  app.delete('/api/v1/jobs/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const job = store.get(id)
+    if (job === undefined) return reply.code(404).send({ error: 'no such job' })
+    if (job.status !== 'queued') {
+      return reply
+        .code(409)
+        .send({ error: `job is ${job.status}; only a queued job can be cancelled (a running ingest is left to finish)` })
+    }
+    const updated = store.transition(id, 'cancelled', { log: 'cancelled by user (SPEC.md §6.2)' })
+    return reply.code(200).send({ job: updated })
   })
 }

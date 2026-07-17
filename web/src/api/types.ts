@@ -1,0 +1,104 @@
+/**
+ * Types mirroring the server's JSON responses (server/src/db/jobs.ts, routes/stats.ts).
+ * Kept hand-written and small rather than generated: the API surface is tiny and stable,
+ * and a shared build step between server/ and web/ isn't worth it for M3.
+ */
+
+export type JobStatus =
+  | 'queued'
+  | 'preprocessing'
+  | 'ingesting'
+  | 'done'
+  | 'failed'
+  | 'deferred'
+  | 'duplicate'
+  | 'cancelled'
+
+export type JobSource = 'drop' | 'watch' | 'url'
+export type JobType = 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+/** A row from the `jobs` table (snake_case, as the server sends it). */
+export interface Job {
+  id: string
+  user_id: string
+  batch_id: string | null
+  source: JobSource
+  type: JobType
+  original_name: string | null
+  url: string | null
+  sha256: string | null
+  status: JobStatus
+  raw_path: string | null
+  /** JSON array (string) of created/updated wiki page paths. */
+  created_pages: string | null
+  error: string | null
+  attempts: number
+  tokens_in: number | null
+  tokens_out: number | null
+  cost_usd: number | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface JobLogLine {
+  ts: string
+  level: LogLevel
+  message: string
+}
+
+export interface JobDetail {
+  job: Job
+  logs: JobLogLine[]
+}
+
+export interface PageCounts {
+  byDir: Record<string, number>
+  total: number
+}
+
+export interface RecentPage {
+  path: string
+  dir: string
+  modified: string
+}
+
+export interface Commit {
+  hash: string
+  date: string
+  subject: string
+  pages: string[]
+}
+
+export interface GrowthPoint {
+  date: string
+  total: number
+}
+
+export interface Stats {
+  vaultName: string
+  pages: PageCounts
+  recentPages: RecentPage[]
+  commits: Commit[]
+  growth: GrowthPoint[]
+  hotCache: string | null
+  kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
+  jobs: Record<string, number>
+  queue: { queued: number; active: number; inFlight: number; paused: boolean; concurrency: number }
+  watcher: { active: boolean; folder: string }
+  generatedAt: string
+}
+
+export interface Health {
+  status: string
+  vaultRoot: string
+  queue: { inFlight: number; paused: boolean; concurrency: number }
+  jobs: Record<string, number>
+}
+
+/** SSE event payloads (server/src/api/routes/events.ts). */
+export type BusEvent =
+  | { kind: 'job'; job: Job }
+  | { kind: 'log'; log: { jobId: string; ts: string; level: LogLevel; message: string } }
+  | { kind: 'stats' }

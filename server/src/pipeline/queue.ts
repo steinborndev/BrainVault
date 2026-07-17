@@ -31,6 +31,7 @@ import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
 import { commitVault, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
+import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
 /** Bookkeeping paths that ride along with every commit — script-written, regenerable, shared. */
@@ -75,6 +76,8 @@ export interface IngestQueueOptions {
   /** Hot-cache refresh hook; returns a note logged against the job. See file note in queue.ts. */
   readonly refreshHotCache?: (vaultRoot: string) => Promise<string>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
+  /** Live-update bus; the queue signals `stats` when a commit changes vault-visible numbers. */
+  readonly events?: EventBus
 }
 
 /** Classifies an agent failure to decide retry vs pause vs give-up. */
@@ -121,6 +124,7 @@ export class IngestQueue {
   private readonly commit: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   private readonly refreshHotCache: (vaultRoot: string) => Promise<string>
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
+  private readonly events: EventBus | undefined
 
   private readonly commitMutex = new Mutex()
   private running = false
@@ -149,17 +153,40 @@ export class IngestQueue {
       (async () =>
         'hot cache is maintained by the ingest skill itself (M0 evidence); no separate refresh pass in M1')
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
+    this.events = opts.events
   }
 
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
    * batches whose members are still queued are reconstructed into pending units. */
   start(): void {
     this.running = true
+    this.reloadPendingBatches()
+    this.pump()
+  }
+
+  /** Reconstructs pending batch units from queued batch members not already tracked in memory. */
+  private reloadPendingBatches(): void {
     const known = new Set(this.pendingBatches.map((u) => u.batchId))
     for (const b of this.store.queuedBatches()) {
       if (!known.has(b.batchId)) this.pendingBatches.push(b)
     }
+  }
+
+  /**
+   * Manually re-queues a `failed` or `deferred` job (SPEC.md §6.2 "Erneut versuchen"). The
+   * runner already retries *transient* errors automatically; this is the operator's path for
+   * permanent failures and deferred jobs. A batch member is re-registered as a pending batch
+   * so it rejoins its combined run. Throws if the job isn't in a re-queueable state.
+   */
+  retryJob(id: string): JobRow {
+    const job = this.store.getOrThrow(id)
+    if (job.status !== 'failed' && job.status !== 'deferred') {
+      throw new Error(`job ${id} is ${job.status}, not failed/deferred — nothing to retry`)
+    }
+    const updated = this.store.transition(id, 'queued', { log: 'manual retry requested (SPEC.md §6.2)' })
+    if (job.batch_id) this.reloadPendingBatches()
     this.pump()
+    return updated
   }
 
   /** Stops claiming new work. In-flight jobs run to completion. */
@@ -466,6 +493,8 @@ export class IngestQueue {
           'info',
           `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} wiki page(s))`,
         )
+        // Vault-visible numbers (page counts, git history) changed → refresh the Overview.
+        this.events?.publish({ kind: 'stats' })
       } else {
         this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
       }
@@ -602,6 +631,7 @@ export class IngestQueue {
       if (result.committed) {
         for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
         this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)
+        this.events?.publish({ kind: 'stats' })
       } else {
         this.store.log(memberIds[0]!, 'info', `not committed: ${result.note ?? 'no changes'}`)
       }

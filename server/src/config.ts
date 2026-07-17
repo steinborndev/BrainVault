@@ -55,6 +55,13 @@ export interface ServerConfig {
 
 export interface Config {
   readonly vaultRoot: string
+  /**
+   * The vault name Obsidian registers for `VAULT_ROOT`, used to build `obsidian://open?vault=…`
+   * deep-links on the Overview/Ingestion tabs (TASKS-M3 §0). Defaults to the vault folder's
+   * basename (Obsidian's own default); override with `OBSIDIAN_VAULT_NAME` if the vault was
+   * added to Obsidian under a different name.
+   */
+  readonly obsidianVaultName: string
   readonly auth: {
     readonly mode: AuthMode
     /** The credential value. Never log this — use describeConfig(). */
@@ -147,6 +154,7 @@ const schema = z.object({
   HTTP_AUTH_MODE: z.enum(['local-single-user', 'token']).optional(),
   HTTP_AUTH_TOKEN: z.string().min(1).optional(),
   WATCH_POLLING: z.enum(['true', 'false', '1', '0', 'yes', 'no']).optional(),
+  OBSIDIAN_VAULT_NAME: z.string().min(1).optional(),
 })
 
 /** Verifies the path is a real claude-obsidian vault, not just any directory. */
@@ -209,6 +217,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     HTTP_AUTH_MODE: presence(merged['HTTP_AUTH_MODE']),
     HTTP_AUTH_TOKEN: presence(merged['HTTP_AUTH_TOKEN']),
     WATCH_POLLING: presence(merged['WATCH_POLLING']),
+    OBSIDIAN_VAULT_NAME: presence(merged['OBSIDIAN_VAULT_NAME']),
   })
 
   if (!parsed.success) {
@@ -253,8 +262,11 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     ...(watchPolling !== undefined ? { watchPolling } : {}),
   }
 
+  const vaultRoot = validateVaultRoot(parsed.data.VAULT_ROOT)
+
   return {
-    vaultRoot: validateVaultRoot(parsed.data.VAULT_ROOT),
+    vaultRoot,
+    obsidianVaultName: parsed.data.OBSIDIAN_VAULT_NAME ?? path.basename(vaultRoot),
     auth: { mode: envVar === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'oauth' : 'api-key', credential, envVar },
     server,
   }
