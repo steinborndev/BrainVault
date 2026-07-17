@@ -1,0 +1,78 @@
+# TASKS-M5 — Härtung (hardening)
+
+Goal (SPEC.md §10): **systemd autostart, error paths, cost display, Settings UI, docs.**
+**Acceptance (DoD): the service survives a WSL restart (systemd user service); failed jobs are diagnosable and retryable.**
+
+This is the last milestone. It also absorbs the carried-over items from M3/M4 (below) — most importantly the **lint async rework** (a real lint currently hangs). Read `SPEC.md` §3.1, §6.4, §7.1, §9, §12.2 before starting; the spec wins over code.
+
+---
+
+## Where M5 starts — full system state (M0–M4 are DONE, on `main`)
+
+A fresh session can rely on all of this being built, tested (195 vitest tests green), and merged to `main` (pushed to github.com/steinborndev/BrainVault, private).
+
+**Run it:** `. ~/.nvm/nvm.sh` first (node 20 via nvm). Build the SPA once: `npm run build:web` (root) → `web/dist`. Start: `VAULT_ROOT=~/vault npm start` (from `server/`) or `npm run start` (root) → serves API + SPA on one origin `http://127.0.0.1:8420`. Dev with HMR: `npm run dev:web` + `VAULT_ROOT=~/vault npm run dev:server`. Credentials load automatically from `~/.config/vault-service/env` (`CLAUDE_CODE_OAUTH_TOKEN`); `VAULT_ROOT` is NOT in that file — pass it.
+
+**Repo layout:** `server/` (Fastify + better-sqlite3 + chokidar, TS strict ESM), `web/` (Vite + React + TS + TanStack Query, PWA), `docs/tasks/` (per-milestone), `SPEC.md` (authoritative, German), `CLAUDE.md` (hard rules). Vault is a separate repo at `~/vault` (claude-obsidian v1.9.2); its Obsidian deep-link vault name is `vault`.
+
+**Backend surface (all under `/api/v1`, behind localhost guard + local-single-user auth):**
+- Ingestion (M1/M2): `POST /jobs` (upload/url/text, multi→batch), `GET /jobs`, `GET /jobs/:id`, `POST /jobs/:id/retry`, `DELETE /jobs/:id` (cancel), `DELETE /jobs[?status=]` (clear history). Queue (concurrency 2, retry×2, timeout, rate-limit pause/resume), preprocessing plugin chain, per-ingest git commit `ingest: <source>` (mutex-serialized, F4 scoping).
+- Dashboard (M3): `GET /events` (SSE: job/log/stats, hijacked raw stream + heartbeat), `GET /stats` (page counts, git growth, commits, hot cache, queue/watcher).
+- Query/Chat (M4): `POST /query` (read-only query-runner + citations), `GET/POST /sessions`, `GET/PATCH/DELETE /sessions/:id`.
+- Maintenance (M4): `POST /maintenance/{lint,research,hot-cache}` (vault-mutating agent runs, shared commit mutex, live log on `maintenance:<kind>` bus channel).
+
+**Enforcement (CLAUDE.md hard rule 4 — do NOT weaken):** agent runs use `RunProfile` (`pipeline/permissions.ts`, `agent-runner.ts`): `ingest` (write vault, no web), `query` (READ-ONLY — sandbox `allowWrite: []`, deny Write/Edit + web), `research` (write + web). Enforcement is the **sandbox (bubblewrap) + a PreToolUse hook**, NOT `canUseTool`. **Re-run `server/src/cli/permprobe.ts` after ANY change to the permission wiring** (expects `canary outside vault: blocked`).
+
+**Frontend:** 4 tabs (`web/src/tabs/`): Overview, Ingestion, Chat, Maintenance — all live. Shared: SSE hook (`hooks/useEvents.ts`), live log store (`lib/logStore.ts`), `PageLink` (obsidian:// + copy fallback), `Markdown`, `Icon`. Theme-aware CSS, responsive (mobile bottom-nav), PWA (manifest + `sw.js`).
+
+**DB (`server/src/db/`, better-sqlite3, migrations gated by `user_version`):** tables `jobs`, `job_logs`, `sessions`, `messages`, `settings`, `users`. Migration v2 added `sessions.sdk_session_id` + `updated_at`. **The `settings` table exists but is UNUSED — it's M5's store for the Settings UI.** SQLite is operational state only; losing it must never damage the vault (hard rule 1).
+
+---
+
+## 0. Carried over from M3/M4 (do these as part of M5 — details in TASKS-M4/M3 Findings)
+
+- [ ] **Lint async rework + hard kill (BIGGEST carryover).** A real full-wiki lint hung **>21 min** (past the 15-min run timeout) because the DragonScale semantic-tiling pass runs embeddings via a long bash call that blocks the SDK message iterator, so `abortController.abort()` never fires. Mitigation applied (lint prompt skips tiling) but NOT re-verified. **Fix:** make maintenance runs **async/job-style** — return a run id immediately, stream the live log over the bus (the UI already reads `maintenance:<kind>` channels), poll a result endpoint — instead of holding the HTTP request for 20+ min. AND give agent runs a **hard, tool-interrupting kill** (per-tool timeout or subprocess kill) so a stuck bash can't outlive the run timeout. This likely generalizes to the ingest runner too.
+- [ ] **`.raw/.manifest.json` commit-scoping residual.** wiki-ingest writes `.raw/.manifest.json` (delta tracker) but the ingest commit pathspec (`BOOKKEEPING_PATHS` in `pipeline/queue.ts`) doesn't stage it → `git status` in the vault stays permanently dirty. Fix: add it to `BOOKKEEPING_PATHS`, or `.gitignore` it in the vault. (A hot-cache run swept it in once, but future ingests re-dirty it.)
+- [ ] **Save-to-vault** (`POST /sessions/:id/save`, SPEC §6.3 "Session in Vault sichern") — the `/save` flow, a write-enabled agent run + commit. Consider resuming the chat's `sdk_session_id` and prompting `/save`. Deferred from M4.
+- [ ] **Autoresearch not yet run with a real agent** (only mocked). Verify end-to-end once (web egress path) with a small topic; watch cost.
+- [ ] Minor deferred polish: inline citation-page **preview** on a chip (Chat tab); hot-cache **last-refresh timestamp** display (Maintenance tab).
+
+## 1. systemd user service + autostart (SPEC.md §3.1) — DoD-critical
+
+- [ ] Ship a `vault-service.service` systemd **user** unit (+ install script under `scripts/`). `systemctl --user enable vault-service` so it starts with WSL; `WantedBy=default.target`, `loginctl enable-linger` note so it survives without an active login. Env from `~/.config/vault-service/env` + `VAULT_ROOT`. Restart-on-failure.
+- [ ] **DoD test:** WSL restart → the service comes back up on `127.0.0.1:8420`, queue resumes any `queued` jobs, watcher re-attaches. Document the exact steps.
+- [ ] Gotcha (from memory): after a kill, orphaned tsx→node children can hold port 8420 — the unit's stop/kill must reap the node child, not just the tsx wrapper. Prefer running the built JS (or `tsx` with proper signal forwarding) under systemd.
+
+## 2. Settings UI + `GET/PUT /api/v1/settings` (SPEC.md §6.4, §6.5)
+
+- [ ] `SettingsStore` over the `settings` table (key/value). Expose the **runtime-adjustable** config: watch-folder path, concurrency, file-size limit, git-commit behavior. Read-only display of the **API-key status** (source oauth/api-key — NEVER the value; reuse `describeConfig`). Precedence vs. env/`config.ts` must be explicit and documented (env is start-time; settings are runtime overrides — decide and enforce one model).
+- [ ] Settings editor in the **Wartung** tab (currently a read-only M5 placeholder note there). Validate with zod; apply live where safe (e.g. concurrency), or flag "restart required".
+- [ ] Keep the localhost guard + credential rules intact (hard rules 2/3): settings must never let the bind leave localhost without an auth token, and never surface credentials.
+
+## 3. Cost / usage display + daily budget (SPEC.md §7.1, §11.3)
+
+- [ ] Surface per-job and aggregate token/cost from the SDK usage already stored on `jobs` (and returned by `/query`, `/maintenance/*`). In **oauth (subscription) mode** label `cost_usd` as **"Schätzwert (Abo)"** everywhere it appears (Ingestion history, Chat, Overview) — the value is an API-price equivalent, not real money. `authMode` is already returned by `/query`; expose it via `/stats` or `/health` for the whole UI.
+- [ ] Configurable **daily budget** (jobs/day in oauth mode, USD in api-key mode): queue pauses when exceeded, shows it in the dashboard, resumes next day. Ties into the existing rate-limit pause/resume in `IngestQueue`.
+
+## 4. Error paths & diagnosability (SPEC.md §10 DoD)
+
+- [ ] Failed jobs must be **diagnosable** (full error + the persisted `job_logs` stream visible in the UI — history already has a Log toggle) and **retryable** (retry endpoint exists; confirm the flow end-to-end including batch members). Add a "copy diagnostics" affordance if useful.
+- [ ] Harden the long-run/hang path from §0 (a stuck agent run must fail loudly and free the worker, not wedge it).
+- [ ] Consider a "git revert this ingest" action in history (SPEC §9 undo; v1.1 note) — optional.
+
+## 5. Dockerfile + docs (SPEC.md §12.2, §10)
+
+- [ ] `Dockerfile` (pure Linux userland, no Windows deps) building the server + serving `web/dist`. Not used under WSL day-to-day, but required from M5 for the future always-on-host move.
+- [ ] Docs: a real `README.md` (setup: vault clone, toolchain, credential, build, run, systemd), plus update `CLAUDE.md`/`SPEC.md` cross-refs if anything changed. Ensure `scripts/` setup helpers are current.
+
+## 6. Acceptance (DoD)
+
+- [ ] After a **WSL restart**, the service is up on `127.0.0.1:8420` without manual start (systemd user service), and in-flight/queued work resumes.
+- [ ] A **failed job** shows its error + full log and can be **retried** to success from the UI.
+- [ ] Settings UI reads/writes config; cost shows as "Schätzwert (Abo)" in oauth mode.
+- [ ] `Dockerfile` present and builds; docs complete.
+- [ ] `npm test` passes; `permprobe` re-run if permission wiring changed.
+
+## Findings
+
+- (M5 findings go here)
