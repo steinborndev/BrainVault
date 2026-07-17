@@ -35,6 +35,7 @@ function stubQueue(rec: Recorder): IngestQueue {
 function makeConfig(): Config {
   return {
     vaultRoot: inbox,
+    obsidianVaultName: 'vault',
     auth: { mode: 'oauth', credential: 'x', envVar: 'CLAUDE_CODE_OAUTH_TOKEN' },
     server: {
       host: '127.0.0.1',

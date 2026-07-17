@@ -9,6 +9,7 @@ import { loadConfig, describeConfig, assertBindAllowed, ConfigError, type Config
 import { openDb, defaultDbPath } from './db/index.js'
 import { JobStore } from './db/jobs.js'
 import { IngestQueue } from './pipeline/queue.js'
+import { EventBus } from './pipeline/events.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
@@ -30,8 +31,11 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   const pin = refreshTransportPin(config.vaultRoot)
 
   const db = openDb(defaultDbPath())
-  const store = new JobStore(db)
-  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth })
+  // The live-update bus is shared: the store publishes job/log events, the queue publishes
+  // stats, and the SSE route (via the app) is the sole subscriber (SPEC.md §6.5).
+  const events = new EventBus()
+  const store = new JobStore(db, events)
+  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth, events })
   queue.start()
 
   const watcher = startWatcher({
@@ -40,7 +44,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
   })
 
-  const app = await buildServer({ config, store, queue })
+  const app = await buildServer({ config, store, queue, events })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
 

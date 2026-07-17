@@ -15,6 +15,7 @@
 import { ulid } from 'ulid'
 import type { Db } from './index.js'
 import { nowIso } from './index.js'
+import type { EventBus } from '../pipeline/events.js'
 
 export type JobStatus =
   | 'queued'
@@ -110,7 +111,16 @@ export class JobStateError extends Error {
 }
 
 export class JobStore {
-  constructor(private readonly db: Db) {}
+  /**
+   * `bus` is optional so unit tests (and the CLIs) can construct a store without wiring the
+   * live-update channel; the service passes one so the dashboard's SSE stream sees every
+   * transition and log line. Events are published AFTER the SQLite write commits, never from
+   * inside a transaction that might still roll back (SPEC.md §6.5).
+   */
+  constructor(
+    private readonly db: Db,
+    private readonly bus?: EventBus,
+  ) {}
 
   /**
    * Creates a job. If `sha256` matches an existing job that still owns its hash, the new
@@ -195,6 +205,45 @@ export class JobStore {
   /** Most-recently-created jobs first — for the Ingestion tab (SPEC.md §6.2). */
   recent(limit = 100): JobRow[] {
     return this.db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?').all(limit) as JobRow[]
+  }
+
+  /**
+   * Job counts by status for jobs that FINISHED at or after `sinceIso` — the 7-day KPIs on
+   * the Overview tab (SPEC.md §6.1). Keyed off `finished_at` so a long-running job counts on
+   * the day it completed, not the day it was queued.
+   */
+  countsSince(sinceIso: string): Record<string, number> {
+    const rows = this.db
+      .prepare(
+        'SELECT status, COUNT(*) n FROM jobs WHERE finished_at IS NOT NULL AND finished_at >= ? GROUP BY status',
+      )
+      .all(sinceIso) as Array<{ status: string; n: number }>
+    return Object.fromEntries(rows.map((r) => [r.status, r.n]))
+  }
+
+  /**
+   * Statuses a user may clear from the Ingestion history — everything that is at rest.
+   * The three active states (`queued`, `preprocessing`, `ingesting`) are deliberately absent
+   * so a clear can never drop a job that is still queued or running.
+   */
+  static readonly CLEARABLE_STATUSES: readonly JobStatus[] = ['done', 'failed', 'deferred', 'duplicate', 'cancelled']
+
+  /**
+   * Deletes at-rest jobs from history ("Verlauf leeren", SPEC.md §6.2). With `status` set,
+   * only that status is cleared (respecting the active filter chip); otherwise all clearable
+   * statuses go. Active jobs are never touched. `job_logs` rows cascade (FK ON DELETE CASCADE).
+   *
+   * This only removes OPERATIONAL rows — the vault (source of truth) is untouched (hard
+   * rule 1), and the created wiki pages remain. Returns the number of jobs removed.
+   */
+  clearHistory(status?: JobStatus): number {
+    const targets = status
+      ? JobStore.CLEARABLE_STATUSES.filter((s) => s === status)
+      : JobStore.CLEARABLE_STATUSES
+    if (targets.length === 0) return 0
+    const placeholders = targets.map(() => '?').join(',')
+    const res = this.db.prepare(`DELETE FROM jobs WHERE status IN (${placeholders})`).run(...targets)
+    return res.changes
   }
 
   /** Job counts grouped by status — for the dashboard/health overview (SPEC.md §6.1). */
@@ -306,7 +355,11 @@ export class JobStore {
       this.log(id, opts.level ?? (to === 'failed' ? 'error' : 'info'), opts.log ?? `→ ${to}`)
       return this.getOrThrow(id)
     })
-    return run()
+    const job = run()
+    // Publish only after the transaction has committed — a subscriber must never see a
+    // status the DB rolled back (SPEC.md §6.5).
+    this.bus?.publish({ kind: 'job', job })
+    return job
   }
 
   /** Increments the retry counter and returns the new value (SPEC.md §3.1: max 2 retries). */
@@ -341,9 +394,13 @@ export class JobStore {
 
   /** Appends a line to the job's log (agent stream + pipeline events, SPEC.md §8). */
   log(id: string, level: LogLevel, message: string): void {
+    const ts = nowIso()
     this.db
       .prepare('INSERT INTO job_logs (job_id, ts, level, message) VALUES (?, ?, ?, ?)')
-      .run(id, nowIso(), level, message)
+      .run(id, ts, level, message)
+    // Stream the line live (the DoD's per-job agent log). Callers invoke log() only after
+    // the row it references exists, and never in a path that subsequently rolls back.
+    this.bus?.publish({ kind: 'log', log: { jobId: id, ts, level, message } })
   }
 
   logs(id: string): Array<{ ts: string; level: LogLevel; message: string }> {

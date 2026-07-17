@@ -1,0 +1,150 @@
+/**
+ * Ingestion (SPEC.md §6.2) — the heart of M3. Dropzone on top, then three live sections:
+ *  - Aktiv: jobs being preprocessed/ingested, each with its live agent log (DoD live log).
+ *  - Warteschlange: queued jobs, cancellable.
+ *  - Verlauf: finished jobs, filterable by status/type, with created-page obsidian:// links
+ *             and a retry for failed/deferred jobs.
+ *
+ * All three come from one `['jobs']` query that the SSE `job` events invalidate live, so a
+ * job visibly moves Aktiv → Verlauf on completion with no refresh (DoD).
+ */
+
+import { useMemo, useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '../api/client.ts'
+import type { Job, JobStatus } from '../api/types.ts'
+import { Dropzone } from '../components/Dropzone.tsx'
+import { JobCard } from '../components/JobCard.tsx'
+
+const ACTIVE: JobStatus[] = ['preprocessing', 'ingesting']
+const HISTORY_FILTERS: Array<{ id: 'all' | JobStatus; label: string }> = [
+  { id: 'all', label: 'Alle' },
+  { id: 'done', label: 'Fertig' },
+  { id: 'failed', label: 'Fehler' },
+  { id: 'deferred', label: 'Zurückgestellt' },
+  { id: 'duplicate', label: 'Duplikate' },
+  { id: 'cancelled', label: 'Abgebrochen' },
+]
+
+export function Ingestion(): React.ReactElement {
+  const qc = useQueryClient()
+  const [filter, setFilter] = useState<'all' | JobStatus>('all')
+  // The vault name for obsidian:// links comes from /stats; cheap and already cached.
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const vaultName = stats.data?.vaultName ?? 'vault'
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['jobs'],
+    queryFn: () => api.jobs({ limit: 300 }),
+  })
+
+  const { active, queued, history } = useMemo(() => {
+    const jobs = data?.jobs ?? []
+    return {
+      active: jobs.filter((j) => ACTIVE.includes(j.status)),
+      queued: jobs.filter((j) => j.status === 'queued'),
+      history: jobs.filter((j) => !ACTIVE.includes(j.status) && j.status !== 'queued'),
+    }
+  }, [data])
+
+  const filteredHistory = useMemo(
+    () => (filter === 'all' ? history : history.filter((j) => j.status === filter)),
+    [history, filter],
+  )
+
+  const clear = useMutation({
+    // Clears per the active filter: a specific status clears only that, "Alle" clears all at-rest jobs.
+    mutationFn: () => api.clearHistory(filter === 'all' ? undefined : filter),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['jobs'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    },
+  })
+
+  const onClear = (): void => {
+    const scope = filter === 'all' ? 'den gesamten Verlauf' : `alle „${filter}"-Einträge`
+    if (window.confirm(`Möchtest du ${scope} (${filteredHistory.length}) löschen? Der Vault und die erzeugten Seiten bleiben unberührt.`)) {
+      clear.mutate()
+    }
+  }
+
+  if (isLoading) return <div className="empty">Lade Jobs…</div>
+  if (isError) return <div className="empty">Jobs konnten nicht geladen werden: {(error as Error)?.message}</div>
+
+  return (
+    <div>
+      <Dropzone />
+
+      <Section title={`Aktiv${active.length ? ` (${active.length})` : ''}`}>
+        {active.length === 0 ? (
+          <div className="empty">Momentan läuft kein Ingest.</div>
+        ) : (
+          <div className="joblist">
+            {active.map((j) => (
+              <JobCard key={j.id} job={j} variant="active" vaultName={vaultName} />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      {queued.length > 0 && (
+        <Section title={`Warteschlange (${queued.length})`}>
+          <div className="joblist">
+            {queued.map((j) => (
+              <JobCard key={j.id} job={j} variant="queue" vaultName={vaultName} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      <Section
+        title="Verlauf"
+        action={
+          filteredHistory.length > 0 ? (
+            <button className="btn ghost danger" disabled={clear.isPending} onClick={onClear}>
+              {filter === 'all' ? 'Verlauf leeren' : 'Auswahl leeren'}
+            </button>
+          ) : undefined
+        }
+      >
+        <div className="filters">
+          {HISTORY_FILTERS.map((f) => (
+            <button key={f.id} className={`chip${filter === f.id ? ' active' : ''}`} onClick={() => setFilter(f.id)}>
+              {f.label}
+              {f.id !== 'all' ? ` (${history.filter((j: Job) => j.status === f.id).length})` : ''}
+            </button>
+          ))}
+        </div>
+        {filteredHistory.length === 0 ? (
+          <div className="empty">Noch keine abgeschlossenen Jobs.</div>
+        ) : (
+          <div className="joblist">
+            {filteredHistory.map((j) => (
+              <JobCard key={j.id} job={j} variant="history" vaultName={vaultName} />
+            ))}
+          </div>
+        )}
+      </Section>
+    </div>
+  )
+}
+
+function Section({
+  title,
+  children,
+  action,
+}: {
+  title: string
+  children: React.ReactNode
+  action?: React.ReactNode
+}): React.ReactElement {
+  return (
+    <div className="section">
+      <div className="section-head">
+        <h3 className="section-title">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </div>
+  )
+}

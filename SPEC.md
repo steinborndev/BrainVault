@@ -277,6 +277,14 @@ Diese drei Anforderungen hängen architektonisch zusammen und werden deshalb gem
 
 **Ausbaustufe:** Sobald der Server per Tailnet erreichbar ist (12.2), funktioniert das Dashboard auf dem Smartphone ohne weiteren Code. Mobile-spezifische Ergänzungen danach: Share-Target im PWA-Manifest, damit "Teilen → Vault" aus jeder App heraus einen URL- oder Datei-Job anlegt (das mobile Gegenstück zum Watch-Ordner); Kamera-Upload in der Dropzone (Foto eines Dokuments → Bild-Ingest); optional Push-Benachrichtigung bei fehlgeschlagenen Jobs (Web Push). Eine native App ist nicht geplant — die PWA deckt die Anforderungen ab.
 
-### 12.4 Reihenfolge
+### 12.4 In-Dashboard Vault-Viewer (Seiten + Graph)
 
-Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits.
+**Motivation (aus dem M3-Betrieb):** Der Vault ist die Source of Truth (Obsidian-flavored Markdown + Wikilinks + git — das „Backend-Format"); Obsidian-die-**App** ist nur *ein* Viewer und bewusst optional. Zwei Reibungspunkte zeigen in dieselbe Richtung: (a) das Windows-Obsidian öffnet den WSL-Vault über `\\wsl$` gar nicht (`EISDIR … watch`, Abschnitt 3/11), und (b) der Graph-View des WSLg-Linux-Obsidian ruckelt mangels GPU. Ein **read-only Vault-Viewer im Dashboard** umgeht beides und macht die Obsidian-App für den Alltag entbehrlich — der Vault bleibt unverändert das Speicherformat.
+
+**Ausbaustufe:** Ein zusätzlicher Bereich (oder eine Erweiterung der Übersicht), der die Wiki-Seiten direkt rendert: Markdown mit aufgelösten `[[Wikilinks]]` als klickbare In-App-Navigation, Backlinks-Panel, und ein **Graph-View** aus dem Wikilink-Graphen (die Links sind vollständig parsebar; ein neuer read-only Endpunkt `GET /api/v1/graph` liefert Knoten/Kanten, `GET /api/v1/page/*` den gerenderten Seiteninhalt). Bleibt strikt lesend — Schreibzugriff auf den Vault gibt es weiterhin nur über Agent-Runs (Hard Rule 1). obsidian://-Deep-Links und der Copy-Pfad-Fallback bleiben als Brücke bestehen, solange Obsidian parallel genutzt wird.
+
+**Nicht in M0–M5.** Kandidat für M6 bzw. eine bewusste Produktentscheidung; die v1-Architektur (Vault-Root als Konfigwert, API-first, alles read-only ableitbar aus FS+git) trägt das ohne Umbau.
+
+### 12.5 Reihenfolge
+
+Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits, (6) In-Dashboard Vault-Viewer (12.4) — macht die Obsidian-App im Alltag optional.
