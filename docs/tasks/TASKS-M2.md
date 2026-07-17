@@ -34,11 +34,11 @@ Work top to bottom. Check off as completed; record decisions under "Findings".
 - [x] On stabilize: enqueue, then **remove from the inbox** (vault already has its copy via `enqueueFile`'s copy) — inbox kept empty, restart-safe.
 - [x] Web Clipper `.md` frontmatter-URL + `.url`/`.webloc` shortcuts → URL jobs (`frontmatterUrl`, `watcher.test.ts`).
 
-## 4. Batching (SPEC.md §4.1, §4.2)
+## 4. Batching (SPEC.md §4.1, §4.2) — DONE
 
-- [ ] Watch folder: files arriving within **60 s** of each other are grouped into one batch.
-- [ ] A batch is preprocessed per-file, then ingested with **one** combined `ingest all of these`-style run so the agent can cross-reference (repo batch behaviour). Needs queue support for a batch job over N artifacts.
-- [ ] Batch is visible as such in the DB (`batch_id` on every member).
+- [x] Watch folder groups files arriving together (quiet window 3 s, hard cap 60 s) into one batch; a lone file stays a single job. `pipeline/watcher.ts`, `watcher-batch.test.ts`.
+- [x] A batch is preprocessed per-file, then **one** combined `ingest all of these` run, then one commit. `IngestQueue.enqueueBatch`/`processBatch`; a batch occupies one worker slot; deferred/failed members drop out; usage split across members; transient/rate-limit retries re-run the batch. `queue.test.ts` batching block.
+- [x] `batch_id` on every member; `claimNextQueued` excludes batch members; pending batches recovered after a restart (`queuedBatches`).
 
 ## 5. Acceptance
 
@@ -49,4 +49,4 @@ Work top to bottom. Check off as completed; record decisions under "Findings".
 
 ## Findings
 
-**Progress 2026-07-17:** §1 server foundation, §2 upload endpoint, §3 watch folder all DONE and committed; 160 tests green; real boot smoke passed (`/health` served real DB counts, graceful shutdown). F1 carryover done (transport pin refreshed on startup). **Remaining M2: §4 batching (combined `ingest all of these` run + 60 s watch-folder grouping), §0 F4 (commit granularity), §5 acceptance (live watch-folder drop + batch).** §4 needs a batch-job abstraction in the queue (preprocess each member, then ONE combined agent run) — a real design step, not a tweak; picking it up next.
+**Progress 2026-07-17:** §1 server foundation, §2 upload endpoint, §3 watch folder, **§4 batching** all DONE and committed; 167 tests green; real boot smoke passed. F1 carryover done. **Remaining M2: §0 F4 (commit granularity — real design choice, or defer to M5 with a note), §5 live acceptance (real watch-folder drop → ingest; spends tokens + mutates the vault, so user-gated).** The deterministic path (watcher → enqueueBatch → processBatch) is fully covered by tests with a faked agent; only the real-agent watch-folder run is outstanding.
