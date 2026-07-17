@@ -19,6 +19,7 @@ import { openDb, defaultDbPath } from '../db/index.js'
 import { JobStore } from '../db/jobs.js'
 import { IngestQueue } from '../pipeline/queue.js'
 import { detectTools } from '../pipeline/preprocess/index.js'
+import { isShortcut, readShortcutUrl } from '../pipeline/shortcut.js'
 
 /** Expands each argument (file or directory) into a flat list of files to enqueue. */
 function collectFiles(args: string[], cwd: string): string[] {
@@ -86,6 +87,18 @@ async function main(): Promise<number> {
 
   const jobIds: string[] = []
   for (const file of files) {
+    // A .url/.webloc shortcut is a pointer to a web page, not content — enqueue the URL.
+    if (isShortcut(file)) {
+      const url = readShortcutUrl(file)
+      if (url === undefined) {
+        console.log(`  skipped ${path.basename(file)} — shortcut has no http(s) URL`)
+        continue
+      }
+      const { job } = queue.enqueueUrl({ url, source: 'drop' })
+      jobIds.push(job.id)
+      console.log(`  queued ${path.basename(file)} → ${job.id} (url: ${url})`)
+      continue
+    }
     const { job, duplicateOf } = await queue.enqueueFile({ sourcePath: file, source: 'drop' })
     jobIds.push(job.id)
     console.log(`  queued ${path.basename(file)} → ${job.id}${duplicateOf ? ' (duplicate)' : ''}`)
