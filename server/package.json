@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "ingest": "tsx src/cli/ingest.ts",
+    "pipeline": "tsx src/cli/pipeline.ts",
+    "permprobe": "tsx src/cli/permprobe.ts",
     "smoke": "tsx src/cli/smoke.ts"
   },
   "dependencies": {
