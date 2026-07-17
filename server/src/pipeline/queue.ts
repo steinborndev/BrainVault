@@ -18,6 +18,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { ulid } from 'ulid'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { JobRow, JobSource, JobType, CreateJobResult } from '../db/jobs.js'
 import { JobStore } from '../db/jobs.js'
@@ -32,6 +33,17 @@ import { commitVault, type CommitResult } from './git.js'
 import { Mutex } from '../util/mutex.js'
 
 export type FailureClass = 'rate_limit' | 'transient' | 'permanent'
+
+/** One member of a batch to enqueue: an uploaded/dropped file, or a URL. */
+export type BatchItem =
+  | { readonly kind: 'file'; readonly sourcePath: string; readonly originalName?: string }
+  | { readonly kind: 'url'; readonly url: string }
+
+/** In-memory record of a batch waiting for (or retrying) its combined ingest run. */
+interface BatchUnit {
+  readonly batchId: string
+  readonly memberIds: string[]
+}
 
 /** Signature of the ingest agent run — injectable so tests supply a fake. */
 export type IngestRunner = (opts: {
@@ -112,6 +124,8 @@ export class IngestQueue {
   private inFlight = 0
   private toolsCache: ToolAvailability | undefined
   private idleWaiters: Array<() => void> = []
+  /** Batches awaiting their combined ingest run. A slot in the pool is one batch OR one job. */
+  private pendingBatches: BatchUnit[] = []
 
   constructor(opts: IngestQueueOptions) {
     this.store = opts.store
@@ -133,9 +147,14 @@ export class IngestQueue {
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
   }
 
-  /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up. */
+  /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
+   * batches whose members are still queued are reconstructed into pending units. */
   start(): void {
     this.running = true
+    const known = new Set(this.pendingBatches.map((u) => u.batchId))
+    for (const b of this.store.queuedBatches()) {
+      if (!known.has(b.batchId)) this.pendingBatches.push(b)
+    }
     this.pump()
   }
 
@@ -173,13 +192,47 @@ export class IngestQueue {
       ...(input.batchId ? { batchId: input.batchId } : {}),
     })
     if (created.duplicateOf === undefined) {
-      const jobDir = path.join(this.vaultRoot, '.raw', created.job.id)
-      fs.mkdirSync(jobDir, { recursive: true })
-      fs.copyFileSync(input.sourcePath, path.join(jobDir, originalName))
-      this.store.setRawPath(created.job.id, path.posix.join('.raw', created.job.id))
+      this.stageFile(created.job.id, input.sourcePath, originalName)
     }
     this.pump()
     return created
+  }
+
+  /** Copies an original into its `.raw/<job-id>/` dir where preprocessing expects it. */
+  private stageFile(jobId: string, sourcePath: string, originalName: string): void {
+    const jobDir = path.join(this.vaultRoot, '.raw', jobId)
+    fs.mkdirSync(jobDir, { recursive: true })
+    fs.copyFileSync(sourcePath, path.join(jobDir, originalName))
+    this.store.setRawPath(jobId, path.posix.join('.raw', jobId))
+  }
+
+  /**
+   * Enqueues a batch (SPEC.md §4.1): every member is preprocessed individually, then the
+   * whole batch is ingested with ONE combined `ingest all of these` run so the agent can
+   * cross-reference the sources. Members share a `batch_id`; duplicates are skipped and
+   * left out of the run. Occupies ONE worker-pool slot for the whole batch.
+   */
+  async enqueueBatch(
+    items: readonly BatchItem[],
+    source: JobSource,
+  ): Promise<{ batchId: string; jobs: CreateJobResult[] }> {
+    const batchId = ulid()
+    const jobs: CreateJobResult[] = []
+    for (const item of items) {
+      if (item.kind === 'url') {
+        jobs.push(this.store.create({ source, type: 'web', url: item.url, batchId }))
+        continue
+      }
+      const originalName = item.originalName ?? path.basename(item.sourcePath)
+      const sha256 = await sha256File(item.sourcePath)
+      const created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId })
+      if (created.duplicateOf === undefined) this.stageFile(created.job.id, item.sourcePath, originalName)
+      jobs.push(created)
+    }
+    const memberIds = jobs.filter((r) => r.duplicateOf === undefined).map((r) => r.job.id)
+    if (memberIds.length > 0) this.pendingBatches.push({ batchId, memberIds })
+    this.pump()
+    return { batchId, jobs }
   }
 
   /** Enqueues a URL job (not content-addressed, so not deduped). */
@@ -212,7 +265,8 @@ export class IngestQueue {
     // A paused queue makes no further progress until it resumes, so with nothing in
     // flight it counts as settled even though jobs are still queued behind the pause.
     if (this.paused) return true
-    return this.store.listByStatus('queued').length === 0
+    if (this.pendingBatches.length > 0) return false
+    return (this.store.counts()['queued'] ?? 0) === 0
   }
 
   private settleIdle(): void {
@@ -229,6 +283,21 @@ export class IngestQueue {
       return
     }
     while (this.inFlight < this.concurrency) {
+      // A batch occupies one slot for its whole combined run; drain pending batches first.
+      const unit = this.pendingBatches.shift()
+      if (unit !== undefined) {
+        this.inFlight++
+        void this.processBatch(unit)
+          .catch((err: unknown) => {
+            const id = unit.memberIds[0] ?? 'unknown'
+            this.store.log(id, 'error', `batch worker crashed: ${(err as Error).message}`)
+          })
+          .finally(() => {
+            this.inFlight--
+            this.pump()
+          })
+        continue
+      }
       const job = this.store.claimNextQueued()
       if (job === undefined) break
       this.inFlight++
@@ -395,6 +464,131 @@ export class IngestQueue {
       // A commit failure must not undo a completed ingest — the pages are on disk and the
       // next successful job's `git add -A` will sweep them in. Surface it, don't fail.
       this.store.log(job.id, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
+    }
+  }
+
+  /**
+   * Processes one batch: preprocess each member individually, then a single combined
+   * `ingest all of these` run over the surviving artifacts, one commit, all members done.
+   * Deferred/failed members drop out but never sink the rest of the batch.
+   */
+  private async processBatch(unit: BatchUnit): Promise<void> {
+    const ready: Array<{ id: string; artifact: string }> = []
+    const names: string[] = []
+
+    for (const id of unit.memberIds) {
+      const job = this.store.get(id)
+      if (job === undefined || job.status !== 'queued') continue // already handled/cancelled
+      const jobDir = path.join(this.vaultRoot, '.raw', id)
+      this.store.setRawPath(id, path.posix.join('.raw', id))
+      try {
+        this.store.transition(id, 'preprocessing', { log: 'batch: preprocessing member' })
+        const pre = await this.preprocessStep(job, jobDir)
+        this.store.setType(id, pre.type)
+        if (pre.deferred) {
+          this.deferJob(job, jobDir)
+          this.store.transition(id, 'deferred', {
+            log: pre.manifest.notes.join('; ') || 'unsupported type — deferred',
+            level: 'warn',
+          })
+          continue
+        }
+        ready.push({ id, artifact: pre.primaryArtifact })
+        names.push(job.original_name ?? job.url ?? id)
+      } catch (err) {
+        this.store.transition(id, 'failed', {
+          patch: { error: `preprocessing failed: ${(err as Error).message}` },
+          log: `batch member preprocessing failed: ${(err as Error).message}`,
+          level: 'error',
+        })
+      }
+    }
+
+    if (ready.length === 0) return
+
+    for (const r of ready) this.store.transition(r.id, 'ingesting', { log: 'batch: combined ingest' })
+    const attempt = this.store.incrementAttempts(ready[0]!.id)
+    for (const r of ready.slice(1)) this.store.incrementAttempts(r.id)
+
+    const lead = ready[0]!.id
+    const prompt = `ingest all of these:\n${ready.map((r) => `- ${r.artifact}`).join('\n')}`
+    this.store.log(lead, 'info', `batch combined ingest of ${ready.length} artifact(s), attempt ${attempt}`)
+
+    const res = await this.runIngest({
+      vaultRoot: this.vaultRoot,
+      prompt,
+      auth: this.auth,
+      timeoutMs: this.timeoutMs,
+      onMessage: (m) => {
+        const line = formatMessage(m)
+        if (line !== undefined) this.store.log(lead, 'info', line)
+      },
+    })
+
+    if (res.ok) {
+      // Split usage evenly so aggregate dashboard totals aren't multiplied by batch size;
+      // the remainder lands on the lead member.
+      const n = ready.length
+      const perIn = Math.floor(res.usage.tokensIn / n)
+      const perOut = Math.floor(res.usage.tokensOut / n)
+      ready.forEach((r, i) => {
+        this.store.transition(r.id, 'done', {
+          patch: {
+            tokensIn: perIn + (i === 0 ? res.usage.tokensIn - perIn * n : 0),
+            tokensOut: perOut + (i === 0 ? res.usage.tokensOut - perOut * n : 0),
+            costUsd: res.usage.costUsd / n,
+          },
+          log: `batch ingest complete (member ${i + 1}/${n}, ${res.numTurns} turns)`,
+        })
+      })
+      await this.batchCommit(ready.map((r) => r.id), names)
+      const note = await this.refreshHotCache(this.vaultRoot)
+      this.store.log(lead, 'info', note)
+      return
+    }
+
+    const outcome = classifyFailure(res)
+    for (const r of ready) {
+      this.store.transition(r.id, 'failed', {
+        patch: { error: res.error ?? 'batch ingest failed' },
+        log: `batch ingest failed (${outcome}): ${res.error ?? 'unknown error'}`,
+        level: 'error',
+      })
+    }
+    const requeue = (logLine: string): void => {
+      for (const r of ready) this.store.transition(r.id, 'queued', { log: logLine })
+      this.pendingBatches.push({ batchId: unit.batchId, memberIds: ready.map((r) => r.id) })
+    }
+    if (outcome === 'rate_limit') {
+      for (const r of ready) this.store.decrementAttempts(r.id)
+      requeue('batch requeued — will retry after the usage-limit pause')
+      this.pauseForRateLimit(lead)
+      return
+    }
+    if (outcome === 'transient' && attempt <= this.maxRetries) {
+      requeue(`batch retry ${attempt}/${this.maxRetries} after transient error`)
+      return
+    }
+    this.store.log(
+      lead,
+      'error',
+      outcome === 'transient' ? `batch gave up after ${attempt} attempt(s)` : 'batch permanent failure — not retried',
+    )
+  }
+
+  /** One commit for a whole batch; every member is attributed the same committed pages. */
+  private async batchCommit(memberIds: string[], names: string[]): Promise<void> {
+    const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
+    try {
+      const result = await this.commitMutex.runExclusive(() => this.commit(this.vaultRoot, `ingest: ${label}`))
+      if (result.committed) {
+        for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
+        this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)
+      } else {
+        this.store.log(memberIds[0]!, 'info', `not committed: ${result.note ?? 'no changes'}`)
+      }
+    } catch (err) {
+      this.store.log(memberIds[0]!, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
     }
   }
 

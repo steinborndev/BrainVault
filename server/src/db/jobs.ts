@@ -213,13 +213,32 @@ export class JobStore {
    */
   claimNextQueued(): JobRow | undefined {
     const claim = this.db.transaction((): JobRow | undefined => {
+      // Batch members (batch_id set) are NEVER claimed individually — the batch
+      // coordinator drives them as a unit so they share one combined ingest run
+      // (SPEC.md §4.1). Only standalone jobs are claimed here.
       const next = this.db
-        .prepare("SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1")
+        .prepare("SELECT id FROM jobs WHERE status = 'queued' AND batch_id IS NULL ORDER BY created_at LIMIT 1")
         .get() as { id: string } | undefined
       if (next === undefined) return undefined
       return this.transition(next.id, 'preprocessing', { log: 'claimed by worker' })
     })
     return claim()
+  }
+
+  /** Queued batch members grouped by batch_id — for reconstructing pending batches after a restart. */
+  queuedBatches(): Array<{ batchId: string; memberIds: string[] }> {
+    const rows = this.db
+      .prepare(
+        "SELECT batch_id, id FROM jobs WHERE status = 'queued' AND batch_id IS NOT NULL ORDER BY created_at",
+      )
+      .all() as Array<{ batch_id: string; id: string }>
+    const byBatch = new Map<string, string[]>()
+    for (const r of rows) {
+      const list = byBatch.get(r.batch_id) ?? []
+      list.push(r.id)
+      byBatch.set(r.batch_id, list)
+    }
+    return [...byBatch.entries()].map(([batchId, memberIds]) => ({ batchId, memberIds }))
   }
 
   /**

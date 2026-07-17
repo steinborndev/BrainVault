@@ -15,6 +15,7 @@ import path from 'node:path'
 import { ulid } from 'ulid'
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
+import type { BatchItem } from '../../pipeline/queue.js'
 import { isShortcut, readShortcutUrl } from '../../pipeline/shortcut.js'
 
 interface EnqueuedRef {
@@ -38,10 +39,8 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
     const enqueued: EnqueuedRef[] = []
 
     if (req.isMultipart()) {
-      // Multiple files → one batch so the agent can cross-reference them (SPEC.md §4.1).
-      const parts = req.files()
       const staged: Array<{ tempPath: string; name: string }> = []
-      for await (const part of parts) {
+      for await (const part of req.files()) {
         const name = part.filename || `upload-${ulid()}`
         const tempPath = path.join(stagingDir(), `${ulid()}-${path.basename(name)}`)
         await fs.promises.writeFile(tempPath, await part.toBuffer())
@@ -50,29 +49,43 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
       if (staged.length === 0) {
         return reply.code(400).send({ error: 'multipart request contained no files' })
       }
-      const batchId = staged.length > 1 ? ulid() : undefined
-      for (const { tempPath, name } of staged) {
-        try {
-          if (isShortcut(name)) {
-            const url = readShortcutUrl(tempPath)
-            if (url) {
-              const { job } = queue.enqueueUrl({ url, source: 'drop', ...(batchId ? { batchId } : {}) })
-              enqueued.push({ id: job.id, name, status: job.status })
-              continue
-            }
-          }
-          const { job, duplicateOf } = await queue.enqueueFile({
-            sourcePath: tempPath,
-            source: 'drop',
-            originalName: name,
-            ...(batchId ? { batchId } : {}),
-          })
-          enqueued.push({ id: job.id, name, status: job.status, ...(duplicateOf ? { duplicateOf } : {}) })
-        } finally {
-          fs.rmSync(tempPath, { force: true })
+      try {
+        // A .url/.webloc becomes a URL item; everything else is a file item.
+        const items: BatchItem[] = staged.map(({ tempPath, name }) => {
+          const url = isShortcut(name) ? readShortcutUrl(tempPath) : undefined
+          return url ? { kind: 'url', url } : { kind: 'file', sourcePath: tempPath, originalName: name }
+        })
+
+        // Multiple files → one batch: preprocess each, then a single combined run (SPEC.md §4.1).
+        if (items.length > 1) {
+          const { batchId, jobs } = await queue.enqueueBatch(items, 'drop')
+          jobs.forEach((r, i) =>
+            enqueued.push({
+              id: r.job.id,
+              name: staged[i]!.name,
+              status: r.job.status,
+              ...(r.duplicateOf ? { duplicateOf: r.duplicateOf } : {}),
+            }),
+          )
+          return reply.code(202).send({ batchId, jobs: enqueued })
         }
+
+        const only = items[0]!
+        if (only.kind === 'url') {
+          const { job } = queue.enqueueUrl({ url: only.url, source: 'drop' })
+          enqueued.push({ id: job.id, name: staged[0]!.name, status: job.status })
+        } else {
+          const { job, duplicateOf } = await queue.enqueueFile({
+            sourcePath: only.sourcePath,
+            source: 'drop',
+            originalName: only.originalName ?? staged[0]!.name,
+          })
+          enqueued.push({ id: job.id, name: staged[0]!.name, status: job.status, ...(duplicateOf ? { duplicateOf } : {}) })
+        }
+        return reply.code(202).send({ jobs: enqueued })
+      } finally {
+        for (const { tempPath } of staged) fs.rmSync(tempPath, { force: true })
       }
-      return reply.code(202).send({ batchId, jobs: enqueued })
     }
 
     // JSON body: a pasted URL or pasted text (SPEC.md §4.1).

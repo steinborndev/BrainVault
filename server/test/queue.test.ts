@@ -252,6 +252,97 @@ describe('rate-limit pause', () => {
   })
 })
 
+describe('batching', () => {
+  it('preprocesses members individually then runs ONE combined ingest', async () => {
+    const prompts: string[] = []
+    let runs = 0
+    const q = makeQueue({
+      runIngest: async (o) => {
+        runs++
+        prompts.push(o.prompt)
+        return okResult()
+      },
+    })
+    q.start()
+    const a = writeSource('a.md', 'alpha')
+    const b = writeSource('b.md', 'bravo')
+    const { batchId, jobs } = await q.enqueueBatch(
+      [
+        { kind: 'file', sourcePath: a },
+        { kind: 'file', sourcePath: b },
+      ],
+      'drop',
+    )
+    await q.onIdle()
+
+    expect(runs).toBe(1) // one combined run, not one per file
+    expect(prompts[0]).toContain('ingest all of these')
+    expect(prompts[0]).toContain('.raw/')
+    for (const r of jobs) {
+      const job = store.getOrThrow(r.job.id)
+      expect(job.status).toBe('done')
+      expect(job.batch_id).toBe(batchId)
+    }
+    expect(commitCalls).toHaveLength(1) // one commit for the whole batch
+  })
+
+  it('defers an unsupported member without sinking the batch', async () => {
+    let runs = 0
+    const q = makeQueue({ runIngest: async () => (runs++, okResult()) })
+    q.start()
+    const a = writeSource('a.md', 'alpha')
+    const mp3 = writeSource('song.mp3', 'ID3 audio')
+    const { jobs } = await q.enqueueBatch(
+      [
+        { kind: 'file', sourcePath: a },
+        { kind: 'file', sourcePath: mp3 },
+      ],
+      'drop',
+    )
+    await q.onIdle()
+    expect(runs).toBe(1)
+    const statuses = jobs.map((r) => store.getOrThrow(r.job.id).status).sort()
+    expect(statuses).toEqual(['deferred', 'done'])
+  })
+
+  it('retries a transient batch failure then succeeds', async () => {
+    let n = 0
+    const q = makeQueue({ runIngest: async () => (n++ === 0 ? failResult('ETIMEDOUT') : okResult()) })
+    q.start()
+    const a = writeSource('a.md', 'alpha')
+    const b = writeSource('b.md', 'bravo')
+    const { jobs } = await q.enqueueBatch(
+      [
+        { kind: 'file', sourcePath: a },
+        { kind: 'file', sourcePath: b },
+      ],
+      'drop',
+    )
+    await q.onIdle()
+    expect(n).toBe(2)
+    for (const r of jobs) expect(store.getOrThrow(r.job.id).status).toBe('done')
+  })
+
+  it('splits usage across members so aggregate totals are not inflated', async () => {
+    const q = makeQueue({
+      runIngest: async () => okResult({ usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.02 } }),
+    })
+    q.start()
+    const a = writeSource('a.md', 'alpha')
+    const b = writeSource('b.md', 'bravo')
+    const { jobs } = await q.enqueueBatch(
+      [
+        { kind: 'file', sourcePath: a },
+        { kind: 'file', sourcePath: b },
+      ],
+      'drop',
+    )
+    await q.onIdle()
+    const totalIn = jobs.reduce((s, r) => s + (store.getOrThrow(r.job.id).tokens_in ?? 0), 0)
+    expect(totalIn).toBe(100) // 50 + 50, not 200
+  })
+})
+
 describe('concurrency', () => {
   it('runs at most `concurrency` ingests at once and completes all', async () => {
     let inFlight = 0
