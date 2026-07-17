@@ -31,10 +31,11 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 
 ## 3. Frontend: Query/Chat tab (SPEC.md §6.3)
 
-- [ ] Replace `ChatStub`: chat UI against `/query`. Streaming answer, markdown-rendered.
-- [ ] **Citations as clickable chips** — obsidian:// deep-link + copy fallback (reuse `PageLink`) + inline page preview on hover/expand. **This is the DoD.**
-- [ ] Multiple named sessions (list/switch/rename/new/delete); session persistence via the sessions API.
-- [ ] "Session in Vault sichern" button → `POST /sessions/:id/save`; show the resulting page link.
+- [x] Replace `ChatStub` (`tabs/Chat.tsx`): chat UI against `/query`, markdown-rendered answers. (Non-streaming for now; token streaming later.)
+- [x] **Citations as clickable chips** — resolved pages via `PageLink` (obsidian:// + copy fallback); unresolved links render as dashed plain-text chips. **DoD — verified live** (see Findings).
+- [x] Multiple named sessions (list/switch/rename/new/delete) via the sessions API; context preserved across follow-ups (SDK resume).
+- [ ] "Session in Vault sichern" button → `POST /sessions/:id/save` (needs the save endpoint, §1). Not built yet.
+- [ ] Inline page **preview** on a citation chip (hover/expand) — deferred polish; the deep-link + copy path work now.
 
 ## 4. Frontend: Wartung tab (SPEC.md §6.4)
 
@@ -59,4 +60,11 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 
 ## Findings
 
-- (M4 findings go here)
+### Chat DoD verified live (2026-07-17)
+
+- Real read-only query ("Was weißt du über Risotto?") → answer in **26 s**, **all 5 `[[…]]` citations resolved to real vault pages** (`wiki/concepts/Risotto.md`, `wiki/sources/Pumpkin Risotto Recipe (chefkoch.de).md`, …), session created + persisted (user+assistant messages), `sdk_session_id` stored for resume. authMode oauth, usage $0.43 (267k cache-heavy input tokens).
+- **Read-only guarantee confirmed:** the vault working tree carried no query-authored change. The query ran at 22:40; the only dirty vault files (`.raw/.manifest.json` mtime 21:47, `.obsidian/*`) predate it by ~1 h — the sandbox `allowWrite: []` blocked any vault write, as designed.
+
+### Residual (belongs to ingest, not chat) — `.raw/.manifest.json` left uncommitted
+
+The `wiki-ingest` skill maintains `.raw/.manifest.json` (its delta tracker), but the per-ingest commit scoping (M2 F4) stages only `.raw/<job-id>` + `.vault-meta` + written wiki paths — **not `.raw/.manifest.json`**. So it accumulates as an uncommitted working-tree change after every ingest. Harmless (the manifest is regenerable, not vault knowledge) but it keeps `git status` permanently dirty. **Fix candidate for M5 hardening:** add `.raw/.manifest.json` to the ingest commit pathspec (BOOKKEEPING_PATHS in queue.ts), or `.gitignore` it in the vault. Noted here; not an M4 blocker.

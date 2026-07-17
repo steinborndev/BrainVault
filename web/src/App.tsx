@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useEvents } from './hooks/useEvents.ts'
 import { Overview } from './tabs/Overview.tsx'
 import { Ingestion } from './tabs/Ingestion.tsx'
-import { ChatStub, MaintenanceStub } from './tabs/Stubs.tsx'
+import { Chat } from './tabs/Chat.tsx'
+import { MaintenanceStub } from './tabs/Stubs.tsx'
 import { Icon, type IconName } from './components/Icon.tsx'
 
 type TabId = 'overview' | 'ingestion' | 'chat' | 'maintenance'
@@ -47,7 +48,7 @@ export function App(): React.ReactElement {
       <main className="content">
         {tab === 'overview' && <Overview onGoto={() => setTab('ingestion')} />}
         {tab === 'ingestion' && <Ingestion />}
-        {tab === 'chat' && <ChatStub />}
+        {tab === 'chat' && <Chat />}
         {tab === 'maintenance' && <MaintenanceStub />}
       </main>
 
