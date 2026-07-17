@@ -78,6 +78,12 @@ export interface IngestQueueOptions {
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
   /** Live-update bus; the queue signals `stats` when a commit changes vault-visible numbers. */
   readonly events?: EventBus
+  /**
+   * Commit serialization mutex. Pass a shared instance so maintenance runs (lint, research,
+   * hot-cache — M4) never interleave a commit with an ingest commit (TASKS-M4 §2: one writer).
+   * Defaults to a fresh mutex when the queue is the only writer.
+   */
+  readonly commitMutex?: Mutex
 }
 
 /** Classifies an agent failure to decide retry vs pause vs give-up. */
@@ -126,7 +132,7 @@ export class IngestQueue {
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
   private readonly events: EventBus | undefined
 
-  private readonly commitMutex = new Mutex()
+  private readonly commitMutex: Mutex
   private running = false
   private paused = false
   private inFlight = 0
@@ -154,6 +160,7 @@ export class IngestQueue {
         'hot cache is maintained by the ingest skill itself (M0 evidence); no separate refresh pass in M1')
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
     this.events = opts.events
+    this.commitMutex = opts.commitMutex ?? new Mutex()
   }
 
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and

@@ -19,12 +19,14 @@ import type { ChatStore } from '../db/chat.js'
 import type { IngestQueue } from '../pipeline/queue.js'
 import type { EventBus } from '../pipeline/events.js'
 import type { QueryRunner } from '../pipeline/query-runner.js'
+import type { MaintenanceRunner } from '../pipeline/maintenance.js'
 import { registerAuth } from './auth.js'
 import { registerHealthRoute } from './routes/health.js'
 import { registerJobsRoute } from './routes/jobs.js'
 import { registerEventsRoute } from './routes/events.js'
 import { registerStatsRoute } from './routes/stats.js'
 import { registerQueryRoute } from './routes/query.js'
+import { registerMaintenanceRoute } from './routes/maintenance.js'
 
 export interface AppContext {
   readonly config: Config
@@ -36,6 +38,8 @@ export interface AppContext {
   readonly events: EventBus
   /** Read-only query runner; injectable so tests mock it (defaults to the real SDK runner). */
   readonly runQuery?: QueryRunner
+  /** Maintenance runner (lint / autoresearch / hot-cache). */
+  readonly maintenance: MaintenanceRunner
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
 }
@@ -64,6 +68,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerEventsRoute(app, ctx)
   registerStatsRoute(app, ctx)
   registerQueryRoute(app, ctx)
+  registerMaintenanceRoute(app, ctx)
 
   await registerFrontend(app)
 

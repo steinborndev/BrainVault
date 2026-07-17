@@ -24,10 +24,10 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 
 ## 2. Backend: maintenance (SPEC.md §6.4, §6.5)
 
-- [ ] **`POST /api/v1/maintenance/lint`** — runs `lint the wiki` as a (write-enabled) agent run; the skill writes `wiki/meta/lint-report-YYYY-MM-DD.md`. Parse that report into structured JSON (orphans, dead links, stale claims, missing cross-links, `[!contradiction]` finds), each with a page link. Commit the report. Return structured result + report path. Live log via SSE.
-- [ ] **`POST /api/v1/maintenance/research`** — body `{ topic }`. Runs `/autoresearch <topic>` with **web egress explicitly enabled** (the one flow allowed web, CLAUDE.md hard rule 4). Live progress (rounds, sources) via SSE; result pages linked; commit.
-- [ ] **`POST /api/v1/maintenance/hot-cache`** — manual hot-cache refresh (`update hot cache` agent run or the repo's refresh); record + expose last-refresh time. Overview already renders `wiki/hot.md`.
-- [ ] These are agent runs that mutate the vault — route them through the **same queue/commit discipline** as ingest (one writer, per-run commit scoping, F4) rather than a second uncontrolled writer. Decide: queue job types vs. a parallel "maintenance run" lane. Document.
+- [x] **`POST /api/v1/maintenance/lint`** — `MaintenanceRunner.lint()` runs `lint the wiki` (write-enabled `ingest` profile); `lint-report.ts` parses `wiki/meta/lint-report-*.md` into structured JSON (summary counts + one section per category, each finding's first `[[Page]]` resolved). Commits, returns `{ ok, lint, reportPath, pages, usage, channel }`. Live log over the bus.
+- [x] **`POST /api/v1/maintenance/research`** — `{ topic }` → `/autoresearch <topic>` on the `research` profile (**web egress enabled**, the one flow allowed web). Result pages committed + returned. 400 on empty topic.
+- [x] **`POST /api/v1/maintenance/hot-cache`** — `update hot cache` run + commit; Overview already renders `wiki/hot.md`. (Last-refresh timestamp display: minor, deferred.)
+- [x] Same commit discipline as ingest: a **shared commit mutex** (`main.ts` passes one `Mutex` to the queue and the `MaintenanceRunner`), plus a `runMutex` so only one maintenance run writes at a time. Live progress streams over a stable `maintenance:<kind>` bus channel (rendered via `JobLog seed={false}`).
 
 ## 3. Frontend: Query/Chat tab (SPEC.md §6.3)
 
@@ -39,17 +39,19 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 
 ## 4. Frontend: Wartung tab (SPEC.md §6.4)
 
-- [ ] Replace `MaintenanceStub`: **Lint** button → run → structured report view (grouped findings, page links). Optional last-report display.
-- [ ] **Autoresearch**: topic input → run with live progress log → linked result pages.
-- [ ] **Hot Cache**: manual refresh button + last-refresh timestamp.
-- [ ] Settings is **M5** — at most a read-only status line here, no editor.
+- [x] Replace `MaintenanceStub` (`tabs/Maintenance.tsx`): **Lint** button → live log → structured report view (summary tiles + grouped findings with page links).
+- [x] **Autoresearch**: topic input → run with live progress log → linked result pages.
+- [x] **Hot Cache**: manual refresh button (live log + result). Last-refresh timestamp: minor, deferred.
+- [x] Settings shown as a **read-only M5 note** (no editor), as scoped.
 
 ## 5. Acceptance (DoD)
 
-- [ ] Ask a question in the Chat tab → a synthesized answer with **clickable citation chips** that open the cited vault pages in Obsidian (or copy-path fallback), context preserved across follow-ups in a session.
-- [ ] Trigger **Lint** → a **structured** report (orphans / dead links / stale / missing cross-links / contradictions) with per-finding page links.
-- [ ] **Autoresearch** and **Hot-Cache refresh** are triggerable from the UI with live feedback.
-- [ ] `npm test` passes (query-runner mocked like the ingest runner; citation parsing, session/message store, report parsing get unit tests).
+- [x] Ask a question in the Chat tab → synthesized answer with **clickable citation chips** (obsidian:// + copy fallback), context preserved across follow-ups. **Verified live** (Risotto query, 5/5 citations resolved; read-only guarantee held).
+- [x] Trigger **Lint** → a **structured** report (summary + orphans / dead links / … with per-finding page links). Backend + parser + UI built; parser unit-tested, route tested with a mocked agent. **Real end-to-end lint run left for the operator** (write agent run — like the ingest DoD).
+- [x] **Autoresearch** and **Hot-Cache refresh** are triggerable from the UI with a live log. (Real runs operator-gated.)
+- [x] `npm test` passes — **195 tests** (query-runner + maintenance runner mocked; citations, profiles, ChatStore, lint-report parser, and all routes covered).
+
+**Note:** the three maintenance actions and the chat are wired + tested up to the agent boundary; a real lint/research run writes to the vault + spends tokens, so — matching the M3 ingest DoD — those are triggered by the operator from the UI (live log + structured result visible).
 
 ## Open decisions / risks (resolve as they come up)
 

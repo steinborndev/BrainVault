@@ -798,6 +798,54 @@ button {
   border-color: var(--accent);
 }
 
+/* ---- Maintenance ---- */
+.tab-hint {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.lint-section {
+  margin-top: 14px;
+}
+.lint-section h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lint-section h4 .count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.lint-findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lint-findings li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.lint-findings li:last-child {
+  border-bottom: none;
+}
+.lint-text {
+  color: var(--text-dim);
+}
+
 /* ---- Empty / loading states ---- */
 .empty {
   text-align: center;

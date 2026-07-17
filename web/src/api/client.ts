@@ -14,6 +14,7 @@ import type {
   ChatMessage,
   QueryResponse,
   Citation,
+  MaintenanceResult,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -117,6 +118,21 @@ export const api = {
 
   deleteSession: (id: string): Promise<{ ok: boolean }> =>
     fetch(`${BASE}/sessions/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),
+
+  // ---- Maintenance ----
+
+  lint: (): Promise<MaintenanceResult> =>
+    fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceResult>),
+
+  hotCache: (): Promise<MaintenanceResult> =>
+    fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceResult>),
+
+  research: (topic: string): Promise<MaintenanceResult> =>
+    fetch(`${BASE}/maintenance/research`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic }),
+    }).then(json<MaintenanceResult>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

@@ -136,6 +136,39 @@ export interface QueryResponse {
   authMode: 'oauth' | 'api-key'
 }
 
+// ---- Maintenance (server/src/pipeline/lint-report.ts, maintenance.ts) ----
+
+export interface LintFinding {
+  text: string
+  page: Citation | null
+}
+
+export interface LintSection {
+  title: string
+  findings: LintFinding[]
+}
+
+export interface LintReport {
+  date: string | null
+  summary: Record<string, number>
+  sections: LintSection[]
+  totalFindings: number
+}
+
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+
+export interface MaintenanceResult {
+  ok: boolean
+  kind: MaintenanceKind
+  /** The SSE channel its live log streamed on, e.g. `maintenance:lint`. */
+  channel: string
+  pages: string[]
+  usage: { tokensIn: number; tokensOut: number; costUsd: number }
+  error?: string
+  lint?: LintReport
+  reportPath?: string
+}
+
 /** SSE event payloads (server/src/api/routes/events.ts). */
 export type BusEvent =
   | { kind: 'job'; job: Job }

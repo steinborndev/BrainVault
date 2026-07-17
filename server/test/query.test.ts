@@ -10,6 +10,7 @@ import {
 } from '../src/pipeline/permissions.js'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { ChatStore } from '../src/db/chat.js'
+import { parseLintReport } from '../src/pipeline/lint-report.js'
 
 describe('citations', () => {
   it('parses wikilink targets, stripping aliases/headings and de-duping', () => {
@@ -50,6 +51,35 @@ describe('run profiles', () => {
     expect(decidePermission(ctx('research'), 'WebFetch', { url: 'https://x' }).behavior).toBe('allow')
     // Path confinement still applies in every profile.
     expect(decidePermission(ctx('research'), 'Read', { file_path: '/etc/passwd' }).behavior).toBe('deny')
+  })
+})
+
+describe('parseLintReport', () => {
+  it('extracts summary counts, sections, and resolves each finding’s first page', () => {
+    const md = [
+      '# Lint Report: 2026-07-17',
+      '## Summary',
+      '- Pages scanned: 94',
+      '- Issues found: 3',
+      '## Orphan Pages',
+      '- [[Lonely]]: no inbound links.',
+      '- [[Also Lonely]]: no inbound links.',
+      '## Dead Links',
+      '- [[Ghost]]: referenced in [[Real Page]] but does not exist.',
+    ].join('\n')
+    const known = new Set(['real page'])
+    const report = parseLintReport(md, (label) => ({
+      label,
+      path: known.has(label.toLowerCase()) ? `wiki/concepts/${label}.md` : null,
+    }))
+
+    expect(report.date).toBe('2026-07-17')
+    expect(report.summary).toEqual({ 'Pages scanned': 94, 'Issues found': 3 })
+    expect(report.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
+    expect(report.totalFindings).toBe(3)
+    // The dead-link finding's first wikilink is [[Ghost]] (unresolved → null).
+    expect(report.sections[1]!.findings[0]!.page?.path).toBeNull()
+    expect(report.sections[1]!.findings[0]!.page?.label).toBe('Ghost')
   })
 })
 

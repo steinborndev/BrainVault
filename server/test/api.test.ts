@@ -9,8 +9,10 @@ import { JobStore } from '../src/db/jobs.js'
 import { ChatStore } from '../src/db/chat.js'
 import { IngestQueue } from '../src/pipeline/queue.js'
 import { EventBus } from '../src/pipeline/events.js'
+import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
+import { Mutex } from '../src/util/mutex.js'
 import type { QueryRunInput } from '../src/pipeline/query-runner.js'
-import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
+import type { AgentRunResult, RunAgentOptions } from '../src/pipeline/agent-runner.js'
 import { buildServer } from '../src/api/server.js'
 import type { Config } from '../src/config.js'
 import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
@@ -35,7 +37,10 @@ let store: JobStore
 let chat: ChatStore
 let queue: IngestQueue
 let events: EventBus
+let maintenance: MaintenanceRunner
 let app: FastifyInstance
+// Controllable stand-in for the maintenance agent runner (no real SDK in tests).
+let maintAgent: (opts: RunAgentOptions) => Promise<AgentRunResult>
 // A controllable stand-in for the read-only query runner (no real SDK in tests).
 let queryImpl: (input: QueryRunInput) => Promise<AgentRunResult>
 const okResult = (result: string): AgentRunResult => ({
@@ -101,12 +106,23 @@ beforeEach(async () => {
     },
   })
   queue.start()
+  maintAgent = async () =>
+    okResult('maintenance done') as AgentRunResult
+  maintenance = new MaintenanceRunner({
+    vaultRoot,
+    auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+    events,
+    commitMutex: new Mutex(),
+    runAgent: (opts) => maintAgent(opts),
+    commit: async () => ({ committed: true, hash: 'abc12345', committedPages: ['wiki/meta/lint-report-2026-07-17.md'] }),
+  })
   app = await buildServer({
     config: makeConfig(),
     store,
     chat,
     queue,
     events,
+    maintenance,
     runQuery: (input) => queryImpl(input),
     logger: false,
   })
@@ -415,5 +431,56 @@ describe('POST /api/v1/query + sessions', () => {
       body: JSON.stringify({ question: '  ' }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/v1/maintenance', () => {
+  it('runs lint and returns a structured, parsed report', async () => {
+    // The lint agent writes a report file; the runner reads + parses it.
+    maintAgent = async () => {
+      fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
+      fs.writeFileSync(
+        path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-07-17.md'),
+        [
+          '# Lint Report: 2026-07-17',
+          '## Summary',
+          '- Pages scanned: 94',
+          '- Issues found: 2',
+          '## Orphan Pages',
+          '- [[Lonely Page]]: no inbound links.',
+          '## Dead Links',
+          '- [[Ghost]]: referenced in [[Some Page]] but does not exist.',
+        ].join('\n'),
+      )
+      return okResult('lint done')
+    }
+
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/lint`, { method: 'POST' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      ok: boolean
+      channel: string
+      lint?: { summary: Record<string, number>; sections: Array<{ title: string; findings: unknown[] }>; totalFindings: number }
+      reportPath?: string
+    }
+    expect(body.ok).toBe(true)
+    expect(body.channel).toBe('maintenance:lint')
+    expect(body.lint?.summary['Pages scanned']).toBe(94)
+    expect(body.lint?.totalFindings).toBe(2)
+    expect(body.lint?.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
+    expect(body.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
+  })
+
+  it('research requires a topic; hot-cache runs', async () => {
+    const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: '  ' }),
+    })
+    expect(bad.status).toBe(400)
+
+    const hot = await fetch(`${baseUrl}/api/v1/maintenance/hot-cache`, { method: 'POST' })
+    expect(hot.status).toBe(200)
+    expect(((await hot.json()) as { ok: boolean }).ok).toBe(true)
   })
 })
