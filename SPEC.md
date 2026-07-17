@@ -40,7 +40,7 @@ Alle Komponenten laufen innerhalb von WSL2 (empfohlen: Ubuntu 24.04). Der Browse
 ```
 Windows 11
 ├── Browser  ──────────────────────────► http://localhost:8420  (Dashboard)
-├── Watch-Ordner (z. B. D:\inbox)  ───► in WSL sichtbar als /mnt/d/inbox
+├── Watch-Ordner (z. B. C:\inbox)  ───► in WSL sichtbar als /mnt/c/inbox
 └── WSL2 (Ubuntu)
     ├── Vault-Ordner  ~/vault/            (claude-obsidian, git-initialisiert)
     │   ├── wiki/  (index.md, hot.md, log.md, concepts/, entities/, sources/, meta/)
@@ -56,7 +56,7 @@ Windows 11
     └── Obsidian für Windows öffnet den Vault via \\wsl$\Ubuntu\home\<user>\vault
 ```
 
-**Hinweis Obsidian + WSL:** Der Vault liegt im WSL-Dateisystem (Performance, Locking-Semantik). Obsidian unter Windows öffnet ihn über den `\\wsl$`-Pfad. Alternative, falls der `\\wsl$`-Zugriff in der Praxis zu träge ist: Vault unter `/mnt/d/vault` (Windows-Dateisystem) — dann muss die Locking-Robustheit von `wiki-lock.sh` auf drvfs verifiziert werden (siehe Risiken, Abschnitt 11).
+**Hinweis Obsidian + WSL (korrigiert nach M0-Befund):** Der Vault liegt im WSL-Dateisystem (Performance, Locking-Semantik). **Obsidian unter Windows kann einen WSL-Vault über `\\wsl$` nicht öffnen** — es scheitert beim Start mit `EISDIR … watch` (der Datei-Watcher kann Verzeichnisse über die 9p-Freigabe nicht überwachen; von Obsidian als won't-fix eingestuft). Nicht bloß „träge", sondern funktionsunfähig. **Gewählte Lösung: Obsidian läuft als Linux-App *innerhalb* von WSL via WSLg** und öffnet `~/vault` als lokalen Pfad; der Vault bleibt auf ext4, der Service behält volle Geschwindigkeit. (Verworfene Alternative: Vault auf `/mnt/c/vault` mit dem nativen Windows-Obsidian — würde jedem Agent-Run und git-Commit den 20–65×-drvfs-Aufschlag aufbürden. Die frühere Sorge um `wiki-lock.sh` auf drvfs ist unbegründet: alle Locking-Tests bestehen dort.) Einschränkung von WSLg: der Graph-View ruckelt (Software-Rendering, kein `/dev/dri`); Tippen und Note-Öffnen bleiben flüssig. Details in Abschnitt 11.
 
 ### 3.1 Komponenten
 
@@ -70,7 +70,7 @@ Windows 11
 
 **Agent-Runner:** Führt pro Job einen headless Run über das Claude Agent SDK aus (`@anthropic-ai/claude-agent-sdk`, TypeScript). Konfiguration:
 
-- `cwd` = Vault-Root, `settingSources: ['project']`, damit `CLAUDE.md` des Vaults und die claude-obsidian-Skills geladen werden.
+- `cwd` = Vault-Root. Zwei Ladewege, die **nicht** dasselbe tun (korrigiert nach M0-Befund): `settingSources: ['project']` lädt die `CLAUDE.md` des Vaults, **nicht** aber seine Skills — der claude-obsidian-Vault ist ein Claude-Code-*Plugin* (`.claude-plugin/plugin.json`), und sein `skills/`-Ordner wird vom CLI nicht von sich aus gescannt. Zum Aktivieren der Skills (`wiki-ingest` etc.) daher zusätzlich `plugins: [{ type: 'local', path: <Vault-Root> }]` und `skills: 'all'` setzen. Ohne diesen Plugin-Ladeweg fällt der Agent auf manuelles Lesen von `SKILL.md` zurück und improvisiert (in M0 gemessen: mit Plugin-Ladeweg 143→55 Turns, 12,7→5,4 Mio. Input-Tokens, 13→15 Seiten).
 - Prompt pro Job: `ingest .raw/<job-id>/<datei>` (bzw. Batch: `ingest all of these` mit Dateiliste), ergänzt um eine feste System-Prompt-Erweiterung, die Vollautomatik erzwingt: keine Rückfragen stellen, bei Ambiguität dokumentierte Default-Entscheidung treffen und im Log vermerken. Zusätzliche Sprachregel: Alle Wiki-Inhalte (Seitennamen, Konzeptbezeichnungen, Zusammenfassungen, Index-Einträge) werden auf Englisch verfasst, unabhängig von der Quellsprache; wörtliche Zitate bleiben in Originalsprache mit Sprachvermerk. Vor dem Anlegen neuer Konzept-Seiten wird gegen bestehende englische Bezeichnungen geprüft (verhindert de/en-Duplikate wie "Zinseszins" neben "Compound Interest").
 - `permissionMode`: automatisches Akzeptieren von Edits innerhalb des Vault-Pfads; Bash-Whitelist auf die claude-obsidian-Skripte (`scripts/*.sh`) beschränkt. Kein Netzwerkzugriff im Ingest-Run (Web-Egress nur im Autoresearch-Flow, dort explizit erlaubt).
 - Streaming-Messages des SDK werden als Job-Log in SQLite persistiert und via SSE live ans Dashboard gereicht.
@@ -98,7 +98,7 @@ Windows 11
 
 ### 4.2 Watch-Ordner
 
-- Konfigurierbarer Pfad (Default `/mnt/d/inbox`, im Dashboard änderbar; mehrere Ordner in v1.1 denkbar).
+- Konfigurierbarer Pfad (Default `/mnt/c/inbox` — **`/mnt/d` existiert auf der Zielmaschine nicht**, verfügbar sind C/M/T; korrigiert nach M0-Befund. Im Dashboard änderbar; mehrere Ordner in v1.1 denkbar).
 - Verhalten wie 4.1, zusätzlich: Dateien, die innerhalb von 60 s gemeinsam eintreffen, werden zu einem Batch gebündelt (typischer Fall: Nutzer kopiert einen Schwung Dateien).
 - Sonderfall `.md`-Dateien aus dem Obsidian Web Clipper: werden als Web-Quelle behandelt (Frontmatter-URL wird ausgewertet).
 - Nicht unterstützte Typen (v1: Audio/Video, Archive, ausführbare Dateien): Verschieben nach `.raw/deferred/`, Job-Status `deferred`, sichtbare Markierung im Dashboard. Archive (`.zip`) werden **nicht** automatisch entpackt (Sicherheitsentscheidung v1).
@@ -168,7 +168,7 @@ GET/PUT /api/v1/settings            Konfiguration
 |---|---|---|
 | Laufzeit | Node.js ≥ 20 LTS in WSL2 (Ubuntu 24.04) | |
 | Backend | TypeScript, Fastify, better-sqlite3, chokidar, zod | ein Prozess, systemd-user-Service |
-| Agent | `@anthropic-ai/claude-agent-sdk` (TypeScript) | headless Runs, `settingSources: ['project']`, bundelt das Claude-Code-Binary; separate Claude-Code-Installation für manuelle Nutzung im Vault weiterhin möglich |
+| Agent | `@anthropic-ai/claude-agent-sdk` (TypeScript) | headless Runs, `settingSources: ['project']` **+ `plugins`/`skills`** (Vault als lokales Plugin laden, damit die Skills verfügbar sind — siehe 3.1), bundelt das Claude-Code-Binary; separate Claude-Code-Installation für manuelle Nutzung im Vault weiterhin möglich |
 | Frontend | React + Vite + TypeScript, TanStack Query, SSE | responsiv von Anfang an (Mobile-Viewports), PWA-fähig gebaut (Manifest + installierbar), kein UI-Framework-Zwang |
 | Vault | claude-obsidian v1.9.2, Generic-Modus | via `git clone` + `bash bin/setup-vault.sh` in WSL |
 | Preprocessing | poppler-utils, ocrmypdf/tesseract (deu+eng), pandoc, defuddle-cli, exiftool | apt/npm/pip in WSL |
@@ -244,7 +244,7 @@ Der Vault selbst bleibt die einzige Wahrheit für Wissen; SQLite hält ausschlie
 
 ## 11. Risiken und offene Punkte
 
-1. **Obsidian-Performance über `\\wsl$`:** Bei großen Vaults kann der 9p-Dateizugriff träge sein. Mitigation: früh testen (M0); Fallback Vault auf `/mnt/d/` mit Locking-Verifikation, oder Obsidian in WSLg.
+1. **Obsidian über `\\wsl$`: GELÖST in M0 (Befund korrigiert die ursprüngliche Annahme).** Erwartet wurde 9p-*Trägheit*; tatsächlich **öffnet Obsidian für Windows den WSL-Vault gar nicht** (`EISDIR … watch`, won't-fix). Gewählte Lösung: **Obsidian in WSLg** (Linux-App in WSL, Vault bleibt auf ext4). Verbleibende Einschränkung: Graph-View ruckelt (WSLg-Software-Rendering), Tippen/Öffnen flüssig — kein Dateisystem-Problem, per 249-Notes-Test verifiziert. Die drvfs-Fallback-Sorge um `wiki-lock.sh` ist erledigt: Locking besteht dort alle Tests.
 2. **Skill-Determinismus bei Vollautomatik:** Der ingest-Skill ist auf interaktive Nutzung ausgelegt und kann Rückfragen stellen. Mitigation: System-Prompt-Erweiterung "keine Rückfragen, Defaults dokumentieren"; in M1 gegen reale Quellen validieren und ggf. einen dünnen Auto-Ingest-Wrapper-Skill ins Vault-Repo legen.
 3. **Nutzungslimits/Kosten:** Im Abo-Modus konkurriert die Vollautomatik mit interaktiver Nutzung um dieselben Limits; im API-Key-Modus entstehen echte Kosten. Mitigation: Rate-Limit-Pause mit Auto-Resume (7.1), Token-Verbrauch pro Job sichtbar, konfigurierbares Tagesbudget (Jobs/Tag im Abo-Modus, USD im API-Modus; Queue pausiert bei Überschreitung).
 4. **Repo-Weiterentwicklung:** claude-obsidian entwickelt sich schnell (v1.7→v1.9 in Monaten). Mitigation: Vault als Fork/Pin auf getesteter Version; Upgrades bewusst.
