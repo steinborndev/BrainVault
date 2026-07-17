@@ -20,3 +20,13 @@ data/
 
 # Test source documents (not ours to commit; CLAUDE.md: no generated artifacts)
 *.pdf
+*.docx
+*.pptx
+*.xlsx
+*.url
+*.URL
+*.webloc
+# Images only at the repo root are test drops; web/ PWA assets stay tracked.
+/*.jpg
+/*.jpeg
+/*.JPG
