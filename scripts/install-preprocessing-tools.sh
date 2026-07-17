@@ -20,9 +20,10 @@ echo "==> Python extractors (pip, user site)"
 # python-pptx / openpyxl / odfpy back scripts/extract-office.py for pptx/xlsx/odf.
 python3 -m pip install --user --upgrade python-pptx openpyxl odfpy
 
-echo "==> defuddle-cli (npm, for URL/web extraction)"
+echo "==> defuddle (npm, for URL/web extraction)"
 # Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
-npm install -g defuddle-cli
+# Ships the `defuddle` binary (the old `defuddle-cli` package merged into it).
+npm install -g defuddle
 
 echo "==> Verifying"
 missing=0

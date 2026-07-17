@@ -1,0 +1,245 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
+import { JobStore } from '../src/db/jobs.js'
+import { IngestQueue, classifyFailure, guessType, type IngestRunner } from '../src/pipeline/queue.js'
+import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
+import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+
+const NO_TOOLS: ToolAvailability = {
+  pdftotext: false,
+  pdfinfo: false,
+  ocrmypdf: false,
+  pandoc: false,
+  python3: false,
+  exiftool: false,
+  defuddle: false,
+}
+
+function okResult(over: Partial<AgentRunResult> = {}): AgentRunResult {
+  return {
+    ok: true,
+    result: 'ingest done',
+    usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.01 },
+    durationMs: 1000,
+    numTurns: 5,
+    sessionId: 's1',
+    timedOut: false,
+    ...over,
+  }
+}
+function failResult(error: string, over: Partial<AgentRunResult> = {}): AgentRunResult {
+  return {
+    ok: false,
+    result: '',
+    usage: { tokensIn: 5, tokensOut: 0, costUsd: 0 },
+    durationMs: 100,
+    numTurns: 1,
+    sessionId: 's1',
+    timedOut: false,
+    error,
+    ...over,
+  }
+}
+
+let db: Db
+let store: JobStore
+let vaultRoot: string
+let srcDir: string
+let commitCalls: string[]
+let pausedTimers: Array<() => void>
+
+beforeEach(() => {
+  db = openDb(MEMORY_DB)
+  store = new JobStore(db)
+  vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'))
+  srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'src-'))
+  commitCalls = []
+  pausedTimers = []
+})
+afterEach(() => {
+  fs.rmSync(vaultRoot, { recursive: true, force: true })
+  fs.rmSync(srcDir, { recursive: true, force: true })
+})
+
+function writeSource(name: string, content = 'hello'): string {
+  const p = path.join(srcDir, name)
+  fs.writeFileSync(p, content)
+  return p
+}
+
+interface QueueOverrides {
+  runIngest?: IngestRunner
+  concurrency?: number
+  maxRetries?: number
+}
+
+function makeQueue(over: QueueOverrides = {}): IngestQueue {
+  return new IngestQueue({
+    store,
+    vaultRoot,
+    auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+    concurrency: over.concurrency ?? 2,
+    maxRetries: over.maxRetries ?? 2,
+    detectToolsFn: async () => NO_TOOLS,
+    commit: async (_root, message) => {
+      commitCalls.push(message)
+      return { committed: true, hash: 'abcd1234ef' }
+    },
+    listChangedPages: async () => ['wiki/concepts/Foo.md'],
+    refreshHotCache: async () => 'hot cache noted',
+    setTimeoutFn: (fn) => void pausedTimers.push(fn),
+    runIngest: over.runIngest ?? (async () => okResult()),
+  })
+}
+
+describe('pure helpers', () => {
+  it('guessType maps extensions', () => {
+    expect(guessType('a.pdf')).toBe('pdf')
+    expect(guessType('a.docx')).toBe('office')
+    expect(guessType('a.png')).toBe('image')
+    expect(guessType('a.mp3')).toBe('av')
+    expect(guessType('a.zip')).toBe('other')
+    expect(guessType('a.md')).toBe('text')
+  })
+  it('classifyFailure distinguishes rate-limit, transient and permanent', () => {
+    expect(classifyFailure(failResult('rate limit exceeded (429)'))).toBe('rate_limit')
+    expect(classifyFailure(failResult('fetch failed ECONNRESET'))).toBe('transient')
+    expect(classifyFailure(okResult({ ok: false, timedOut: true }))).toBe('transient')
+    expect(classifyFailure(failResult('run consumed zero tokens — auth failure'))).toBe('permanent')
+  })
+})
+
+describe('happy path', () => {
+  it('drives a text file to done, commits, records pages/tokens, and persists the stream', async () => {
+    const messages: SDKMessage[] = []
+    const runIngest: IngestRunner = async (opts) => {
+      const m = { type: 'assistant', message: { content: [{ type: 'text', text: 'working' }] } } as unknown as SDKMessage
+      messages.push(m)
+      opts.onMessage(m)
+      return okResult()
+    }
+    const q = makeQueue({ runIngest })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+
+    const done = store.getOrThrow(job.id)
+    expect(done.status).toBe('done')
+    expect(done.type).toBe('text')
+    expect(done.tokens_in).toBe(100)
+    expect(JSON.parse(done.created_pages!)).toEqual(['wiki/concepts/Foo.md'])
+    expect(commitCalls).toEqual(['ingest: note.md'])
+    const logMessages = store.logs(job.id).map((l) => l.message)
+    expect(logMessages.some((m) => m.includes('working'))).toBe(true)
+    expect(logMessages.some((m) => m.includes('committed abcd1234'))).toBe(true)
+    expect(logMessages.some((m) => m.includes('hot cache noted'))).toBe(true)
+  })
+
+  it('skips ingest for a duplicate', async () => {
+    let runs = 0
+    const q = makeQueue({ runIngest: async () => (runs++, okResult()) })
+    q.start()
+    const src = writeSource('dup.md', 'same bytes')
+    await q.enqueueFile({ sourcePath: src, source: 'drop' })
+    const second = await q.enqueueFile({ sourcePath: src, source: 'watch' })
+    await q.onIdle()
+    expect(second.job.status).toBe('duplicate')
+    expect(runs).toBe(1)
+  })
+})
+
+describe('deferred', () => {
+  it('defers audio and moves the original to .raw/deferred/', async () => {
+    let runs = 0
+    const q = makeQueue({ runIngest: async () => (runs++, okResult()) })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('talk.mp3', 'ID3'), source: 'drop' })
+    await q.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('deferred')
+    expect(runs).toBe(0)
+    expect(fs.existsSync(path.join(vaultRoot, '.raw', 'deferred', `${job.id}-talk.mp3`))).toBe(true)
+  })
+})
+
+describe('retry and failure', () => {
+  it('retries a transient failure, then succeeds', async () => {
+    let n = 0
+    const q = makeQueue({
+      runIngest: async () => (n++ === 0 ? failResult('fetch failed') : okResult()),
+    })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await q.onIdle()
+    const done = store.getOrThrow(job.id)
+    expect(done.status).toBe('done')
+    expect(done.attempts).toBe(2)
+  })
+
+  it('gives up after maxRetries on persistent transient failures', async () => {
+    const q = makeQueue({ runIngest: async () => failResult('ETIMEDOUT'), maxRetries: 2 })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await q.onIdle()
+    const failed = store.getOrThrow(job.id)
+    expect(failed.status).toBe('failed')
+    expect(failed.attempts).toBe(3) // initial + 2 retries
+  })
+
+  it('does not retry a permanent failure', async () => {
+    let n = 0
+    const q = makeQueue({ runIngest: async () => (n++, failResult('run consumed zero tokens — auth')) })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await q.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('failed')
+    expect(n).toBe(1)
+  })
+})
+
+describe('rate-limit pause', () => {
+  it('pauses on a usage-limit signal, and a pause does not burn a retry', async () => {
+    let n = 0
+    const q = makeQueue({ runIngest: async () => (n++ === 0 ? failResult('rate limit (429)') : okResult()) })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await q.onIdle() // settles once the job is re-queued and the queue paused
+
+    expect(q.isPaused).toBe(true)
+    expect(store.getOrThrow(job.id).status).toBe('queued')
+    expect(pausedTimers).toHaveLength(1)
+
+    // Fire the auto-resume timer.
+    pausedTimers[0]!()
+    await q.onIdle()
+
+    const done = store.getOrThrow(job.id)
+    expect(done.status).toBe('done')
+    expect(done.attempts).toBe(1) // the failed rate-limited attempt was refunded
+  })
+})
+
+describe('concurrency', () => {
+  it('runs at most `concurrency` ingests at once and completes all', async () => {
+    let inFlight = 0
+    let peak = 0
+    const runIngest: IngestRunner = async () => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 10))
+      inFlight--
+      return okResult()
+    }
+    const q = makeQueue({ runIngest, concurrency: 2 })
+    q.start()
+    for (let i = 0; i < 5; i++) {
+      await q.enqueueFile({ sourcePath: writeSource(`f${i}.md`, `body ${i}`), source: 'drop' })
+    }
+    await q.onIdle()
+    expect(peak).toBe(2)
+    expect(store.listByStatus('done')).toHaveLength(5)
+  })
+})

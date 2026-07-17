@@ -282,6 +282,25 @@ export class JobStore {
     return this.getOrThrow(id).attempts
   }
 
+  /**
+   * Gives back a consumed attempt. Used when a run failed for a reason that must NOT
+   * burn a retry — a usage-limit pause is the queue's fault, not the job's (SPEC.md §7.1).
+   */
+  decrementAttempts(id: string): number {
+    this.db.prepare('UPDATE jobs SET attempts = MAX(0, attempts - 1) WHERE id = ?').run(id)
+    return this.getOrThrow(id).attempts
+  }
+
+  /** Corrects the provisional type once preprocessing has detected the real one. */
+  setType(id: string, type: JobType): void {
+    this.db.prepare('UPDATE jobs SET type = ? WHERE id = ?').run(type, id)
+  }
+
+  /** Records where the job's `.raw/<job-id>/` directory lives (vault-relative). */
+  setRawPath(id: string, rawPath: string): void {
+    this.db.prepare('UPDATE jobs SET raw_path = ? WHERE id = ?').run(rawPath, id)
+  }
+
   /** Appends a line to the job's log (agent stream + pipeline events, SPEC.md §8). */
   log(id: string, level: LogLevel, message: string): void {
     this.db
