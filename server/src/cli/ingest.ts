@@ -92,6 +92,7 @@ async function main(): Promise<number> {
   const run = await runAgent({
     vaultRoot: config.vaultRoot,
     prompt,
+    auth: config.auth,
     onMessage: (message) => {
       const line = formatMessage(message)
       if (line !== undefined) console.log(line)

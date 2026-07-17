@@ -10,6 +10,7 @@
 import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { AUTOMATION_SYSTEM_PROMPT } from './system-prompt.js'
 import { decidePermission, WEB_TOOLS } from './permissions.js'
+import { CREDENTIAL_ENV_VARS, type CredentialEnvVar } from '../config.js'
 
 /** Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 15 min)"). */
 export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
@@ -39,11 +40,25 @@ export interface AgentRunResult {
   readonly timedOut: boolean
 }
 
+export interface AgentAuth {
+  readonly envVar: CredentialEnvVar
+  readonly credential: string
+}
+
 export interface RunAgentOptions {
   /** Absolute, validated vault root. Becomes the run's cwd. */
   readonly vaultRoot: string
   /** The prompt, e.g. `ingest .raw/m0-test/paper.pdf`. */
   readonly prompt: string
+  /**
+   * Credential for the spawned Claude Code process.
+   *
+   * Required: the SDK spawns a subprocess that reads the credential from ITS
+   * environment. Holding the token in our own config object does nothing for it —
+   * without this the subprocess runs unauthenticated and replies
+   * "Not logged in · Please run /login" as a *successful* result.
+   */
+  readonly auth: AgentAuth
   readonly timeoutMs?: number
   /** Sink for streamed SDK messages. M1 swaps stdout for job_logs here. */
   readonly onMessage?: (message: SDKMessage) => void
@@ -66,9 +81,29 @@ function readUsage(usage: unknown, costUsd: number): AgentUsage {
   return { tokensIn, tokensOut: num(u['output_tokens']), costUsd }
 }
 
+/**
+ * Builds the subprocess environment with exactly one credential in it.
+ *
+ * `Options.env` REPLACES the child environment rather than merging, so process.env
+ * is spread in for PATH/HOME. Both credential vars are then stripped and only the
+ * configured one re-added: config already refuses to start when both are set, but
+ * this makes it structurally impossible for a stray ANTHROPIC_API_KEY in the
+ * service's own environment to override the token we chose (SPEC.md §7.1).
+ */
+export function buildAgentEnv(
+  auth: AgentAuth,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...baseEnv }
+  for (const name of CREDENTIAL_ENV_VARS) delete env[name]
+  env[auth.envVar] = auth.credential
+  return env
+}
+
 export function buildOptions(opts: RunAgentOptions, abortController: AbortController): Options {
   return {
     cwd: opts.vaultRoot,
+    env: buildAgentEnv(opts.auth),
     // Must include 'project' or the vault's CLAUDE.md and its skills never load —
     // without it the `ingest` skill does not exist and the run is a plain chat.
     settingSources: ['project'],
@@ -130,14 +165,27 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
       if (message.type !== 'result') continue
 
       if (message.subtype === 'success') {
+        const usage = readUsage(message.usage, message.total_cost_usd)
+        // A run that spent zero tokens never reached the model, yet the SDK still
+        // reports subtype 'success' with is_error: false — an unauthenticated
+        // subprocess answers "Not logged in · Please run /login" exactly this way.
+        // Trusting the subtype alone would record a no-op as a completed ingest.
+        const reachedModel = usage.tokensIn > 0 || usage.tokensOut > 0
         result = {
-          ok: !message.is_error,
+          ok: !message.is_error && reachedModel,
           result: message.result,
-          usage: readUsage(message.usage, message.total_cost_usd),
+          usage,
           durationMs: message.duration_ms,
           numTurns: message.num_turns,
           sessionId: message.session_id,
           timedOut: false,
+          ...(reachedModel
+            ? {}
+            : {
+                error:
+                  'run consumed zero tokens — the agent never reached the model. ' +
+                  `Usually an authentication failure; the agent replied: ${JSON.stringify(message.result.trim().slice(0, 120))}`,
+              }),
         }
       } else {
         // Error subtypes (e.g. max turns, execution error) still carry usage —
