@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { formatMessage } from './format-message.js'
-import { commitVault, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { parseLintReport, type LintReport } from './lint-report.js'
 import { indexWikiPages } from './citations.js'
@@ -238,7 +238,7 @@ export class MaintenanceRunner {
       }
 
       // One commit per run, serialized against ingest commits.
-      const pathspec = [...written, '.vault-meta', '.raw/.manifest.json']
+      const pathspec = [...written, ...BOOKKEEPING_PATHS]
       const commit = await this.commitMutex.runExclusive(() =>
         this.commit(this.vaultRoot, `maintenance: ${kind}`, { pathspec }),
       )

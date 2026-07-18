@@ -13,6 +13,17 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { runTool } from './preprocess/tools.js'
 
+/**
+ * Bookkeeping paths that ride along with EVERY vault commit — script-written, regenerable,
+ * shared across runs rather than owned by one job.
+ *
+ * `.raw/.manifest.json` is load-bearing here: the wiki-ingest skill rewrites it as its delta
+ * tracker on every run. Leaving it out of the pathspec meant each ingest re-dirtied it and
+ * `git status` in the vault never came back clean (TASKS-M5 §0). Both the ingest queue and the
+ * maintenance runner stage these, so they are defined once here to stop the two drifting apart.
+ */
+export const BOOKKEEPING_PATHS = ['.vault-meta', '.raw/.manifest.json'] as const
+
 /** Commit identity, matching the M0 hand-made ingest commits. */
 const AUTHOR_ARGS = [
   '-c',

@@ -50,6 +50,7 @@ let store: JobStore
 let vaultRoot: string
 let srcDir: string
 let commitCalls: string[]
+let commitPathspecs: string[][]
 let pausedTimers: Array<() => void>
 
 beforeEach(() => {
@@ -58,6 +59,7 @@ beforeEach(() => {
   vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'))
   srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'src-'))
   commitCalls = []
+  commitPathspecs = []
   pausedTimers = []
 })
 afterEach(() => {
@@ -85,8 +87,9 @@ function makeQueue(over: QueueOverrides = {}): IngestQueue {
     concurrency: over.concurrency ?? 2,
     maxRetries: over.maxRetries ?? 2,
     detectToolsFn: async () => NO_TOOLS,
-    commit: async (_root, message) => {
+    commit: async (_root, message, opts) => {
       commitCalls.push(message)
+      commitPathspecs.push([...(opts?.pathspec ?? [])])
       return { committed: true, hash: 'abcd1234ef', committedPages: ['wiki/concepts/Foo.md'] }
     },
     refreshHotCache: async () => 'hot cache noted',
@@ -136,6 +139,20 @@ describe('happy path', () => {
     expect(logMessages.some((m) => m.includes('working'))).toBe(true)
     expect(logMessages.some((m) => m.includes('committed abcd1234'))).toBe(true)
     expect(logMessages.some((m) => m.includes('hot cache noted'))).toBe(true)
+  })
+
+  it('stages the shared bookkeeping paths so the vault does not stay dirty (regression)', async () => {
+    // wiki-ingest rewrites .raw/.manifest.json as its delta tracker on every run. It was
+    // missing from the pathspec, so each ingest left the vault permanently dirty
+    // (TASKS-M5 §0). Both bookkeeping paths must ride along with the ingest commit.
+    const q = makeQueue()
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+
+    expect(store.getOrThrow(job.id).status).toBe('done')
+    expect(commitPathspecs).toHaveLength(1)
+    expect(commitPathspecs[0]).toEqual(expect.arrayContaining(['.vault-meta', '.raw/.manifest.json']))
   })
 
   it('routes a URL job by its url, not its source channel (regression)', async () => {

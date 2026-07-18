@@ -29,13 +29,10 @@ import { sha256File } from './hash.js'
 import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
-
-/** Bookkeeping paths that ride along with every commit — script-written, regenerable, shared. */
-const BOOKKEEPING_PATHS = ['.vault-meta'] as const
 
 export type FailureClass = 'rate_limit' | 'transient' | 'permanent'
 
