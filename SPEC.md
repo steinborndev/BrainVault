@@ -75,7 +75,7 @@ Windows 11
 - `permissionMode`: automatisches Akzeptieren von Edits innerhalb des Vault-Pfads; Bash-Whitelist auf die claude-obsidian-Skripte (`scripts/*.sh`) beschränkt. Kein Netzwerkzugriff im Ingest-Run (Web-Egress nur im Autoresearch-Flow, dort explizit erlaubt).
 - Streaming-Messages des SDK werden als Job-Log in SQLite persistiert und via SSE live ans Dashboard gereicht.
 - Timeout pro Job (Default 15 min), max. 2 automatische Retries bei transienten Fehlern (API-Fehler, Timeout); danach `failed` mit Fehlerdetails.
-- Nach jedem erfolgreichen Job: Hot-Cache-Refresh anstoßen (entspricht `update hot cache`), Git-Auto-Commit (falls Obsidian-Git nicht ohnehin committet — nur einer von beiden, konfigurierbar, Default: Service committet mit Message `ingest: <quelle>`).
+- Nach jedem erfolgreichen Job: Git-Auto-Commit (falls Obsidian-Git nicht ohnehin committet — nur einer von beiden, konfigurierbar, Default: Service committet mit Message `ingest: <quelle>`). Ein separater Hot-Cache-Refresh-Pass entfällt (korrigiert nach M0-Befund): der ingest-Skill pflegt `wiki/hot.md` selbst; ein manueller Refresh bleibt über den Wartungs-Tab verfügbar (§6.4).
 
 **Query-Runner:** Analog zum Agent-Runner, aber read-only (`permissionMode` restriktiv, nur Lese-Tools + `wiki-retrieve`), gespeist aus dem Query/Chat-Tab. Sessions werden über die SDK-Session-Verwaltung gehalten, sodass Folgefragen Kontext behalten.
 
@@ -101,7 +101,7 @@ Windows 11
 - Konfigurierbarer Pfad (Default `/mnt/c/inbox` — **`/mnt/d` existiert auf der Zielmaschine nicht**, verfügbar sind C/M/T; korrigiert nach M0-Befund. Im Dashboard änderbar; mehrere Ordner in v1.1 denkbar).
 - Verhalten wie 4.1, zusätzlich: Dateien, die innerhalb von 60 s gemeinsam eintreffen, werden zu einem Batch gebündelt (typischer Fall: Nutzer kopiert einen Schwung Dateien).
 - Sonderfall `.md`-Dateien aus dem Obsidian Web Clipper: werden als Web-Quelle behandelt (Frontmatter-URL wird ausgewertet).
-- Nicht unterstützte Typen (v1: Audio/Video, Archive, ausführbare Dateien): Verschieben nach `.raw/deferred/`, Job-Status `deferred`, sichtbare Markierung im Dashboard. Archive (`.zip`) werden **nicht** automatisch entpackt (Sicherheitsentscheidung v1).
+- Nicht unterstützte Typen (v1: Audio/Video, Archive): Verschieben nach `.raw/deferred/`, Job-Status `deferred`, sichtbare Markierung im Dashboard. Archive (`.zip`) werden **nicht** automatisch entpackt (Sicherheitsentscheidung v1). **Getarnte ausführbare Dateien** (Magic-Byte-Befund widerspricht der Endung) sind dagegen ein Sicherheitsbefund, kein „wartet auf Feature": Job-Status `failed` mit klarer Fehlermeldung, kein Verschieben nach deferred (Entscheidung 2026-07-18, ersetzt die frühere Einordnung unter deferred).
 
 ---
 
@@ -111,7 +111,7 @@ Windows 11
 |---|---|---|---|
 | PDF | Extension + Magic Bytes | Text-Extraktion; bei Text-Ausbeute < 100 Zeichen/Seite: Seiten rastern + OCR | `pdftotext` (poppler), Fallback `ocrmypdf`/tesseract (deu+eng) |
 | Office (docx, pptx, xlsx) | Extension | Konvertierung nach Markdown/Plaintext | `pandoc` (docx), `python-pptx`/`openpyxl`-basierte Extraktoren aus WSL |
-| Webseite/URL | URL-Job | Abruf + Boilerplate-Entfernung nach den Egress-Hygiene-Regeln des Repos (kein `file://`, kein RFC1918, Größenlimit) | `defuddle-cli` (vom Repo als Extraktor vorgesehen), Fallback readability |
+| Webseite/URL | URL-Job | Abruf + Boilerplate-Entfernung nach den Egress-Hygiene-Regeln des Repos (kein `file://`, kein RFC1918, DNS-Pinning gegen Rebinding, Größenlimit) | `defuddle-cli` (vom Repo als Extraktor vorgesehen), Fallback: eingebauter HTML-zu-Text-Extraktor (readability als mögliche spätere Aufwertung) |
 | Bild (png, jpg, webp) | Extension + Magic Bytes | Kein lokales OCR nötig: Bild wird dem Agent-Run direkt als Anhang mitgegeben (Claude liest Bildinhalt/Screenshot-Text selbst); zusätzlich EXIF-Metadaten in `manifest.json` | Agent SDK (Bild-Input), `exiftool` |
 | Markdown/Text/Code | Extension | Durchreichen | — |
 | Audio/Video | Extension | v1: `deferred` (siehe 4.2) | später: faster-whisper oder Cloud-API, Schnittstelle: Preprocessing-Plugin |

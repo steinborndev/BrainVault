@@ -19,7 +19,7 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 - [x] **`POST /api/v1/query`** (`routes/query.ts`) — `{ question, sessionId? }`: creates/continues a session, persists the user message, runs the query-runner, persists the assistant message + citations, returns `{ sessionId, message, citations, usage, authMode }`. **First cut is request/response (non-streaming)** — see decision below. 502 on runner failure (recorded as a system message).
 - [x] **Citation extraction** (`pipeline/citations.ts`) — parse `[[Page]]`/`[[Page|Alias]]`/`[[Page#H]]`, resolve to vault-relative page paths via a `wiki/**` basename index, dedupe. Stored in `messages.citations` (JSON). Unresolved → `path: null` (plain text, never a broken link).
 - [x] **Sessions API** — `GET/POST /api/v1/sessions`, `GET/PATCH/DELETE /api/v1/sessions/:id`. `ChatStore` (`db/chat.ts`) over the existing tables + migration v2 (`sdk_session_id`, `updated_at`).
-- [ ] **Save-to-vault** — `POST /api/v1/sessions/:id/save` (the `/save` flow, write-enabled + commit). **Not built yet** (§6.3 "Session in Vault sichern").
+- [x] **Save-to-vault** — `POST /api/v1/sessions/:id/save` (the `/save` flow, write-enabled + commit). Built in M5 as a `save` kind on `MaintenanceRunner` (see TASKS-M5 §0); this box was stale.
 - [x] Streaming decision: **request/response for the first cut** (fully testable, meets the DoD "returns cited pages"); token/turn streaming layered on with the Chat UI (reusing the SSE approach). Documented in `routes/query.ts`.
 
 ## 2. Backend: maintenance (SPEC.md §6.4, §6.5)
@@ -34,8 +34,8 @@ Settings UI (§6.4 "Einstellungen") is **M5** — leave it out here (the Wartung
 - [x] Replace `ChatStub` (`tabs/Chat.tsx`): chat UI against `/query`, markdown-rendered answers. (Non-streaming for now; token streaming later.)
 - [x] **Citations as clickable chips** — resolved pages via `PageLink` (obsidian:// + copy fallback); unresolved links render as dashed plain-text chips. **DoD — verified live** (see Findings).
 - [x] Multiple named sessions (list/switch/rename/new/delete) via the sessions API; context preserved across follow-ups (SDK resume).
-- [ ] "Session in Vault sichern" button → `POST /sessions/:id/save` (needs the save endpoint, §1). Not built yet.
-- [ ] Inline page **preview** on a citation chip (hover/expand) — deferred polish; the deep-link + copy path work now.
+- [x] "Session in Vault sichern" button → `POST /sessions/:id/save`. Built in M5 with the save endpoint (TASKS-M5 §0); this box was stale.
+- [x] Inline page **preview** on a citation chip (hover/expand) — built in M5 (`GET /api/v1/pages` + `CitationChip`, TASKS-M5 §0); this box was stale.
 
 ## 4. Frontend: Wartung tab (SPEC.md §6.4)
 

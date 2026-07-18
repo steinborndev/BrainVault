@@ -31,7 +31,7 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 0. Carried over from M3/M4 (do these as part of M5 — details in TASKS-M4/M3 Findings)
 
-- [x] **Lint async rework + hard kill (BIGGEST carryover).** DONE in code on `feat/m5-maintenance-async` (see Finding F1). (a) **Hard kill:** agent runs now spawn the SDK CLI through `Options.spawnClaudeCodeProcess` in a detached process group (`pipeline/agent-spawn.ts`) and the runner escalates timeout/abort → graceful abort → group `SIGKILL` after a 5 s grace, reaping the CLI + any stuck `bash`/`python3` descendants (generalizes to ingest — it's in `runAgent`). (b) **Async/job:** `POST /maintenance/*` returns `202 {id,channel,status}` immediately; the run executes in the background; `GET /maintenance/runs/:id` polls the result; live log still streams over `maintenance:<kind>`. Frontend Wartung tab polls via `useMaintenanceRun`. Server 198 tests green (+ new `agent-spawn` group-kill test), web builds. **Still pending (user-gated):** one real agent run that forces a long `bash sleep` to confirm the detached spawner + group-SIGKILL end-to-end, and a `permprobe` re-run (permission/spawn wiring changed).
+- [x] **Lint async rework + hard kill (BIGGEST carryover).** DONE in code on `feat/m5-maintenance-async` (see Finding F1). (a) **Hard kill:** agent runs now spawn the SDK CLI through `Options.spawnClaudeCodeProcess` in a detached process group (`pipeline/agent-spawn.ts`) and the runner escalates timeout/abort → graceful abort → group `SIGKILL` after a 5 s grace, reaping the CLI + any stuck `bash`/`python3` descendants (generalizes to ingest — it's in `runAgent`). (b) **Async/job:** `POST /maintenance/*` returns `202 {id,channel,status}` immediately; the run executes in the background; `GET /maintenance/runs/:id` polls the result; live log still streams over `maintenance:<kind>`. Frontend Wartung tab polls via `useMaintenanceRun`. Server 198 tests green (+ new `agent-spawn` group-kill test), web builds. **Both follow-ups DONE:** the end-to-end kill was verified with `killprobe` (F1: 30 s timeout run, 7 descendants, none survived, ×4 reproduced) and `permprobe` re-ran PASS after the spawn/permission change.
 - [x] **`.raw/.manifest.json` commit-scoping residual.** Fixed: `BOOKKEEPING_PATHS` now includes `.raw/.manifest.json` and was moved to `pipeline/git.ts` (the shared commit module) so the ingest queue and the maintenance runner can't drift apart — maintenance had the two paths duplicated as literals. Both the single-job and batch ingest pathspecs pick it up. Regression test added (`queue.test.ts`, asserts the commit pathspec). Vault is currently clean for this file (an earlier hot-cache run swept it in); the fix stops future ingests re-dirtying it.
 - [x] **Save-to-vault** (`POST /sessions/:id/save`, SPEC §6.3). Resumes the chat's `sdk_session_id` and prompts `/save` under the **`ingest`** profile — the chat itself is read-only by design, so the save needs a write-enabled run to produce the page. Implemented as a new `save` kind on `MaintenanceRunner` rather than a separate module: it needs the same commit discipline, and sharing that runner's **run mutex is what stops a save interleaving with a lint** (two concurrent vault writers is exactly what the mutex prevents). Async like the other runs (202 + poll). 400 if the session never completed a query (nothing to resume). Chat tab gained an "In Vault sichern" button with the live log and resulting page links.
 - [x] **Autoresearch verified end-to-end with a real agent** (2026-07-18, topic: endosomal escape of lipid nanoparticles). 10 pages created + 8 updated, committed as `8b28ca0 maintenance: research`; vault 98 → 108 pages. 4.74 M in / 53.7 k out tokens, **$3.45 estimated (Abo)**. Web egress worked (5 search angles, 8 fetches, 2 paywalled and logged). Quality note: it correctly filed a *contradiction* between a Nov 2025 ACS Nano perspective and a Sept 2025 review as unresolved instead of overwriting the vault's existing claim. **Two real bugs surfaced — see F3 and F4.**
@@ -63,9 +63,9 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 4. Error paths & diagnosability (SPEC.md §10 DoD)
 
-- [ ] Failed jobs must be **diagnosable** (full error + the persisted `job_logs` stream visible in the UI — history already has a Log toggle) and **retryable** (retry endpoint exists; confirm the flow end-to-end including batch members). Add a "copy diagnostics" affordance if useful.
-- [ ] Harden the long-run/hang path from §0 (a stuck agent run must fail loudly and free the worker, not wedge it).
-- [ ] Consider a "git revert this ingest" action in history (SPEC §9 undo; v1.1 note) — optional.
+- [x] Failed jobs must be **diagnosable** (full error + the persisted `job_logs` stream visible in the UI — history already has a Log toggle) and **retryable** — verified end-to-end in the §1 WSL-restart test (retry drove `failed → queued → claimed → failed` with a clear error); batch members re-register as a pending batch on retry (`retryJob` + `reloadPendingBatches`). "Copy diagnostics" affordance: skipped as not pulling its weight — the log toggle shows the full stream.
+- [x] Harden the long-run/hang path from §0 — done and VERIFIED via `killprobe` (F1): detached process group + abort→grace→group-SIGKILL escalation, generalized in `runAgent` so it covers ingest too.
+- [ ] (deferred, optional — v1.1) "git revert this ingest" action in history (SPEC §9 undo). Architecture supports it (one commit per ingest); no UI yet.
 
 ## 5. Dockerfile + docs (SPEC.md §12.2, §10)
 
@@ -81,7 +81,7 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 - [x] After a **WSL restart**, the service is up on `127.0.0.1:8420` without manual start (verified 2026-07-18, 2 s after boot); `queued` work resumes and mid-flight work is reconciled to a retryable `failed`.
 - [x] A **failed job** shows its error + full log and can be **retried** (verified live during the restart test: retry re-entered the pipeline and produced a clear diagnosable failure).
 - [x] Settings UI reads/writes config; cost shows as "Schätzwert (Abo)" in oauth mode.
-- [x] `Dockerfile` present, docs complete. ⚠️ `docker build` itself is UNVERIFIED (no Docker in the dev WSL distro) — see §5.
+- [x] `Dockerfile` present, docs complete. `docker build` + container run were later verified (see §5 — build, guard, and PID-1 checks all passed); the earlier "UNVERIFIED" caveat here was stale.
 - [x] `npm test` passes (235); `permprobe` re-run after the spawn/permission change — `canary outside vault: blocked`.
 
 ## Findings
@@ -231,3 +231,32 @@ colons and spaces must not come back quoted, or `git add` would fail on them). 2
 Residual, accepted: while two runs genuinely overlap, a Bash-written page from either still stays
 untracked. It is visible in `git status` and committable by hand — which is what was done for the
 autoresearch synthesis page (vault commit `3988a4e`).
+
+
+---
+
+## 7. Deep review + fix wave (2026-07-18, post-M5)
+
+A systematic review (spec-compliance, server, frontend, open items) was run and its findings
+fixed on `fix/deep-review`. Highlights — details in the two `fix:` commits:
+
+- **Server:** SSRF DNS-rebinding fix (outbound fetches pinned to the validated address),
+  `/query` concurrency cap (2, then 429), usage now ACCUMULATES across attempts (retry-then-
+  success and failed batch runs no longer under-count the budget), 413 + temp cleanup for
+  over-limit uploads, a failing batch member no longer strands its siblings, watch folder
+  honours `maxUploadBytes` (SPEC §4.2), rate-limit pause honours a parseable reset time
+  (SPEC §7.1), SSE hardening, `finished_at` index (migration v4), timing-safe token compare,
+  `GET /jobs?type=` filter (SPEC §6.5), office magic-byte check un-deadened.
+- **Frontend:** SSE reconnect/visibility resync (stale-dashboard fix), bounded log store with
+  rowid-exact dedup, keyboard-accessible dropzone + client-side size pre-check, chat draft
+  restore on error, inline rename/two-step delete instead of `window.prompt`/`confirm`,
+  copy fallback for non-secure contexts, SW no longer caches errors + trims old assets +
+  reloads once on controllerchange, Overview retry button, SVG icons replace emoji.
+- **Spec updates (user-approved):** §4.2 now documents that disguised executables FAIL
+  (security finding) rather than defer; §3.1 documents that the ingest skill maintains the
+  hot cache itself (M0 evidence) — no separate refresh pass; §5 documents the built-in
+  HTML-to-text fallback actually shipped.
+
+Still deliberately open (unchanged): queue-reorder endpoint (M3 optional), git-revert button
+(v1.1), token streaming for chat, login screen (SPEC §12.1 Ausbaustufe), per-job-type model
+choice, multiple watch folders, live budget-pause trigger (unit-tested only).
