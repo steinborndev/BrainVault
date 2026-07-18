@@ -15,6 +15,7 @@
     "ingest": "tsx src/cli/ingest.ts",
     "pipeline": "tsx src/cli/pipeline.ts",
     "permprobe": "tsx src/cli/permprobe.ts",
+    "killprobe": "tsx src/cli/killprobe.ts",
     "smoke": "tsx src/cli/smoke.ts"
   },
   "dependencies": {

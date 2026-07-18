@@ -113,10 +113,27 @@ touches the permission wiring's neighbourhood → **re-run `permprobe.ts` after 
 agent run still gets `canary outside vault: blocked` (0 denials — the sandbox blocks the write
 at the kernel level: "Read-only file system"), skills invocable. Hard rule 4 intact.
 
-**Still needs a real (token-costing, user-gated) end-to-end check:** one run whose prompt
-forces a long `bash sleep`, to confirm the custom detached spawner works with the real SDK
-stream and the group-SIGKILL reaps an actual CLI-spawned grandchild. Deferred until the
-implementation lands.
+**VERIFIED end-to-end (2026-07-18) — `server/src/cli/killprobe.ts`, `npm run killprobe`.**
+A real run with a 30 s timeout, whose prompt forces a blocking `python3 -c "time.sleep(604)"`,
+returned at **32.0 s** with `timedOut: true`; **7 descendants** (CLI, bwrap, bash, python3) were
+observed while it ran and **none survived**. Reproduced identically across four runs. Before the
+fix that python3 would have kept running for its full 604 s.
+
+Two things had to be learned to make the probe work, both worth keeping:
+1. Under the `query` profile the agent **refuses** the blocking command — the read-only system
+   prompt correctly notices it contradicts a read-only wiki query. The probe therefore uses
+   `ingest`, which is also the profile the real hang occurred under. Point it at a THROWAWAY
+   vault (a copy of `.claude-plugin/` + `skills/` plus an empty `wiki/`).
+2. A bare `sleep` is rejected by the Claude Code CLI's own guard ("Blocked: standalone sleep …
+   use Monitor with an until-loop"). A blocking `python3` is both allowed and more faithful to
+   the original `bash → python3` embeddings hang.
+
+**Side effect worth knowing:** a group-SIGKILLed run leaves bubblewrap's 0-byte read-only
+bind-mount targets (`.bashrc`, `.gitconfig`, `.mcp.json`, …) plus a scaffolded `.claude/` in the
+project root, because bwrap never gets to run its own cleanup. They do not appear after a
+normally-completed run (the real vault has none after 8 ingests), they are never committed (the
+ingest pathspec is scoped), and no vault CONTENT is touched — the probe asserts `wiki/` is
+unchanged. Only a hard-killed run can leave them, and then only as untracked files.
 
 ### F2 — PRE-EXISTING BUG: the Overview's 7-day "Fehler"/"deferred" KPIs are always 0
 
