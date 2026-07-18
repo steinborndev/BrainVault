@@ -30,6 +30,7 @@ import { registerQueryRoute } from './routes/query.js'
 import { registerMaintenanceRoute } from './routes/maintenance.js'
 import { registerSettingsRoute } from './routes/settings.js'
 import { registerPagesRoute } from './routes/pages.js'
+import { registerGraphRoute } from './routes/graph.js'
 
 export interface AppContext {
   readonly config: Config
@@ -76,6 +77,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerMaintenanceRoute(app, ctx)
   registerSettingsRoute(app, ctx)
   registerPagesRoute(app, ctx)
+  registerGraphRoute(app, ctx)
 
   await registerFrontend(app)
 
