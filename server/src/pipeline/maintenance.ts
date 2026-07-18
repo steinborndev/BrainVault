@@ -28,7 +28,13 @@ import { indexWikiPages } from './citations.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+/**
+ * `save` is the chat's "Session in Vault sichern" (SPEC.md §6.3), not a Wartung-tab action — but
+ * it is the same shape: a vault-mutating agent run that must hold the same commit discipline.
+ * Sharing this runner also shares its run mutex, which is what stops a save interleaving with a
+ * lint; two concurrent vault writers is exactly what that mutex exists to prevent.
+ */
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
 
 /** Stable SSE channel id per kind, so the UI can subscribe to a run's live log. */
 export const maintenanceChannel = (kind: MaintenanceKind): string => `maintenance:${kind}`
@@ -84,6 +90,14 @@ export interface MaintenanceRun {
 /** How many finished runs to retain for polling before the oldest is evicted. */
 const RUN_HISTORY_CAP = 25
 
+/** Per-run knobs that differ between the kinds. */
+interface RunOptions {
+  /** SDK session to resume, so the run inherits a conversation (used by `save`). */
+  readonly resumeSessionId?: string
+  /** Overrides the default `maintenance: <kind>` commit subject. */
+  readonly commitMessage?: string
+}
+
 export class MaintenanceRunner {
   private readonly vaultRoot: string
   private readonly auth: AgentAuth
@@ -136,6 +150,20 @@ export class MaintenanceRunner {
     return this.start('hot-cache', 'update hot cache', 'ingest')
   }
 
+  /**
+   * Saves a chat session into the vault (SPEC.md §6.3 "Session in Vault sichern"): resumes the
+   * chat's SDK session so the agent has the conversation, then triggers the vault repo's own
+   * `/save` flow. Runs under `ingest` — write access, no web — because the chat itself is
+   * read-only by design and cannot write the page it is being asked to produce.
+   */
+  startSave(sdkSessionId: string, title?: string): MaintenanceRun {
+    const label = title?.trim() ? ` (${title.trim()})` : ''
+    return this.start('save', '/save', 'ingest', {
+      resumeSessionId: sdkSessionId,
+      commitMessage: `chat: save session${label}`,
+    })
+  }
+
   /** A tracked run by id (for the poll endpoint), or undefined once evicted. */
   getRun(id: string): MaintenanceRun | undefined {
     return this.runs.get(id)
@@ -151,7 +179,12 @@ export class MaintenanceRunner {
    * the (up to 15-min) agent work happens off the request path. Concurrent starts still
    * serialize on the run mutex; a queued one simply reports `running` until its turn.
    */
-  private start(kind: MaintenanceKind, prompt: string, profile: 'ingest' | 'research'): MaintenanceRun {
+  private start(
+    kind: MaintenanceKind,
+    prompt: string,
+    profile: 'ingest' | 'research',
+    opts: RunOptions = {},
+  ): MaintenanceRun {
     const id = randomUUID()
     const run: MaintenanceRun = {
       id,
@@ -163,7 +196,7 @@ export class MaintenanceRunner {
     this.runs.set(id, run)
     this.evictOldRuns()
     // Fire-and-forget: execute() never rejects (it records failures on the run record).
-    void this.execute(id, kind, prompt, profile)
+    void this.execute(id, kind, prompt, profile, opts)
     return run
   }
 
@@ -173,9 +206,10 @@ export class MaintenanceRunner {
     kind: MaintenanceKind,
     prompt: string,
     profile: 'ingest' | 'research',
+    opts: RunOptions = {},
   ): Promise<void> {
     try {
-      const result = await this.run(kind, prompt, profile)
+      const result = await this.run(kind, prompt, profile, opts)
       this.settle(id, result.ok ? 'done' : 'error', {
         result,
         ...(result.ok ? {} : { error: result.error ?? `${kind} failed` }),
@@ -211,6 +245,7 @@ export class MaintenanceRunner {
     kind: MaintenanceKind,
     prompt: string,
     profile: 'ingest' | 'research',
+    opts: RunOptions = {},
   ): Promise<MaintenanceResult> {
     return this.runMutex.runExclusive(async () => {
       const channel = maintenanceChannel(kind)
@@ -225,6 +260,10 @@ export class MaintenanceRunner {
         auth: this.auth,
         profile,
         timeoutMs: this.timeoutMs,
+        // A save resumes the chat's SDK session so the agent still has the conversation it is
+        // being asked to write up. The profile is applied fresh per run, so resuming a
+        // read-only chat under a write-enabled profile is what grants the save its write access.
+        ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
         onMessage: (m: SDKMessage) => {
           const line = formatMessage(m)
           if (line !== undefined) log('info', line)
@@ -240,7 +279,7 @@ export class MaintenanceRunner {
       // One commit per run, serialized against ingest commits.
       const pathspec = [...written, ...BOOKKEEPING_PATHS]
       const commit = await this.commitMutex.runExclusive(() =>
-        this.commit(this.vaultRoot, `maintenance: ${kind}`, { pathspec }),
+        this.commit(this.vaultRoot, opts.commitMessage ?? `maintenance: ${kind}`, { pathspec }),
       )
       const pages = commit.committed ? commit.committedPages : []
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')

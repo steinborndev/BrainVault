@@ -14,7 +14,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
 import type { ChatMessage, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
-import { PageLink } from '../components/PageLink.tsx'
+import { PageLinks } from '../components/PageLink.tsx'
+import { CitationChip } from '../components/CitationChip.tsx'
+import { JobLog } from '../components/JobLog.tsx'
+import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost, CostFootnote } from '../components/Cost.tsx'
@@ -57,9 +60,16 @@ export function Chat(): React.ReactElement {
     ask.mutate(q)
   }
 
+  // "Session in Vault sichern" (SPEC.md §6.3): a write-enabled agent run that resumes this
+  // chat's SDK session and triggers the vault's /save flow. Async like the maintenance runs.
+  const save = useMaintenanceRun(() => api.saveSession(activeId as string))
+  // A session must have answered at least once before there is anything to save.
+  const canSave = activeId !== null && messages.some((m) => m.role === 'assistant')
+
   const newSession = (): void => {
     setActiveId(null)
     ask.reset()
+    save.reset()
   }
 
   return (
@@ -74,7 +84,23 @@ export function Chat(): React.ReactElement {
           if (id === activeId) newSession()
           qc.invalidateQueries({ queryKey: ['sessions'] })
         }}
+        canSave={canSave}
+        saving={save.running}
+        onSave={save.start}
       />
+
+      {save.running && <JobLog jobId="maintenance:save" seed={false} />}
+      {save.error && <div className="toast err">{save.error}</div>}
+      {save.result?.ok && (
+        <div className="toast ok">
+          Session gesichert
+          {save.result.pages.length > 0 ? (
+            <PageLinks vaultName={vaultName} paths={save.result.pages} />
+          ) : (
+            <> — keine neuen Seiten.</>
+          )}
+        </div>
+      )}
 
       <div className="chat-thread" ref={threadRef}>
         {messages.length === 0 && !ask.isPending && (
@@ -142,6 +168,9 @@ function SessionBar({
   onNew,
   onRenamed,
   onDeleted,
+  canSave,
+  saving,
+  onSave,
 }: {
   sessions: Session[]
   activeId: string | null
@@ -149,6 +178,10 @@ function SessionBar({
   onNew: () => void
   onRenamed: () => void
   onDeleted: (id: string) => void
+  /** False until the session has an answer — there is nothing to write up before that. */
+  canSave: boolean
+  saving: boolean
+  onSave: () => void
 }): React.ReactElement {
   const rename = async (s: Session): Promise<void> => {
     const title = window.prompt('Session umbenennen:', s.title ?? '')
@@ -184,6 +217,18 @@ function SessionBar({
           </div>
         ))}
       </div>
+      <button
+        className="btn"
+        disabled={!canSave || saving}
+        onClick={onSave}
+        title={
+          canSave
+            ? 'Diese Session als Seite im Vault sichern'
+            : 'Erst nach der ersten Antwort verfügbar'
+        }
+      >
+        {saving ? 'Sichere…' : 'In Vault sichern'}
+      </button>
     </div>
   )
 }
@@ -201,7 +246,7 @@ function Bubble({ message, vaultName }: { message: ChatMessage; vaultName: strin
           <div className="pages">
             {citations.map((c, i) =>
               c.path ? (
-                <PageLink key={`${c.label}-${i}`} vaultName={vaultName} path={c.path} />
+                <CitationChip key={`${c.label}-${i}`} vaultName={vaultName} path={c.path} />
               ) : (
                 <span key={`${c.label}-${i}`} className="pagelink unresolved" title="Seite nicht im Vault gefunden">
                   {c.label}

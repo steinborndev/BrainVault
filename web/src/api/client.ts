@@ -17,6 +17,7 @@ import type {
   MaintenanceRun,
   SettingsResponse,
   SettingsPatch,
+  PagePreview,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -123,6 +124,14 @@ export const api = {
 
   deleteSession: (id: string): Promise<{ ok: boolean }> =>
     fetch(`${BASE}/sessions/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),
+
+  /** Raw markdown of one wiki page, for the Chat tab's inline citation preview. */
+  page: (path: string): Promise<PagePreview> =>
+    fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`).then(json<PagePreview>),
+
+  /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
+  saveSession: (id: string): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/sessions/${id}/save`, { method: 'POST' }).then(json<MaintenanceRun>),
 
   // ---- Maintenance (async: POST starts a run, GET polls its result) ----
 

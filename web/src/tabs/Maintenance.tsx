@@ -3,70 +3,19 @@
  * Hot-Cache refresh. Each triggers a vault-mutating agent run on the backend. Runs are
  * async/job-style (TASKS-M5 §0): the POST returns a run id at once, we poll its result via
  * `GET /maintenance/runs/:id`, and the live log streams over the `maintenance:<kind>` SSE
- * channel (rendered via JobLog with seeding off). Settings are M5 — read-only note for now.
+ * channel (rendered via JobLog with seeding off), plus the settings editor.
  */
 
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
-import type { LintReport, MaintenanceResult, MaintenanceRun } from '../api/types.ts'
+import type { LintReport, MaintenanceResult } from '../api/types.ts'
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
-
-interface MaintenanceRunState {
-  start: () => void
-  /** True from the POST until the polled run settles to done/error. */
-  running: boolean
-  /** The settled run (with `result`) once polling completes. */
-  run: MaintenanceRun | undefined
-  /** The final result, or undefined while running / on a start failure. */
-  result: MaintenanceResult | undefined
-  /** A start (POST) failure, or the run's own failure reason once settled. */
-  error: string | null
-}
-
-/**
- * Starts an async maintenance run and polls it to completion. `starter` may close over
- * component state (e.g. the research topic) — it is read fresh at click time.
- */
-function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): MaintenanceRunState {
-  const qc = useQueryClient()
-  const [runId, setRunId] = useState<string | null>(null)
-
-  const start = useMutation({
-    mutationFn: starter,
-    onSuccess: (run) => setRunId(run.id),
-  })
-
-  const poll = useQuery({
-    queryKey: ['maintenance-run', runId],
-    queryFn: () => api.maintenanceRun(runId as string),
-    enabled: runId !== null,
-    // Poll while the run is in flight; stop once it settles.
-    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'running' ? false : 1000),
-  })
-
-  const settled = poll.data !== undefined && poll.data.status !== 'running'
-  useEffect(() => {
-    // A settled run may have committed pages / refreshed the hot cache — refresh stats.
-    if (settled) qc.invalidateQueries({ queryKey: ['stats'] })
-  }, [settled, qc])
-
-  const running =
-    start.isPending || (runId !== null && (poll.data === undefined || poll.data.status === 'running'))
-  const startError = start.error ? (start.error as Error).message : null
-  const runError = settled && poll.data?.status === 'error' ? poll.data.error ?? 'Fehlgeschlagen' : null
-
-  return {
-    start: () => start.mutate(),
-    running,
-    run: settled ? poll.data : undefined,
-    result: settled ? poll.data?.result : undefined,
-    error: startError ?? runError,
-  }
-}
+import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { timeAgo } from '../lib/format.ts'
 
 export function Maintenance(): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
@@ -135,7 +84,16 @@ export function Maintenance(): React.ReactElement {
             {hot.running ? 'Läuft…' : 'Aktualisieren'}
           </button>
         </div>
-        <p className="tab-hint">Frischt <code>wiki/hot.md</code> auf (schnellerer Kontext für künftige Läufe).</p>
+        <p className="tab-hint">
+          Frischt <code>wiki/hot.md</code> auf (schnellerer Kontext für künftige Läufe).
+          {' '}
+          {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) — the file's mtime. */}
+          {stats.data?.hotCacheUpdatedAt ? (
+            <>Letzter Refresh: <strong title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('de-DE')}>{timeAgo(stats.data.hotCacheUpdatedAt)}</strong>.</>
+          ) : (
+            <>Noch nie aktualisiert.</>
+          )}
+        </p>
         {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
         {hot.error && <div className="toast err">{hot.error}</div>}
         {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Aktualisiert" />}
