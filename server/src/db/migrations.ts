@@ -109,7 +109,25 @@ ALTER TABLE sessions ADD COLUMN sdk_session_id TEXT;
 ALTER TABLE sessions ADD COLUMN updated_at TEXT;
 `
 
+/**
+ * v3 — backfill `finished_at` for jobs that stopped running but never got one (finding F2 in
+ * TASKS-M5). `failed`/`deferred` were excluded from the finished-stamping set, so every
+ * `finished_at`-filtered query skipped them and the Overview's 7-day "Fehler"/"deferred" KPIs
+ * read 0 even with failures present. The code fix is FINISHED_STATES in db/jobs.ts; this
+ * repairs the rows already written under the old behaviour so historical KPIs are correct too.
+ *
+ * `started_at` is the honest stamp (when the run began) and always exists for a job that
+ * reached these states; `created_at` is a last-resort fallback so the column is never left null.
+ */
+const V3 = `
+UPDATE jobs
+   SET finished_at = COALESCE(started_at, created_at)
+ WHERE status IN ('failed', 'deferred')
+   AND finished_at IS NULL;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
+  { version: 3, up: V3 },
 ]

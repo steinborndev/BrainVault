@@ -31,11 +31,33 @@ export type JobSource = 'drop' | 'watch' | 'url'
 export type JobType = 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-/** States from which no transition is legal — the job is finished, one way or another. */
+/**
+ * States from which no transition is legal (mirrors the empty rows in ALLOWED_TRANSITIONS).
+ *
+ * NOT the same thing as "the run stopped" — see FINISHED_STATES. Conflating the two is what
+ * made the dashboard's 7-day failure KPI read 0 forever (finding F2 in TASKS-M5).
+ */
 export const TERMINAL_STATES: readonly JobStatus[] = [
   'done',
   'duplicate',
   'cancelled',
+]
+
+/**
+ * States meaning "this job stopped running", which is what stamps `finished_at`.
+ *
+ * `failed` and `deferred` belong here even though they are NOT terminal: both end the run, and
+ * both are re-queueable later. Leaving them out (the F2 bug) meant they never got a
+ * `finished_at`, so every `finished_at`-filtered query — `countsSince`, which drives the
+ * Overview's "Fehler (7 T.)" and "deferred" KPIs — silently skipped them. A retry moves the job
+ * back to `queued` and clears `finished_at`, so this stays consistent.
+ */
+export const FINISHED_STATES: readonly JobStatus[] = [
+  'done',
+  'duplicate',
+  'cancelled',
+  'failed',
+  'deferred',
 ]
 
 /**
@@ -219,10 +241,8 @@ export class JobStore {
    * `ingests` is the job count — the unit the budget uses in subscription mode, where the limit
    * is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1).
    *
-   * The time filter uses `COALESCE(finished_at, started_at, created_at)` rather than
-   * `finished_at` alone on purpose: `failed` is NOT in TERMINAL_STATES (a failed job is
-   * retryable), so it never gets a `finished_at` — filtering on that column would silently drop
-   * exactly the failed runs this has to count.
+   * Filtering on `finished_at` is only correct because `failed` is in FINISHED_STATES (it was
+   * not before — finding F2; migration v3 backfilled the rows written under the old behaviour).
    */
   usageSince(sinceIso: string): { tokensIn: number; tokensOut: number; costUsd: number; ingests: number } {
     const row = this.db
@@ -234,7 +254,7 @@ export class JobStore {
            COUNT(*)                     AS ingests
          FROM jobs
          WHERE status IN ('done', 'failed')
-           AND COALESCE(finished_at, started_at, created_at) >= ?`,
+           AND finished_at IS NOT NULL AND finished_at >= ?`,
       )
       .get(sinceIso) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
     return row
@@ -401,7 +421,7 @@ export class JobStore {
           batch_id: patch.batchId ?? null,
           now,
           set_started: to !== 'queued' && current.started_at === null ? 1 : 0,
-          set_finished: TERMINAL_STATES.includes(to) ? 1 : 0,
+          set_finished: FINISHED_STATES.includes(to) ? 1 : 0,
         })
 
       // A retry clears the previous error explicitly (COALESCE above won't overwrite a
