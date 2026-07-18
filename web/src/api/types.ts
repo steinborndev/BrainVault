@@ -76,16 +76,52 @@ export interface GrowthPoint {
   total: number
 }
 
+/** Anthropic auth mode. In `oauth` (subscription) mode cost is an estimate, not money charged. */
+export type AuthMode = 'oauth' | 'api-key'
+
+/** Why the queue is paused — a spent budget reads differently from a usage limit. */
+export type PauseReason = 'rate-limit' | 'budget' | null
+
+/** Token/cost totals over a window (server/src/db/jobs.ts `usageSince`). */
+export interface UsageTotals {
+  tokensIn: number
+  tokensOut: number
+  costUsd: number
+  /** Agent runs in the window (done + failed) — the unit the budget uses in oauth mode. */
+  ingests: number
+}
+
+/** Daily budget state (server/src/pipeline/budget.ts, SPEC.md §7.1/§11.3). */
+export interface Budget {
+  /** null = no budget configured (default). */
+  limit: number | null
+  /** `jobs` in subscription mode, `usd` with an API key. */
+  unit: 'jobs' | 'usd'
+  spent: number
+  exceeded: boolean
+  resetsAt: string
+}
+
 export interface Stats {
   vaultName: string
+  authMode: AuthMode
   pages: PageCounts
   recentPages: RecentPage[]
   commits: Commit[]
   growth: GrowthPoint[]
   hotCache: string | null
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
+  usage: { today: UsageTotals; last7d: UsageTotals }
+  budget: Budget
   jobs: Record<string, number>
-  queue: { queued: number; active: number; inFlight: number; paused: boolean; concurrency: number }
+  queue: {
+    queued: number
+    active: number
+    inFlight: number
+    paused: boolean
+    pauseReason: PauseReason
+    concurrency: number
+  }
   watcher: { active: boolean; folder: string }
   generatedAt: string
 }
@@ -93,7 +129,7 @@ export interface Stats {
 export interface Health {
   status: string
   vaultRoot: string
-  queue: { inFlight: number; paused: boolean; concurrency: number }
+  queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
 }
 
@@ -196,6 +232,8 @@ export interface EffectiveSettings {
   concurrency: number
   maxUploadBytes: number
   gitAutoCommit: boolean
+  /** null = no budget. Unit depends on authMode: ingests/day (oauth) or USD/day (api-key). */
+  dailyBudget: number | null
 }
 
 /**

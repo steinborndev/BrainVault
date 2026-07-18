@@ -208,6 +208,39 @@ export class JobStore {
   }
 
   /**
+   * Token/cost totals over jobs whose agent run FINISHED at or after `sinceIso` — the aggregate
+   * usage display and the daily budget (SPEC.md §7.1, §11.3).
+   *
+   * Scope is `done` + `failed` deliberately: a failed run still spent tokens and still competed
+   * for the subscription's limits, so counting only successes would under-report what was used
+   * and let a run of failures blow through a daily budget unnoticed. `duplicate`/`cancelled`
+   * never started an agent run and carry no usage.
+   *
+   * `ingests` is the job count — the unit the budget uses in subscription mode, where the limit
+   * is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1).
+   *
+   * The time filter uses `COALESCE(finished_at, started_at, created_at)` rather than
+   * `finished_at` alone on purpose: `failed` is NOT in TERMINAL_STATES (a failed job is
+   * retryable), so it never gets a `finished_at` — filtering on that column would silently drop
+   * exactly the failed runs this has to count.
+   */
+  usageSince(sinceIso: string): { tokensIn: number; tokensOut: number; costUsd: number; ingests: number } {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(tokens_in), 0)  AS tokensIn,
+           COALESCE(SUM(tokens_out), 0) AS tokensOut,
+           COALESCE(SUM(cost_usd), 0)   AS costUsd,
+           COUNT(*)                     AS ingests
+         FROM jobs
+         WHERE status IN ('done', 'failed')
+           AND COALESCE(finished_at, started_at, created_at) >= ?`,
+      )
+      .get(sinceIso) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
+    return row
+  }
+
+  /**
    * Job counts by status for jobs that FINISHED at or after `sinceIso` — the 7-day KPIs on
    * the Overview tab (SPEC.md §6.1). Keyed off `finished_at` so a long-running job counts on
    * the day it completed, not the day it was queued.

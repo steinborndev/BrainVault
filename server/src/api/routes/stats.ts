@@ -21,6 +21,7 @@ import {
   type Commit,
   type GrowthPoint,
 } from '../../pipeline/vault-stats.js'
+import { budgetStatus, budgetUnit, startOfToday } from '../../pipeline/budget.js'
 
 const CACHE_TTL_MS = 5_000
 const GROWTH_DAYS = 30
@@ -34,7 +35,7 @@ interface VaultDerived {
 }
 
 export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void {
-  const { config, store, queue } = ctx
+  const { config, store, queue, settings } = ctx
 
   // Short-TTL cache for the filesystem+git scan. Invalidated eagerly on a `stats` bus event
   // so a completed ingest shows up immediately, and lazily after the TTL as a backstop.
@@ -74,8 +75,21 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
     const queued = counts['queued'] ?? 0
     const active = (counts['preprocessing'] ?? 0) + (counts['ingesting'] ?? 0)
 
+    // Token/cost aggregates (SPEC.md §7.1 "Anzeige"). In oauth mode `costUsd` is an API-price
+    // equivalent, not money charged — the UI labels it "Schätzwert (Abo)", which is what
+    // `authMode` below is here for.
+    const usage = {
+      today: store.usageSince(startOfToday().toISOString()),
+      last7d: store.usageSince(since),
+    }
+    const budget = settings
+      ? budgetStatus(config, settings.effective(config), store)
+      : { limit: null, unit: budgetUnit(config), spent: 0, exceeded: false, resetsAt: '' }
+
     return {
       vaultName: config.obsidianVaultName,
+      /** Anthropic auth mode — drives the "Schätzwert (Abo)" labelling across the whole UI. */
+      authMode: config.auth.mode,
       pages: derived.pages,
       recentPages: derived.recentPages,
       commits: derived.commits,
@@ -87,6 +101,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
         deferred: finishedSince['deferred'] ?? 0,
         duplicates: finishedSince['duplicate'] ?? 0,
       },
+      usage,
+      budget,
       jobs: counts,
       queue: { queued, active, ...queue.stats() },
       watcher: { active: true, folder: config.server.watchFolder },

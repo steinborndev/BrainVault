@@ -31,6 +31,7 @@ import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
 import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
+import { msUntilReset } from './budget.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
@@ -79,6 +80,14 @@ export interface IngestQueueOptions {
    * When it returns false the pages still land on disk; only the commit is skipped.
    */
   readonly autoCommit?: () => boolean
+  /**
+   * Daily-budget check (SPEC.md §7.1, §11.3). A provider, like `autoCommit`, so a settings
+   * change applies live. When it returns true the queue pauses before claiming more work and
+   * auto-resumes at the next local midnight. In-flight jobs always run to completion.
+   */
+  readonly budgetExceeded?: () => boolean
+  /** Milliseconds until the budget window resets; injected so tests control the clock. */
+  readonly msUntilBudgetReset?: () => number
   /** Live-update bus; the queue signals `stats` when a commit changes vault-visible numbers. */
   readonly events?: EventBus
   /**
@@ -136,10 +145,14 @@ export class IngestQueue {
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
   private readonly events: EventBus | undefined
   private readonly autoCommit: () => boolean
+  private readonly budgetExceeded: () => boolean
+  private readonly msUntilBudgetReset: () => number
 
   private readonly commitMutex: Mutex
   private running = false
   private paused = false
+  /** Why the queue is paused — the dashboard distinguishes a rate limit from a spent budget. */
+  private pauseReason: 'rate-limit' | 'budget' | null = null
   private inFlight = 0
   private toolsCache: ToolAvailability | undefined
   private idleWaiters: Array<() => void> = []
@@ -166,6 +179,8 @@ export class IngestQueue {
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
     this.events = opts.events
     this.autoCommit = opts.autoCommit ?? ((): boolean => true)
+    this.budgetExceeded = opts.budgetExceeded ?? ((): boolean => false)
+    this.msUntilBudgetReset = opts.msUntilBudgetReset ?? ((): number => msUntilReset())
     this.commitMutex = opts.commitMutex ?? new Mutex()
   }
 
@@ -234,8 +249,19 @@ export class IngestQueue {
   }
 
   /** Live queue state for the health/overview endpoints (SPEC.md §6.1). */
-  stats(): { readonly inFlight: number; readonly paused: boolean; readonly concurrency: number } {
-    return { inFlight: this.inFlight, paused: this.paused, concurrency: this.concurrency }
+  stats(): {
+    readonly inFlight: number
+    readonly paused: boolean
+    /** Distinguishes a usage-limit pause from a spent daily budget for the dashboard. */
+    readonly pauseReason: 'rate-limit' | 'budget' | null
+    readonly concurrency: number
+  } {
+    return {
+      inFlight: this.inFlight,
+      paused: this.paused,
+      pauseReason: this.pauseReason,
+      concurrency: this.concurrency,
+    }
   }
 
   /**
@@ -319,10 +345,14 @@ export class IngestQueue {
     return new Promise<void>((resolve) => this.idleWaiters.push(resolve))
   }
 
-  /** Manually resumes after a usage-limit pause (also called by the auto-resume timer). */
+  /**
+   * Manually resumes after a pause (also called by both auto-resume timers). If the reason still
+   * holds — e.g. the budget is still spent — `pump()` simply pauses again rather than spinning.
+   */
   resume(): void {
     if (!this.paused) return
     this.paused = false
+    this.pauseReason = null
     this.pump()
   }
 
@@ -345,6 +375,13 @@ export class IngestQueue {
 
   private pump(): void {
     if (!this.running || this.paused) {
+      this.settleIdle()
+      return
+    }
+    // Checked before claiming, never mid-job: an in-flight run always finishes, so a budget
+    // can be overshot by at most the runs already started (SPEC.md §11.3).
+    if (this.budgetExceeded()) {
+      this.pauseForBudget()
       this.settleIdle()
       return
     }
@@ -697,12 +734,36 @@ export class IngestQueue {
   private pauseForRateLimit(jobId: string): void {
     if (this.paused) return
     this.paused = true
+    this.pauseReason = 'rate-limit'
     this.store.log(
       jobId,
       'warn',
       `queue paused on a usage-limit signal; auto-resume in ${Math.round(this.rateLimitPauseMs / 1000)}s (SPEC.md §7.1)`,
     )
     this.setTimeoutFn(() => this.resume(), this.rateLimitPauseMs)
+  }
+
+  /**
+   * Pauses because today's budget is spent, releasing at the next local midnight (SPEC.md §11.3).
+   * There is no job to attribute this to — it happens before claiming — so it is announced on the
+   * bus's `queue` channel rather than in a job log.
+   */
+  private pauseForBudget(): void {
+    if (this.paused) return
+    this.paused = true
+    this.pauseReason = 'budget'
+    const ms = this.msUntilBudgetReset()
+    this.events?.publish({
+      kind: 'log',
+      log: {
+        jobId: 'queue',
+        ts: new Date().toISOString(),
+        level: 'warn',
+        message: `queue paused: daily budget reached; resumes in ${Math.round(ms / 60_000)} min (SPEC.md §11.3)`,
+      },
+    })
+    this.events?.publish({ kind: 'stats' })
+    this.setTimeoutFn(() => this.resume(), ms)
   }
 }
 

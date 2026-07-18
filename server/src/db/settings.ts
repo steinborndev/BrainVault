@@ -50,6 +50,12 @@ export const SETTINGS_SCHEMA = z
       .nullable(),
     /** Whether an ingest auto-commits to the vault. Applied live. */
     gitAutoCommit: z.boolean().nullable(),
+    /**
+     * Per-day ceiling before the queue pauses (SPEC.md §7.1, §11.3). The UNIT depends on the
+     * auth mode — ingests/day in oauth (subscription) mode, USD/day with an API key — see
+     * `pipeline/budget.ts`. `null` (the default) means no budget. Applied live.
+     */
+    dailyBudget: z.number().positive().nullable(),
   })
   .partial()
   .strict()
@@ -68,6 +74,8 @@ export interface EffectiveSettings {
   readonly concurrency: number
   readonly maxUploadBytes: number
   readonly gitAutoCommit: boolean
+  /** null = no daily budget (the default). Unit depends on auth mode — see pipeline/budget.ts. */
+  readonly dailyBudget: number | null
 }
 
 /** Baseline (start-time) values, before any override is applied. */
@@ -77,6 +85,9 @@ export function baselineSettings(config: Config): EffectiveSettings {
     concurrency: DEFAULT_CONCURRENCY,
     maxUploadBytes: config.server.maxUploadBytes,
     gitAutoCommit: DEFAULT_GIT_AUTO_COMMIT,
+    // No env baseline: a budget is opt-in, so "unset" means unlimited. Clearing the override
+    // therefore lands back on null, which reads the same as never having set one.
+    dailyBudget: null,
   }
 }
 
@@ -88,6 +99,7 @@ export function effectiveSettings(config: Config, overrides: SettingsOverrides):
     concurrency: overrides.concurrency ?? base.concurrency,
     maxUploadBytes: overrides.maxUploadBytes ?? base.maxUploadBytes,
     gitAutoCommit: overrides.gitAutoCommit ?? base.gitAutoCommit,
+    dailyBudget: overrides.dailyBudget ?? base.dailyBudget,
   }
 }
 

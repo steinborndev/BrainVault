@@ -16,7 +16,8 @@ import type { ChatMessage, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink } from '../components/PageLink.tsx'
 import { Icon } from '../components/Icon.tsx'
-import { timeAgo } from '../lib/format.ts'
+import { timeAgo, tokens } from '../lib/format.ts'
+import { Cost, CostFootnote } from '../components/Cost.tsx'
 
 export function Chat(): React.ReactElement {
   const qc = useQueryClient()
@@ -100,6 +101,15 @@ export function Chat(): React.ReactElement {
         {ask.isError && (
           <div className="bubble system">
             <div className="bubble-body">Fehler: {(ask.error as Error).message}</div>
+          </div>
+        )}
+        {ask.data && !ask.isPending && (
+          // Usage for the last answer — the server has always returned it (SPEC.md §7.1);
+          // Cost marks it as an estimate in subscription mode.
+          <div className="chat-usage">
+            {tokens(ask.data.usage.tokensIn + ask.data.usage.tokensOut)} Tokens ·{' '}
+            <Cost value={ask.data.usage.costUsd} authMode={ask.data.authMode} />
+            <CostFootnote authMode={ask.data.authMode} />
           </div>
         )}
       </div>

@@ -986,3 +986,37 @@ button {
   .setting-control input[type="text"] { width: 100%; }
   .settings-ro-row { flex-direction: column; gap: 2px; }
 }
+
+/* ---- Cost estimate marking + budget (SPEC.md §7.1, §11.3) ---- */
+.cost-est {
+  color: var(--text-faint);
+  margin-left: 1px;
+  cursor: help;
+}
+.cost-est-note {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-left: 8px;
+  cursor: help;
+}
+.chat-usage {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.budget-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.budget-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.budget-fill.over { background: var(--warn); }

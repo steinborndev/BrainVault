@@ -13,6 +13,7 @@ import { SettingsStore } from './db/settings.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
+import { budgetStatus } from './pipeline/budget.js'
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
@@ -57,6 +58,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     concurrency: effective.concurrency,
     // A provider, not a value: a settings change takes effect on the next commit, no restart.
     autoCommit: () => settings.effective(config).gitAutoCommit,
+    // Same pattern for the daily budget — evaluated through the shared budget module so the
+    // queue's pause decision and the dashboard's display can never disagree (SPEC.md §11.3).
+    budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
   })
   queue.start()
 

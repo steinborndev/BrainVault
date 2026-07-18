@@ -50,6 +50,9 @@ export function SettingsEditor(): React.ReactElement {
   if (!q.data || !draft) return <div className="tab-hint">Einstellungen werden geladen…</div>
 
   const data = q.data
+  // The budget's unit follows the Anthropic auth mode: ingests/day on a subscription (where
+  // there is no per-run charge), USD/day with an API key (SPEC.md §7.1).
+  const budgetUnit = data.readOnly.authMode === 'oauth' ? 'jobs' : 'usd'
   const keys = Object.keys(draft) as Array<keyof EffectiveSettings>
   const dirty = keys.filter((k) => draft[k] !== data.effective[k])
   const isOverridden = (k: keyof EffectiveSettings): boolean => data.overrides[k] !== undefined
@@ -145,6 +148,29 @@ export function SettingsEditor(): React.ReactElement {
             checked={draft.gitAutoCommit}
             onChange={(e) => setDraft({ ...draft, gitAutoCommit: e.target.checked })}
           />,
+        )}
+
+        {row(
+          'dailyBudget',
+          'Tagesbudget',
+          budgetUnit === 'jobs'
+            ? 'Ingests pro Tag; danach pausiert die Queue bis Mitternacht. Leer = kein Limit.'
+            : 'USD pro Tag; danach pausiert die Queue bis Mitternacht. Leer = kein Limit.',
+          <div className="setting-control">
+            <input
+              type="number"
+              min={budgetUnit === 'usd' ? 0.01 : 1}
+              step={budgetUnit === 'usd' ? 0.5 : 1}
+              placeholder="kein Limit"
+              value={draft.dailyBudget ?? ''}
+              onChange={(e) =>
+                setDraft({ ...draft, dailyBudget: e.target.value === '' ? null : Number(e.target.value) })
+              }
+            />
+            <span className="setting-hint" style={{ marginTop: 0 }}>
+              {budgetUnit === 'jobs' ? 'Ingests/Tag' : 'USD/Tag'}
+            </span>
+          </div>,
         )}
       </div>
 
