@@ -68,8 +68,9 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 5. Dockerfile + docs (SPEC.md §12.2, §10)
 
-- [ ] `Dockerfile` (pure Linux userland, no Windows deps) building the server + serving `web/dist`. Not used under WSL day-to-day, but required from M5 for the future always-on-host move.
-- [ ] Docs: a real `README.md` (setup: vault clone, toolchain, credential, build, run, systemd), plus update `CLAUDE.md`/`SPEC.md` cross-refs if anything changed. Ensure `scripts/` setup helpers are current.
+- [x] `Dockerfile` (+ `.dockerignore`): multi-stage — build SPA + server, compile prod deps in a stage that HAS a toolchain (better-sqlite3 is native; bookworm → bookworm-slim keeps the ABI valid), then a slim runtime that ships **bubblewrap + socat** (without them every agent run fails, by design) and the preprocessing toolchain. Runs non-root as a single `node dist/main.js`. Vault/DB/inbox are volumes; the localhost guard is NOT relaxed — publishing the port requires `HTTP_AUTH_MODE=token` + `HTTP_AUTH_TOKEN`, and bubblewrap needs unprivileged user namespaces (both documented).
+- [ ] ⚠️ **The image build is UNVERIFIED** — Docker is not installed in the dev WSL distro, so `docker build` was never run. What *was* verified: the build steps mirror the working local ones (`npm ci`, `npm run build`, `node dist/main.js`), and `src/` imports no devDependency, so `npm ci --omit=dev` is safe. Treat the first build as untested; this is the one open item in §5.
+- [x] Docs: a real `README.md` written from scratch (there was none) — requirements, vault clone, toolchain, credential, build/run, systemd + the WSL-restart check, the dashboard, the env-vs-settings precedence model, daily budget semantics, the security model incl. why the sandbox is the boundary and when to re-run `permprobe`, Docker with its two non-optional caveats, API surface, and troubleshooting. All commands in it were executed or resolved against the real scripts before being documented.
 
 ## 6. Acceptance (DoD)
 
