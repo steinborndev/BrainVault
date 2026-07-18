@@ -7,8 +7,15 @@
  * rather than a rewrite of this module.
  */
 
-import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import {
+  query,
+  type Options,
+  type SDKMessage,
+  type SpawnOptions as SdkSpawnOptions,
+  type SpawnedProcess,
+} from '@anthropic-ai/claude-agent-sdk'
 import { AUTOMATION_SYSTEM_PROMPT, QUERY_SYSTEM_PROMPT } from './system-prompt.js'
+import { createDetachedSpawn } from './agent-spawn.js'
 import {
   decidePermission,
   profileAllowsVaultWrite,
@@ -21,6 +28,14 @@ import { CREDENTIAL_ENV_VARS, type CredentialEnvVar } from '../config.js'
 
 /** Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 15 min)"). */
 export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+
+/**
+ * Grace between the graceful abort and the hard, group-level SIGKILL. The SDK's own
+ * graceful window (stdin-EOF → force) is ~2 s; we wait a little longer so a well-behaved
+ * CLI still flushes its final result/usage before we reap its whole process group
+ * (TASKS-M5 Finding F1). If a stuck bash grandchild is holding the run, this is what ends it.
+ */
+export const HARD_KILL_GRACE_MS = 5_000
 
 export interface AgentUsage {
   readonly tokensIn: number
@@ -119,7 +134,16 @@ export function buildAgentEnv(
   return env
 }
 
-export function buildOptions(opts: RunAgentOptions, abortController: AbortController): Options {
+export function buildOptions(
+  opts: RunAgentOptions,
+  abortController: AbortController,
+  /**
+   * Custom CLI spawner (TASKS-M5 Finding F1). When provided, the SDK starts the CLI
+   * through it so the runner owns a detached process group it can hard-kill. Omitted by
+   * `permprobe` (which only checks the enforcement hook), where the SDK's default spawn is fine.
+   */
+  spawnClaudeCodeProcess?: (options: SdkSpawnOptions) => SpawnedProcess,
+): Options {
   const profile: RunProfile = opts.profile ?? 'ingest'
   const ctx = { vaultRoot: opts.vaultRoot, profile }
   // Web tools stay out of context unless this is a research run; a read-only query run
@@ -218,6 +242,8 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
     // Removes web (and, for a read-only query, write) tools from the model's context.
     disallowedTools,
     abortController,
+    // Own the CLI spawn so the run has a detached process group to hard-kill (F1).
+    ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
   }
 }
 
@@ -231,18 +257,34 @@ export function buildOptions(opts: RunAgentOptions, abortController: AbortContro
 export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const abortController = new AbortController()
+  const spawnHandle = createDetachedSpawn()
   const startedAt = Date.now()
+
+  // The hard backstop (F1): a graceful abort SIGTERMs only the CLI leader, which a stuck
+  // bash grandchild survives. After a grace, SIGKILL the whole process group.
+  let hardKillTimer: ReturnType<typeof setTimeout> | undefined
+  const scheduleHardKill = (): void => {
+    if (hardKillTimer) return
+    hardKillTimer = setTimeout(() => spawnHandle.hardKill(), HARD_KILL_GRACE_MS)
+    hardKillTimer.unref?.()
+  }
 
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
     abortController.abort()
+    scheduleHardKill()
   }, timeoutMs)
 
-  const onExternalAbort = (): void => abortController.abort()
+  const onExternalAbort = (): void => {
+    abortController.abort()
+    scheduleHardKill()
+  }
   if (opts.signal) {
-    if (opts.signal.aborted) abortController.abort()
-    else opts.signal.addEventListener('abort', onExternalAbort, { once: true })
+    if (opts.signal.aborted) {
+      abortController.abort()
+      scheduleHardKill()
+    } else opts.signal.addEventListener('abort', onExternalAbort, { once: true })
   }
 
   let result: AgentRunResult = {
@@ -257,7 +299,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
   }
 
   try {
-    for await (const message of query({ prompt: opts.prompt, options: buildOptions(opts, abortController) })) {
+    for await (const message of query({
+      prompt: opts.prompt,
+      options: buildOptions(opts, abortController, spawnHandle.spawn),
+    })) {
       opts.onMessage?.(message)
 
       if (message.type !== 'result') continue
@@ -313,6 +358,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentRunResult> {
     }
   } finally {
     clearTimeout(timer)
+    if (hardKillTimer) clearTimeout(hardKillTimer)
+    // Once the run has resolved, make sure no descendant (a detached bash the CLI left
+    // behind) leaks. hardKill() no-ops if the child already exited cleanly.
+    spawnHandle.hardKill()
     opts.signal?.removeEventListener('abort', onExternalAbort)
   }
 

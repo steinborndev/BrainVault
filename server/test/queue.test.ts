@@ -50,6 +50,7 @@ let store: JobStore
 let vaultRoot: string
 let srcDir: string
 let commitCalls: string[]
+let commitPathspecs: string[][]
 let pausedTimers: Array<() => void>
 
 beforeEach(() => {
@@ -58,6 +59,7 @@ beforeEach(() => {
   vaultRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-'))
   srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'src-'))
   commitCalls = []
+  commitPathspecs = []
   pausedTimers = []
 })
 afterEach(() => {
@@ -75,6 +77,7 @@ interface QueueOverrides {
   runIngest?: IngestRunner
   concurrency?: number
   maxRetries?: number
+  budgetExceeded?: () => boolean
 }
 
 function makeQueue(over: QueueOverrides = {}): IngestQueue {
@@ -85,13 +88,15 @@ function makeQueue(over: QueueOverrides = {}): IngestQueue {
     concurrency: over.concurrency ?? 2,
     maxRetries: over.maxRetries ?? 2,
     detectToolsFn: async () => NO_TOOLS,
-    commit: async (_root, message) => {
+    commit: async (_root, message, opts) => {
       commitCalls.push(message)
+      commitPathspecs.push([...(opts?.pathspec ?? [])])
       return { committed: true, hash: 'abcd1234ef', committedPages: ['wiki/concepts/Foo.md'] }
     },
     refreshHotCache: async () => 'hot cache noted',
     setTimeoutFn: (fn) => void pausedTimers.push(fn),
     runIngest: over.runIngest ?? (async () => okResult()),
+    ...(over.budgetExceeded ? { budgetExceeded: over.budgetExceeded } : {}),
   })
 }
 
@@ -136,6 +141,62 @@ describe('happy path', () => {
     expect(logMessages.some((m) => m.includes('working'))).toBe(true)
     expect(logMessages.some((m) => m.includes('committed abcd1234'))).toBe(true)
     expect(logMessages.some((m) => m.includes('hot cache noted'))).toBe(true)
+  })
+
+  it('stages the shared bookkeeping paths so the vault does not stay dirty (regression)', async () => {
+    // wiki-ingest rewrites .raw/.manifest.json as its delta tracker on every run. It was
+    // missing from the pathspec, so each ingest left the vault permanently dirty
+    // (TASKS-M5 §0). Both bookkeeping paths must ride along with the ingest commit.
+    const q = makeQueue()
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+
+    expect(store.getOrThrow(job.id).status).toBe('done')
+    expect(commitPathspecs).toHaveLength(1)
+    expect(commitPathspecs[0]).toEqual(expect.arrayContaining(['.vault-meta', '.raw/.manifest.json']))
+  })
+
+  it('pauses instead of claiming work when the daily budget is spent', async () => {
+    // SPEC.md §11.3: the queue pauses on an exceeded budget and resumes at the next window.
+    let overBudget = true
+    const q = makeQueue({ budgetExceeded: () => overBudget })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+
+    // The job was never claimed — it is still queued behind the pause.
+    expect(store.getOrThrow(job.id).status).toBe('queued')
+    expect(q.stats().paused).toBe(true)
+    expect(q.stats().pauseReason).toBe('budget')
+    expect(commitCalls).toHaveLength(0)
+
+    // The window resets: the captured resume timer fires and the work goes through.
+    overBudget = false
+    pausedTimers.forEach((fn) => fn())
+    await q.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('done')
+    expect(q.stats().paused).toBe(false)
+    expect(q.stats().pauseReason).toBeNull()
+  })
+
+  it('lets in-flight work finish rather than aborting it when the budget trips', async () => {
+    // The check runs before claiming, so a budget can be overshot only by runs already started.
+    let overBudget = false
+    const q = makeQueue({
+      concurrency: 1,
+      budgetExceeded: () => overBudget,
+      runIngest: async () => {
+        overBudget = true // trips while this job is mid-run
+        return okResult()
+      },
+    })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await q.onIdle()
+
+    expect(store.getOrThrow(job.id).status).toBe('done') // finished, not aborted
+    expect(q.stats().pauseReason).toBe('budget') // and the queue then stopped claiming
   })
 
   it('routes a URL job by its url, not its source channel (regression)', async () => {

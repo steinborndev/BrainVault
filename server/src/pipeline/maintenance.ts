@@ -5,23 +5,36 @@
  * streamed live to the dashboard over the event bus under a stable per-kind channel id
  * (`maintenance:lint` etc.), which the Wartung tab renders as a live log.
  *
+ * Runs are ASYNC/job-style (TASKS-M5 §0): `start*()` registers a run, kicks it off in the
+ * background and returns a `runId` immediately — the HTTP request is NOT held for the (up to
+ * 15-min) agent run, so a slow or stuck lint can no longer wedge the request or a worker. The
+ * caller polls `getRun(id)` for the result while watching the live log on the bus channel.
+ * A stuck run is now bounded by the agent runner's hard, group-level kill (Finding F1).
+ *
  * Profiles (permissions.ts): lint + hot-cache use `ingest` (write, no web); autoresearch
  * uses `research` (write AND web egress — the one flow allowed the web, CLAUDE.md hard rule 4).
  */
 
 import path from 'node:path'
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { formatMessage } from './format-message.js'
-import { commitVault, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { parseLintReport, type LintReport } from './lint-report.js'
 import { indexWikiPages } from './citations.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+/**
+ * `save` is the chat's "Session in Vault sichern" (SPEC.md §6.3), not a Wartung-tab action — but
+ * it is the same shape: a vault-mutating agent run that must hold the same commit discipline.
+ * Sharing this runner also shares its run mutex, which is what stops a save interleaving with a
+ * lint; two concurrent vault writers is exactly what that mutex exists to prevent.
+ */
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
 
 /** Stable SSE channel id per kind, so the UI can subscribe to a run's live log. */
 export const maintenanceChannel = (kind: MaintenanceKind): string => `maintenance:${kind}`
@@ -55,6 +68,36 @@ export interface MaintenanceResult {
   readonly reportPath?: string
 }
 
+export type MaintenanceRunStatus = 'running' | 'done' | 'error'
+
+/**
+ * A tracked async run. `start*()` returns this immediately (status `running`); the client
+ * polls `getRun(id)` until it settles to `done`/`error`, at which point `result` is present.
+ */
+export interface MaintenanceRun {
+  readonly id: string
+  readonly kind: MaintenanceKind
+  /** SSE channel carrying this run's live log — the UI subscribes to it. */
+  readonly channel: string
+  readonly status: MaintenanceRunStatus
+  readonly startedAt: string
+  readonly finishedAt?: string
+  readonly result?: MaintenanceResult
+  /** Failure reason when `status === 'error'` (agent failure or an unexpected throw). */
+  readonly error?: string
+}
+
+/** How many finished runs to retain for polling before the oldest is evicted. */
+const RUN_HISTORY_CAP = 25
+
+/** Per-run knobs that differ between the kinds. */
+interface RunOptions {
+  /** SDK session to resume, so the run inherits a conversation (used by `save`). */
+  readonly resumeSessionId?: string
+  /** Overrides the default `maintenance: <kind>` commit subject. */
+  readonly commitMessage?: string
+}
+
 export class MaintenanceRunner {
   private readonly vaultRoot: string
   private readonly auth: AgentAuth
@@ -65,6 +108,8 @@ export class MaintenanceRunner {
   private readonly timeoutMs: number
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
+  /** In-memory registry of async runs, keyed by run id (insertion-ordered for eviction). */
+  private readonly runs = new Map<string, MaintenanceRun>()
 
   constructor(opts: MaintenanceRunnerOptions) {
     this.vaultRoot = opts.vaultRoot
@@ -76,37 +121,131 @@ export class MaintenanceRunner {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   }
 
-  lint(): Promise<MaintenanceResult> {
+  /** Starts a lint run in the background; returns its tracked run immediately. */
+  startLint(): MaintenanceRun {
     // Be explicit: run the skill, WRITE the report file (the dashboard reads it back), and
     // report-only — never auto-fix, so a lint can't silently rewrite content pages.
-    return this.run(
+    return this.start(
       'lint',
       'Use the wiki-lint skill to health-check the entire wiki and WRITE the full report to ' +
         'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD). Report only — do NOT auto-fix or ' +
         'modify any existing wiki page. Keep the standard report sections (Orphan Pages, Dead Links, ' +
         'Missing Pages, Frontmatter Gaps, Stale Claims, Cross-Reference Gaps). ' +
-        // Mitigation for an observed >20-min hang: the DragonScale Mechanism 3 "semantic tiling"
-        // path runs embeddings via a long bash call that blocks the SDK iterator, so the run
-        // timeout can't fire until it returns. The read-based checks above are what the report
-        // needs; skip the heavy embedding pass.
+        // Belt-and-braces with the hard kill (F1): the DragonScale Mechanism 3 "semantic tiling"
+        // path runs embeddings via a long bash call. The runner will now group-kill a stuck run,
+        // but the report only needs the read-based checks, so still skip the heavy embedding pass.
         'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass — ' +
         'use only the read-based checks (Read/Grep/Glob).',
       'ingest',
     )
   }
 
-  research(topic: string): Promise<MaintenanceResult> {
-    return this.run('research', `/autoresearch ${topic}`, 'research')
+  /** Starts an autoresearch run in the background; returns its tracked run immediately. */
+  startResearch(topic: string): MaintenanceRun {
+    return this.start('research', `/autoresearch ${topic}`, 'research')
   }
 
-  refreshHotCache(): Promise<MaintenanceResult> {
-    return this.run('hot-cache', 'update hot cache', 'ingest')
+  /** Starts a hot-cache refresh in the background; returns its tracked run immediately. */
+  startHotCache(): MaintenanceRun {
+    return this.start('hot-cache', 'update hot cache', 'ingest')
+  }
+
+  /**
+   * Saves a chat session into the vault (SPEC.md §6.3 "Session in Vault sichern"): resumes the
+   * chat's SDK session so the agent has the conversation, then triggers the vault repo's own
+   * `/save` flow. Runs under `ingest` — write access, no web — because the chat itself is
+   * read-only by design and cannot write the page it is being asked to produce.
+   */
+  startSave(sdkSessionId: string, title?: string): MaintenanceRun {
+    const label = title?.trim() ? ` (${title.trim()})` : ''
+    return this.start('save', '/save', 'ingest', {
+      resumeSessionId: sdkSessionId,
+      commitMessage: `chat: save session${label}`,
+    })
+  }
+
+  /** A tracked run by id (for the poll endpoint), or undefined once evicted. */
+  getRun(id: string): MaintenanceRun | undefined {
+    return this.runs.get(id)
+  }
+
+  /** All tracked runs, newest first (most-recent history for the UI). */
+  listRuns(): MaintenanceRun[] {
+    return [...this.runs.values()].reverse()
+  }
+
+  /**
+   * Registers a run and kicks it off in the background. Returns the `running` record at once —
+   * the (up to 15-min) agent work happens off the request path. Concurrent starts still
+   * serialize on the run mutex; a queued one simply reports `running` until its turn.
+   */
+  private start(
+    kind: MaintenanceKind,
+    prompt: string,
+    profile: 'ingest' | 'research',
+    opts: RunOptions = {},
+  ): MaintenanceRun {
+    const id = randomUUID()
+    const run: MaintenanceRun = {
+      id,
+      kind,
+      channel: maintenanceChannel(kind),
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    }
+    this.runs.set(id, run)
+    this.evictOldRuns()
+    // Fire-and-forget: execute() never rejects (it records failures on the run record).
+    void this.execute(id, kind, prompt, profile, opts)
+    return run
+  }
+
+  /** Runs the agent work, then settles the run record to `done`/`error`. Never rejects. */
+  private async execute(
+    id: string,
+    kind: MaintenanceKind,
+    prompt: string,
+    profile: 'ingest' | 'research',
+    opts: RunOptions = {},
+  ): Promise<void> {
+    try {
+      const result = await this.run(kind, prompt, profile, opts)
+      this.settle(id, result.ok ? 'done' : 'error', {
+        result,
+        ...(result.ok ? {} : { error: result.error ?? `${kind} failed` }),
+      })
+    } catch (err) {
+      // run() only throws on unexpected (non-agent) errors; record them so the poll surfaces it.
+      const message = err instanceof Error ? err.message : String(err)
+      this.events.publish({
+        kind: 'log',
+        log: { jobId: maintenanceChannel(kind), ts: new Date().toISOString(), level: 'error', message: `maintenance: ${kind} crashed: ${message}` },
+      })
+      this.settle(id, 'error', { error: message })
+    }
+  }
+
+  /** Transitions a tracked run to its terminal state (records may already be evicted — no-op then). */
+  private settle(id: string, status: MaintenanceRunStatus, patch: { result?: MaintenanceResult; error?: string }): void {
+    const prev = this.runs.get(id)
+    if (!prev) return
+    this.runs.set(id, { ...prev, status, finishedAt: new Date().toISOString(), ...patch })
+  }
+
+  /** Bounds the registry so long-lived services don't accumulate run records without limit. */
+  private evictOldRuns(): void {
+    while (this.runs.size > RUN_HISTORY_CAP) {
+      const oldest = this.runs.keys().next().value
+      if (oldest === undefined) break
+      this.runs.delete(oldest)
+    }
   }
 
   private async run(
     kind: MaintenanceKind,
     prompt: string,
     profile: 'ingest' | 'research',
+    opts: RunOptions = {},
   ): Promise<MaintenanceResult> {
     return this.runMutex.runExclusive(async () => {
       const channel = maintenanceChannel(kind)
@@ -121,6 +260,10 @@ export class MaintenanceRunner {
         auth: this.auth,
         profile,
         timeoutMs: this.timeoutMs,
+        // A save resumes the chat's SDK session so the agent still has the conversation it is
+        // being asked to write up. The profile is applied fresh per run, so resuming a
+        // read-only chat under a write-enabled profile is what grants the save its write access.
+        ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
         onMessage: (m: SDKMessage) => {
           const line = formatMessage(m)
           if (line !== undefined) log('info', line)
@@ -134,9 +277,9 @@ export class MaintenanceRunner {
       }
 
       // One commit per run, serialized against ingest commits.
-      const pathspec = [...written, '.vault-meta', '.raw/.manifest.json']
+      const pathspec = [...written, ...BOOKKEEPING_PATHS]
       const commit = await this.commitMutex.runExclusive(() =>
-        this.commit(this.vaultRoot, `maintenance: ${kind}`, { pathspec }),
+        this.commit(this.vaultRoot, opts.commitMessage ?? `maintenance: ${kind}`, { pathspec }),
       )
       const pages = commit.committed ? commit.committedPages : []
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')

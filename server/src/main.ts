@@ -9,9 +9,11 @@ import { loadConfig, describeConfig, assertBindAllowed, ConfigError, type Config
 import { openDb, defaultDbPath } from './db/index.js'
 import { JobStore } from './db/jobs.js'
 import { ChatStore } from './db/chat.js'
+import { SettingsStore } from './db/settings.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
+import { budgetStatus } from './pipeline/budget.js'
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
@@ -42,7 +44,24 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // One commit mutex shared by the ingest queue and the maintenance runner so their commits
   // never interleave (one vault writer at a time, TASKS-M4 §2).
   const commitMutex = new Mutex()
-  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth, events, commitMutex })
+  // Runtime settings (SPEC.md §6.4): env is the start-time baseline, these are the overrides.
+  // `watchFolder`/`maxUploadBytes` are read once here (they bind at startup — changing them is
+  // flagged "restart required"); `concurrency`/`gitAutoCommit` apply live via the queue.
+  const settings = new SettingsStore(db)
+  const effective = settings.effective(config)
+  const queue = new IngestQueue({
+    store,
+    vaultRoot: config.vaultRoot,
+    auth: config.auth,
+    events,
+    commitMutex,
+    concurrency: effective.concurrency,
+    // A provider, not a value: a settings change takes effect on the next commit, no restart.
+    autoCommit: () => settings.effective(config).gitAutoCommit,
+    // Same pattern for the daily budget — evaluated through the shared budget module so the
+    // queue's pause decision and the dashboard's display can never disagree (SPEC.md §11.3).
+    budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
+  })
   queue.start()
 
   const maintenance = new MaintenanceRunner({
@@ -52,17 +71,30 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     commitMutex,
   })
 
+  // The start-time-bound settings folded into the config the watcher and HTTP server see. The
+  // bind (host/port) is deliberately NOT overridable — it stays whatever assertBindAllowed
+  // approved above (hard rule 2).
+  const effectiveConfig: Config = {
+    ...config,
+    server: {
+      ...config.server,
+      watchFolder: effective.watchFolder,
+      maxUploadBytes: effective.maxUploadBytes,
+    },
+  }
+
   const watcher = startWatcher({
     queue,
-    config,
+    config: effectiveConfig,
     ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
   })
 
-  const app = await buildServer({ config, store, chat, queue, events, maintenance })
+  const app = await buildServer({ config: effectiveConfig, store, chat, queue, events, maintenance, settings })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
 
-  app.log.info({ ...describeConfig(config), transportPin: pin }, 'vault-service started')
+  // Log what the service actually runs with (overrides applied), not the bare baseline.
+  app.log.info({ ...describeConfig(effectiveConfig), transportPin: pin }, 'vault-service started')
 
   const stop = async (): Promise<void> => {
     await watcher.close()

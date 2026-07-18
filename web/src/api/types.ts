@@ -76,16 +76,54 @@ export interface GrowthPoint {
   total: number
 }
 
+/** Anthropic auth mode. In `oauth` (subscription) mode cost is an estimate, not money charged. */
+export type AuthMode = 'oauth' | 'api-key'
+
+/** Why the queue is paused — a spent budget reads differently from a usage limit. */
+export type PauseReason = 'rate-limit' | 'budget' | null
+
+/** Token/cost totals over a window (server/src/db/jobs.ts `usageSince`). */
+export interface UsageTotals {
+  tokensIn: number
+  tokensOut: number
+  costUsd: number
+  /** Agent runs in the window (done + failed) — the unit the budget uses in oauth mode. */
+  ingests: number
+}
+
+/** Daily budget state (server/src/pipeline/budget.ts, SPEC.md §7.1/§11.3). */
+export interface Budget {
+  /** null = no budget configured (default). */
+  limit: number | null
+  /** `jobs` in subscription mode, `usd` with an API key. */
+  unit: 'jobs' | 'usd'
+  spent: number
+  exceeded: boolean
+  resetsAt: string
+}
+
 export interface Stats {
   vaultName: string
+  authMode: AuthMode
   pages: PageCounts
   recentPages: RecentPage[]
   commits: Commit[]
   growth: GrowthPoint[]
   hotCache: string | null
+  /** mtime of wiki/hot.md — the Wartung tab's "letzter Refresh". null if never written. */
+  hotCacheUpdatedAt: string | null
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
+  usage: { today: UsageTotals; last7d: UsageTotals }
+  budget: Budget
   jobs: Record<string, number>
-  queue: { queued: number; active: number; inFlight: number; paused: boolean; concurrency: number }
+  queue: {
+    queued: number
+    active: number
+    inFlight: number
+    paused: boolean
+    pauseReason: PauseReason
+    concurrency: number
+  }
   watcher: { active: boolean; folder: string }
   generatedAt: string
 }
@@ -93,7 +131,7 @@ export interface Stats {
 export interface Health {
   status: string
   vaultRoot: string
-  queue: { inFlight: number; paused: boolean; concurrency: number }
+  queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
 }
 
@@ -155,13 +193,12 @@ export interface LintReport {
   totalFindings: number
 }
 
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+/** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
 
 export interface MaintenanceResult {
   ok: boolean
   kind: MaintenanceKind
-  /** The SSE channel its live log streamed on, e.g. `maintenance:lint`. */
-  channel: string
   pages: string[]
   usage: { tokensIn: number; tokensOut: number; costUsd: number }
   error?: string
@@ -169,6 +206,66 @@ export interface MaintenanceResult {
   answer?: string
   lint?: LintReport
   reportPath?: string
+}
+
+export type MaintenanceRunStatus = 'running' | 'done' | 'error'
+
+/**
+ * An async maintenance run. POST returns this at `running`; the client polls
+ * `GET /maintenance/runs/:id` until it settles and `result` appears (server-side
+ * `MaintenanceRunner`, TASKS-M5 §0).
+ */
+export interface MaintenanceRun {
+  id: string
+  kind: MaintenanceKind
+  /** SSE channel carrying the live log, e.g. `maintenance:lint`. */
+  channel: string
+  status: MaintenanceRunStatus
+  startedAt: string
+  finishedAt?: string
+  result?: MaintenanceResult
+  error?: string
+}
+
+// ---- Settings (server/src/db/settings.ts, SPEC.md §6.4/§6.5) ----
+
+/** The runtime-settable configuration. Bind + credentials are deliberately NOT in here. */
+export interface EffectiveSettings {
+  watchFolder: string
+  concurrency: number
+  maxUploadBytes: number
+  gitAutoCommit: boolean
+  /** null = no budget. Unit depends on authMode: ingests/day (oauth) or USD/day (api-key). */
+  dailyBudget: number | null
+}
+
+/**
+ * Precedence (defined server-side): env/env-file is the start-time `baseline`, the settings
+ * table holds `overrides`, and `effective` = override ?? baseline.
+ */
+export interface SettingsResponse {
+  effective: EffectiveSettings
+  baseline: EffectiveSettings
+  overrides: Partial<EffectiveSettings>
+  /** Read-only status incl. the API-key SOURCE — never the credential itself (hard rule 3). */
+  readOnly: Record<string, string>
+  /** Keys that only take effect after a service restart. */
+  restartRequiredKeys: string[]
+  /** Set on a PUT response: restart-required keys this write actually changed. */
+  pendingRestart?: string[]
+}
+
+/** A settings write. `null` clears an override, falling back to the baseline. */
+export type SettingsPatch = Partial<{
+  [K in keyof EffectiveSettings]: EffectiveSettings[K] | null
+}>
+
+/** One wiki page's markdown for the citation preview (server/src/api/routes/pages.ts). */
+export interface PagePreview {
+  path: string
+  markdown: string
+  /** True when the page was cut to the preview limit. */
+  truncated: boolean
 }
 
 /** SSE event payloads (server/src/api/routes/events.ts). */

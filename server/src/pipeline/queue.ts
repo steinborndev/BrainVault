@@ -29,13 +29,11 @@ import { sha256File } from './hash.js'
 import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { extractWrittenPaths } from './written-paths.js'
+import { msUntilReset } from './budget.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
-
-/** Bookkeeping paths that ride along with every commit — script-written, regenerable, shared. */
-const BOOKKEEPING_PATHS = ['.vault-meta'] as const
 
 export type FailureClass = 'rate_limit' | 'transient' | 'permanent'
 
@@ -76,6 +74,20 @@ export interface IngestQueueOptions {
   /** Hot-cache refresh hook; returns a note logged against the job. See file note in queue.ts. */
   readonly refreshHotCache?: (vaultRoot: string) => Promise<string>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
+  /**
+   * Whether an ingest auto-commits to the vault ("Git-Commit-Verhalten", SPEC.md §6.4). Read
+   * per commit — a provider, not a value — so a settings change applies live without a restart.
+   * When it returns false the pages still land on disk; only the commit is skipped.
+   */
+  readonly autoCommit?: () => boolean
+  /**
+   * Daily-budget check (SPEC.md §7.1, §11.3). A provider, like `autoCommit`, so a settings
+   * change applies live. When it returns true the queue pauses before claiming more work and
+   * auto-resumes at the next local midnight. In-flight jobs always run to completion.
+   */
+  readonly budgetExceeded?: () => boolean
+  /** Milliseconds until the budget window resets; injected so tests control the clock. */
+  readonly msUntilBudgetReset?: () => number
   /** Live-update bus; the queue signals `stats` when a commit changes vault-visible numbers. */
   readonly events?: EventBus
   /**
@@ -119,7 +131,8 @@ export class IngestQueue {
   private readonly store: JobStore
   private readonly vaultRoot: string
   private readonly auth: AgentAuth
-  private readonly concurrency: number
+  /** Not readonly: settings can raise/lower it live (SPEC.md §6.4 "Parallelität"). */
+  private concurrency: number
   private readonly timeoutMs: number
   private readonly maxRetries: number
   private readonly rateLimitPauseMs: number
@@ -131,10 +144,15 @@ export class IngestQueue {
   private readonly refreshHotCache: (vaultRoot: string) => Promise<string>
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
   private readonly events: EventBus | undefined
+  private readonly autoCommit: () => boolean
+  private readonly budgetExceeded: () => boolean
+  private readonly msUntilBudgetReset: () => number
 
   private readonly commitMutex: Mutex
   private running = false
   private paused = false
+  /** Why the queue is paused — the dashboard distinguishes a rate limit from a spent budget. */
+  private pauseReason: 'rate-limit' | 'budget' | null = null
   private inFlight = 0
   private toolsCache: ToolAvailability | undefined
   private idleWaiters: Array<() => void> = []
@@ -160,13 +178,38 @@ export class IngestQueue {
         'hot cache is maintained by the ingest skill itself (M0 evidence); no separate refresh pass in M1')
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
     this.events = opts.events
+    this.autoCommit = opts.autoCommit ?? ((): boolean => true)
+    this.budgetExceeded = opts.budgetExceeded ?? ((): boolean => false)
+    this.msUntilBudgetReset = opts.msUntilBudgetReset ?? ((): number => msUntilReset())
     this.commitMutex = opts.commitMutex ?? new Mutex()
   }
 
+  /**
+   * Live-applies a concurrency change from settings (SPEC.md §6.4). Raising it starts more work
+   * immediately; lowering it lets in-flight jobs finish and simply claims fewer afterwards.
+   */
+  setConcurrency(concurrency: number): void {
+    this.concurrency = Math.max(1, Math.floor(concurrency))
+    this.pump()
+  }
+
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
-   * batches whose members are still queued are reconstructed into pending units. */
+   * batches whose members are still queued are reconstructed into pending units. Jobs
+   * stranded mid-flight by an abrupt stop are first reconciled to `failed` (retryable). */
   start(): void {
     this.running = true
+    const recovered = this.store.recoverInterrupted()
+    if (recovered.length > 0) {
+      this.events?.publish({
+        kind: 'log',
+        log: {
+          jobId: 'queue',
+          ts: new Date().toISOString(),
+          level: 'warn',
+          message: `recovered ${recovered.length} interrupted job(s) after restart → failed (retryable)`,
+        },
+      })
+    }
     this.reloadPendingBatches()
     this.pump()
   }
@@ -206,8 +249,19 @@ export class IngestQueue {
   }
 
   /** Live queue state for the health/overview endpoints (SPEC.md §6.1). */
-  stats(): { readonly inFlight: number; readonly paused: boolean; readonly concurrency: number } {
-    return { inFlight: this.inFlight, paused: this.paused, concurrency: this.concurrency }
+  stats(): {
+    readonly inFlight: number
+    readonly paused: boolean
+    /** Distinguishes a usage-limit pause from a spent daily budget for the dashboard. */
+    readonly pauseReason: 'rate-limit' | 'budget' | null
+    readonly concurrency: number
+  } {
+    return {
+      inFlight: this.inFlight,
+      paused: this.paused,
+      pauseReason: this.pauseReason,
+      concurrency: this.concurrency,
+    }
   }
 
   /**
@@ -291,10 +345,14 @@ export class IngestQueue {
     return new Promise<void>((resolve) => this.idleWaiters.push(resolve))
   }
 
-  /** Manually resumes after a usage-limit pause (also called by the auto-resume timer). */
+  /**
+   * Manually resumes after a pause (also called by both auto-resume timers). If the reason still
+   * holds — e.g. the budget is still spent — `pump()` simply pauses again rather than spinning.
+   */
   resume(): void {
     if (!this.paused) return
     this.paused = false
+    this.pauseReason = null
     this.pump()
   }
 
@@ -317,6 +375,13 @@ export class IngestQueue {
 
   private pump(): void {
     if (!this.running || this.paused) {
+      this.settleIdle()
+      return
+    }
+    // Checked before claiming, never mid-job: an in-flight run always finishes, so a budget
+    // can be overshot by at most the runs already started (SPEC.md §11.3).
+    if (this.budgetExceeded()) {
+      this.pauseForBudget()
       this.settleIdle()
       return
     }
@@ -489,6 +554,12 @@ export class IngestQueue {
 
   private async commitStep(job: JobRow, pathspec: string[]): Promise<void> {
     const label = job.original_name ?? job.url ?? job.id
+    if (!this.autoCommit()) {
+      // Pages are already written; only the commit is skipped, so nothing is lost — the
+      // operator (or the next run with auto-commit on) picks them up.
+      this.store.log(job.id, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
+      return
+    }
     try {
       const result = await this.commitMutex.runExclusive(() =>
         this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
@@ -631,6 +702,10 @@ export class IngestQueue {
   /** One commit for a whole batch; every member is attributed the same committed pages. */
   private async batchCommit(memberIds: string[], names: string[], pathspec: string[]): Promise<void> {
     const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
+    if (!this.autoCommit()) {
+      this.store.log(memberIds[0]!, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
+      return
+    }
     try {
       const result = await this.commitMutex.runExclusive(() =>
         this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
@@ -659,12 +734,36 @@ export class IngestQueue {
   private pauseForRateLimit(jobId: string): void {
     if (this.paused) return
     this.paused = true
+    this.pauseReason = 'rate-limit'
     this.store.log(
       jobId,
       'warn',
       `queue paused on a usage-limit signal; auto-resume in ${Math.round(this.rateLimitPauseMs / 1000)}s (SPEC.md §7.1)`,
     )
     this.setTimeoutFn(() => this.resume(), this.rateLimitPauseMs)
+  }
+
+  /**
+   * Pauses because today's budget is spent, releasing at the next local midnight (SPEC.md §11.3).
+   * There is no job to attribute this to — it happens before claiming — so it is announced on the
+   * bus's `queue` channel rather than in a job log.
+   */
+  private pauseForBudget(): void {
+    if (this.paused) return
+    this.paused = true
+    this.pauseReason = 'budget'
+    const ms = this.msUntilBudgetReset()
+    this.events?.publish({
+      kind: 'log',
+      log: {
+        jobId: 'queue',
+        ts: new Date().toISOString(),
+        level: 'warn',
+        message: `queue paused: daily budget reached; resumes in ${Math.round(ms / 60_000)} min (SPEC.md §11.3)`,
+      },
+    })
+    this.events?.publish({ kind: 'stats' })
+    this.setTimeoutFn(() => this.resume(), ms)
   }
 }
 

@@ -31,11 +31,33 @@ export type JobSource = 'drop' | 'watch' | 'url'
 export type JobType = 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
-/** States from which no transition is legal — the job is finished, one way or another. */
+/**
+ * States from which no transition is legal (mirrors the empty rows in ALLOWED_TRANSITIONS).
+ *
+ * NOT the same thing as "the run stopped" — see FINISHED_STATES. Conflating the two is what
+ * made the dashboard's 7-day failure KPI read 0 forever (finding F2 in TASKS-M5).
+ */
 export const TERMINAL_STATES: readonly JobStatus[] = [
   'done',
   'duplicate',
   'cancelled',
+]
+
+/**
+ * States meaning "this job stopped running", which is what stamps `finished_at`.
+ *
+ * `failed` and `deferred` belong here even though they are NOT terminal: both end the run, and
+ * both are re-queueable later. Leaving them out (the F2 bug) meant they never got a
+ * `finished_at`, so every `finished_at`-filtered query — `countsSince`, which drives the
+ * Overview's "Fehler (7 T.)" and "deferred" KPIs — silently skipped them. A retry moves the job
+ * back to `queued` and clears `finished_at`, so this stays consistent.
+ */
+export const FINISHED_STATES: readonly JobStatus[] = [
+  'done',
+  'duplicate',
+  'cancelled',
+  'failed',
+  'deferred',
 ]
 
 /**
@@ -208,6 +230,37 @@ export class JobStore {
   }
 
   /**
+   * Token/cost totals over jobs whose agent run FINISHED at or after `sinceIso` — the aggregate
+   * usage display and the daily budget (SPEC.md §7.1, §11.3).
+   *
+   * Scope is `done` + `failed` deliberately: a failed run still spent tokens and still competed
+   * for the subscription's limits, so counting only successes would under-report what was used
+   * and let a run of failures blow through a daily budget unnoticed. `duplicate`/`cancelled`
+   * never started an agent run and carry no usage.
+   *
+   * `ingests` is the job count — the unit the budget uses in subscription mode, where the limit
+   * is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1).
+   *
+   * Filtering on `finished_at` is only correct because `failed` is in FINISHED_STATES (it was
+   * not before — finding F2; migration v3 backfilled the rows written under the old behaviour).
+   */
+  usageSince(sinceIso: string): { tokensIn: number; tokensOut: number; costUsd: number; ingests: number } {
+    const row = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(tokens_in), 0)  AS tokensIn,
+           COALESCE(SUM(tokens_out), 0) AS tokensOut,
+           COALESCE(SUM(cost_usd), 0)   AS costUsd,
+           COUNT(*)                     AS ingests
+         FROM jobs
+         WHERE status IN ('done', 'failed')
+           AND finished_at IS NOT NULL AND finished_at >= ?`,
+      )
+      .get(sinceIso) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
+    return row
+  }
+
+  /**
    * Job counts by status for jobs that FINISHED at or after `sinceIso` — the 7-day KPIs on
    * the Overview tab (SPEC.md §6.1). Keyed off `finished_at` so a long-running job counts on
    * the day it completed, not the day it was queued.
@@ -272,6 +325,31 @@ export class JobStore {
       return this.transition(next.id, 'preprocessing', { log: 'claimed by worker' })
     })
     return claim()
+  }
+
+  /**
+   * Reconciles jobs stranded in an active state (`preprocessing`/`ingesting`) by an abrupt
+   * stop — a WSL restart, a crash, a SIGKILL. The worker that owned them is gone, so they can
+   * never progress on their own. Mark them `failed` with an interrupted reason: this makes
+   * them diagnosable and one-click retryable (SPEC.md §10 M5), which is how in-flight work
+   * "resumes" after a restart. We deliberately do NOT auto-re-run them — an `ingesting` job
+   * may have partially written the vault, and silently replaying a mid-commit write risks
+   * vault integrity (hard rule 1). `queued` jobs are untouched; the queue resumes those itself.
+   * Returns the ids recovered. Idempotent (a second call finds nothing active).
+   */
+  recoverInterrupted(): string[] {
+    const stuck = this.db
+      .prepare("SELECT id FROM jobs WHERE status IN ('preprocessing', 'ingesting')")
+      .all() as Array<{ id: string }>
+    const recovered: string[] = []
+    for (const { id } of stuck) {
+      this.transition(id, 'failed', {
+        patch: { error: 'interrupted by a service restart before it finished — retry to run it again' },
+        log: 'recovered after service restart: job was mid-flight when the service stopped',
+      })
+      recovered.push(id)
+    }
+    return recovered
   }
 
   /** Queued batch members grouped by batch_id — for reconstructing pending batches after a restart. */
@@ -343,7 +421,7 @@ export class JobStore {
           batch_id: patch.batchId ?? null,
           now,
           set_started: to !== 'queued' && current.started_at === null ? 1 : 0,
-          set_finished: TERMINAL_STATES.includes(to) ? 1 : 0,
+          set_finished: FINISHED_STATES.includes(to) ? 1 : 0,
         })
 
       // A retry clears the previous error explicitly (COALESCE above won't overwrite a

@@ -1,0 +1,13 @@
+{
+  // Production build (M5 systemd): compile src/ to dist/ as runnable JS. rootDir MUST be
+  // `src` (not `.`) so output is dist/main.js, dist/api/server.js — keeping the same directory
+  // depth as the sources. server.ts resolves web/dist via `../../../web/dist` relative to
+  // itself; a `dist/src/...` layout (what rootDir `.` produces) would shift that and break it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["dist", "node_modules", "test"]
+}

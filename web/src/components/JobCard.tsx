@@ -9,17 +9,29 @@
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { Job } from '../api/types.ts'
+import type { AuthMode, Job } from '../api/types.ts'
 import { api } from '../api/client.ts'
 import { StatusBadge, TypeBadge } from './StatusBadge.tsx'
 import { PageLinks } from './PageLink.tsx'
 import { JobLog } from './JobLog.tsx'
 import { Icon } from './Icon.tsx'
-import { parsePages, timeAgo, duration, tokens, usd } from '../lib/format.ts'
+import { Cost } from './Cost.tsx'
+import { parsePages, timeAgo, duration, tokens } from '../lib/format.ts'
 
 type Variant = 'active' | 'queue' | 'history'
 
-export function JobCard({ job, variant, vaultName }: { job: Job; variant: Variant; vaultName: string }): React.ReactElement {
+export function JobCard({
+  job,
+  variant,
+  vaultName,
+  authMode,
+}: {
+  job: Job
+  variant: Variant
+  vaultName: string
+  /** Decides whether the per-job cost is marked as an estimate (SPEC.md §7.1). */
+  authMode: AuthMode
+}): React.ReactElement {
   const qc = useQueryClient()
   const [showLog, setShowLog] = useState(false)
   const pages = parsePages(job.created_pages)
@@ -67,7 +79,11 @@ export function JobCard({ job, variant, vaultName }: { job: Job; variant: Varian
         <span>{timeAgo(job.finished_at ?? job.started_at ?? job.created_at)}</span>
         {job.started_at && job.finished_at && <span>Dauer {duration(job.started_at, job.finished_at)}</span>}
         {job.tokens_out != null && <span>{tokens((job.tokens_in ?? 0) + job.tokens_out)} Tokens</span>}
-        {job.cost_usd != null && <span>{usd(job.cost_usd)}</span>}
+        {job.cost_usd != null && (
+          <span>
+            <Cost value={job.cost_usd} authMode={authMode} />
+          </span>
+        )}
         {job.attempts > 1 && <span>{job.attempts} Versuche</span>}
       </div>
 

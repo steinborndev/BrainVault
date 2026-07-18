@@ -20,6 +20,7 @@ import type { IngestQueue } from '../pipeline/queue.js'
 import type { EventBus } from '../pipeline/events.js'
 import type { QueryRunner } from '../pipeline/query-runner.js'
 import type { MaintenanceRunner } from '../pipeline/maintenance.js'
+import type { SettingsStore } from '../db/settings.js'
 import { registerAuth } from './auth.js'
 import { registerHealthRoute } from './routes/health.js'
 import { registerJobsRoute } from './routes/jobs.js'
@@ -27,10 +28,14 @@ import { registerEventsRoute } from './routes/events.js'
 import { registerStatsRoute } from './routes/stats.js'
 import { registerQueryRoute } from './routes/query.js'
 import { registerMaintenanceRoute } from './routes/maintenance.js'
+import { registerSettingsRoute } from './routes/settings.js'
+import { registerPagesRoute } from './routes/pages.js'
 
 export interface AppContext {
   readonly config: Config
   readonly store: JobStore
+  /** Runtime settings overrides (SPEC.md §6.4/§6.5). Optional so tests can omit it. */
+  readonly settings?: SettingsStore
   /** Chat sessions + messages store (M4). */
   readonly chat: ChatStore
   readonly queue: IngestQueue
@@ -69,6 +74,8 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerStatsRoute(app, ctx)
   registerQueryRoute(app, ctx)
   registerMaintenanceRoute(app, ctx)
+  registerSettingsRoute(app, ctx)
+  registerPagesRoute(app, ctx)
 
   await registerFrontend(app)
 

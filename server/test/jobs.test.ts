@@ -41,6 +41,82 @@ describe('create', () => {
   })
 })
 
+describe('finished_at stamping (F2 regression)', () => {
+  // The Overview's "Fehler (7 T.)" KPI read 0 forever because failed/deferred never got a
+  // finished_at, so countsSince (which filters on it) silently skipped them.
+  const run = (sha: string, to: 'done' | 'failed' | 'deferred'): string => {
+    const { job } = store.create({ ...pdf, sha256: sha })
+    store.transition(job.id, 'preprocessing')
+    if (to === 'deferred') {
+      store.transition(job.id, 'deferred')
+      return job.id
+    }
+    store.transition(job.id, 'ingesting')
+    store.transition(job.id, to)
+    return job.id
+  }
+
+  it('stamps finished_at for failed and deferred, not just terminal states', () => {
+    for (const status of ['done', 'failed', 'deferred'] as const) {
+      const id = run(`sha-${status}`, status)
+      expect(store.getOrThrow(id).finished_at, `${status} should be stamped`).not.toBeNull()
+    }
+  })
+
+  it('counts failures and deferrals in the 7-day KPIs', () => {
+    run('a', 'done')
+    run('b', 'failed')
+    run('c', 'deferred')
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const counts = store.countsSince(since)
+    expect(counts['done']).toBe(1)
+    expect(counts['failed']).toBe(1) // was 0 before the fix
+    expect(counts['deferred']).toBe(1) // was 0 before the fix
+  })
+
+  it('clears finished_at again on retry, so a re-queued job is not counted as finished', () => {
+    const id = run('r', 'failed')
+    expect(store.getOrThrow(id).finished_at).not.toBeNull()
+    store.transition(id, 'queued', { log: 'retry' })
+    expect(store.getOrThrow(id).finished_at).toBeNull()
+  })
+
+  it('keeps failed/deferred re-queueable — they are finished, not terminal', () => {
+    expect(ALLOWED_TRANSITIONS.failed).toContain('queued')
+    expect(ALLOWED_TRANSITIONS.deferred).toContain('queued')
+    expect(ALLOWED_TRANSITIONS.done).toEqual([])
+  })
+})
+
+describe('recoverInterrupted', () => {
+  it('fails jobs stranded mid-flight and leaves queued/terminal ones alone', () => {
+    const queued = store.create({ ...pdf, sha256: 'q' }).job
+    const pre = store.create({ ...pdf, sha256: 'p' }).job
+    store.transition(pre.id, 'preprocessing')
+    const ing = store.create({ ...pdf, sha256: 'i' }).job
+    store.transition(ing.id, 'preprocessing')
+    store.transition(ing.id, 'ingesting')
+    const done = store.create({ ...pdf, sha256: 'd' }).job
+    store.transition(done.id, 'preprocessing')
+    store.transition(done.id, 'ingesting')
+    store.transition(done.id, 'done')
+
+    const recovered = store.recoverInterrupted()
+
+    expect(recovered.sort()).toEqual([pre.id, ing.id].sort())
+    expect(store.getOrThrow(pre.id).status).toBe('failed')
+    expect(store.getOrThrow(ing.id).status).toBe('failed')
+    expect(store.getOrThrow(ing.id).error).toMatch(/interrupted by a service restart/)
+    // Recovered jobs are retryable (failed → queued is allowed).
+    expect(ALLOWED_TRANSITIONS.failed).toContain('queued')
+    // Untouched:
+    expect(store.getOrThrow(queued.id).status).toBe('queued')
+    expect(store.getOrThrow(done.id).status).toBe('done')
+    // Idempotent: a second pass finds nothing active.
+    expect(store.recoverInterrupted()).toEqual([])
+  })
+})
+
 describe('transition', () => {
   it('walks the happy path and stamps timestamps', () => {
     const { job } = store.create({ ...pdf, sha256: 'h' })

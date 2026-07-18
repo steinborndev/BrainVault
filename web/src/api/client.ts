@@ -14,7 +14,10 @@ import type {
   ChatMessage,
   QueryResponse,
   Citation,
-  MaintenanceResult,
+  MaintenanceRun,
+  SettingsResponse,
+  SettingsPatch,
+  PagePreview,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -23,8 +26,11 @@ async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = ''
     try {
-      const body = (await res.json()) as { error?: string }
+      const body = (await res.json()) as { error?: string; issues?: string[] }
       detail = body.error ? `: ${body.error}` : ''
+      // Validation endpoints (e.g. PUT /settings) return per-field issues — surfacing them
+      // turns "400 Bad Request" into something the user can actually act on.
+      if (Array.isArray(body.issues) && body.issues.length > 0) detail += ` (${body.issues.join('; ')})`
     } catch {
       /* non-JSON error body */
     }
@@ -119,20 +125,42 @@ export const api = {
   deleteSession: (id: string): Promise<{ ok: boolean }> =>
     fetch(`${BASE}/sessions/${id}`, { method: 'DELETE' }).then(json<{ ok: boolean }>),
 
-  // ---- Maintenance ----
+  /** Raw markdown of one wiki page, for the Chat tab's inline citation preview. */
+  page: (path: string): Promise<PagePreview> =>
+    fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`).then(json<PagePreview>),
 
-  lint: (): Promise<MaintenanceResult> =>
-    fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceResult>),
+  /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
+  saveSession: (id: string): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/sessions/${id}/save`, { method: 'POST' }).then(json<MaintenanceRun>),
 
-  hotCache: (): Promise<MaintenanceResult> =>
-    fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceResult>),
+  // ---- Maintenance (async: POST starts a run, GET polls its result) ----
 
-  research: (topic: string): Promise<MaintenanceResult> =>
+  lint: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceRun>),
+
+  hotCache: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceRun>),
+
+  research: (topic: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/research`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ topic }),
-    }).then(json<MaintenanceResult>),
+    }).then(json<MaintenanceRun>),
+
+  maintenanceRun: (id: string): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  // ---- Settings ----
+
+  settings: (): Promise<SettingsResponse> => fetch(`${BASE}/settings`).then(json<SettingsResponse>),
+
+  saveSettings: (patch: SettingsPatch): Promise<SettingsResponse> =>
+    fetch(`${BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(json<SettingsResponse>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

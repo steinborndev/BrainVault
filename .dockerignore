@@ -1,0 +1,16 @@
+# Keep the build context small and never ship local state or secrets into an image layer.
+node_modules
+**/node_modules
+server/dist
+web/dist
+.git
+.github
+*.log
+.env
+.env.*
+*.token
+# Local scratch / test drops (see .gitignore)
+*.pdf
+*.docx
+*.pptx
+*.xlsx

@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { ChatStore } from '../src/db/chat.js'
+import { SettingsStore } from '../src/db/settings.js'
 import { IngestQueue } from '../src/pipeline/queue.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
@@ -123,6 +124,7 @@ beforeEach(async () => {
     queue,
     events,
     maintenance,
+    settings: new SettingsStore(db),
     runQuery: (input) => queryImpl(input),
     logger: false,
   })
@@ -434,8 +436,207 @@ describe('POST /api/v1/query + sessions', () => {
   })
 })
 
-describe('POST /api/v1/maintenance', () => {
-  it('runs lint and returns a structured, parsed report', async () => {
+describe('GET /api/v1/pages (citation preview)', () => {
+  beforeEach(() => {
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Foo.md'), '# Foo\n\nbody text')
+    // A secret OUTSIDE the wiki, to prove the guard actually confines reads.
+    fs.writeFileSync(path.join(vaultRoot, 'secret.md'), 'TOP SECRET')
+  })
+
+  it('returns the markdown of a wiki page', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/pages?path=wiki/concepts/Foo.md`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { markdown: string; truncated: boolean }
+    expect(body.markdown).toContain('body text')
+    expect(body.truncated).toBe(false)
+  })
+
+  it('refuses to read outside the wiki', async () => {
+    // The path comes from agent-produced citations, so it is attacker-adjacent input.
+    for (const p of [
+      'secret.md',
+      '../secret.md',
+      'wiki/../secret.md',
+      'wiki/concepts/../../secret.md',
+      '/etc/passwd',
+      '../../../../etc/passwd',
+    ]) {
+      const res = await fetch(`${baseUrl}/api/v1/pages?path=${encodeURIComponent(p)}`)
+      expect(res.status, `${p} must be rejected`).toBe(400)
+      expect(await res.text()).not.toContain('TOP SECRET')
+    }
+  })
+
+  it('rejects non-markdown and missing paths', async () => {
+    expect((await fetch(`${baseUrl}/api/v1/pages`)).status).toBe(400)
+    expect((await fetch(`${baseUrl}/api/v1/pages?path=wiki/notes.txt`)).status).toBe(400)
+    expect((await fetch(`${baseUrl}/api/v1/pages?path=wiki/nope.md`)).status).toBe(404)
+  })
+})
+
+describe('POST /api/v1/sessions/:id/save', () => {
+  const poll = async (id: string): Promise<{ status: string; result?: { ok: boolean; pages: string[] } }> => {
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${baseUrl}/api/v1/maintenance/runs/${id}`)
+      const body = (await r.json()) as { status: string; result?: { ok: boolean; pages: string[] } }
+      if (body.status !== 'running') return body
+      await new Promise((res) => setTimeout(res, 5))
+    }
+    throw new Error('save run did not settle')
+  }
+
+  it('404s for an unknown session', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/sessions/nope/save`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+
+  it('400s when the session never completed a query (nothing to resume)', async () => {
+    const created = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'empty' }),
+    })
+    const { session } = (await created.json()) as { session: { id: string } }
+    const res = await fetch(`${baseUrl}/api/v1/sessions/${session.id}/save`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/nothing to save/)
+  })
+
+  it('resumes the chat SDK session under a WRITE profile and commits', async () => {
+    // Ask something first so the session records an sdk_session_id to resume.
+    await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'what is in the vault?' }),
+    })
+    const list = (await (await fetch(`${baseUrl}/api/v1/sessions`)).json()) as {
+      sessions: Array<{ id: string }>
+    }
+    const sessionId = list.sessions[0]!.id
+
+    let seen: { profile: string | undefined; resumeSessionId: string | undefined } = {
+      profile: undefined,
+      resumeSessionId: undefined,
+    }
+    maintAgent = async (opts) => {
+      seen = { profile: opts.profile, resumeSessionId: opts.resumeSessionId }
+      return okResult('saved')
+    }
+
+    const res = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/save`, { method: 'POST' })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as { id: string; kind: string; channel: string }
+    expect(started.kind).toBe('save')
+    expect(started.channel).toBe('maintenance:save')
+
+    const run = await poll(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+    // The chat is read-only by design, so the save must run write-enabled and carry the
+    // conversation forward — otherwise it has nothing to write, or no permission to write it.
+    expect(seen.profile).toBe('ingest')
+    expect(seen.resumeSessionId).toBe('sdk-session-1')
+  })
+})
+
+describe('GET/PUT /api/v1/settings', () => {
+  interface SettingsResp {
+    effective: { watchFolder: string; concurrency: number; maxUploadBytes: number; gitAutoCommit: boolean }
+    baseline: { concurrency: number }
+    overrides: Record<string, unknown>
+    readOnly: Record<string, string>
+    restartRequiredKeys: string[]
+    pendingRestart?: string[]
+  }
+  const get = async (): Promise<SettingsResp> =>
+    (await (await fetch(`${baseUrl}/api/v1/settings`)).json()) as SettingsResp
+  const put = async (body: unknown): Promise<Response> =>
+    fetch(`${baseUrl}/api/v1/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  it('reports effective/baseline/overrides and the key STATUS but never the credential', async () => {
+    const body = await get()
+    expect(body.overrides).toEqual({})
+    expect(body.effective.concurrency).toBe(body.baseline.concurrency)
+    expect(body.readOnly.authMode).toBe('oauth')
+    expect(body.readOnly.credentialSource).toBe('CLAUDE_CODE_OAUTH_TOKEN')
+    // Hard rule 3: only the STATUS is exposed — no field carries the credential value.
+    expect(Object.keys(body.readOnly)).not.toContain('credential')
+    expect(Object.keys(body.readOnly)).not.toContain('authToken')
+    expect(body.readOnly.credentialConfigured).toBe('yes')
+    expect(body.restartRequiredKeys.sort()).toEqual(['maxUploadBytes', 'watchFolder'])
+  })
+
+  it('applies a concurrency change live to the running queue', async () => {
+    expect(queue.stats().concurrency).toBe(2)
+    const res = await put({ concurrency: 4 })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SettingsResp
+    expect(body.effective.concurrency).toBe(4)
+    expect(body.pendingRestart).toEqual([]) // concurrency is live, no restart needed
+    expect(queue.stats().concurrency).toBe(4)
+  })
+
+  it('flags a restart-required key instead of pretending it applied', async () => {
+    const res = await put({ watchFolder: '/tmp/other-inbox' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SettingsResp
+    expect(body.effective.watchFolder).toBe('/tmp/other-inbox')
+    expect(body.pendingRestart).toEqual(['watchFolder'])
+  })
+
+  it('rejects keys that would breach the bind or credential rules', async () => {
+    const bindBefore = (await get()).readOnly.bind
+    for (const bad of [{ host: '0.0.0.0' }, { port: 80 }, { CLAUDE_CODE_OAUTH_TOKEN: 'leak' }]) {
+      const res = await put(bad)
+      expect(res.status).toBe(400)
+    }
+    // The bind is unchanged by the rejected writes, and still loopback (hard rule 2).
+    const after = await get()
+    expect(after.readOnly.bind).toBe(bindBefore)
+    expect(after.readOnly.bind ?? '').toMatch(/^127\.0\.0\.1:/)
+    expect(after.overrides).toEqual({})
+  })
+
+  it('clears an override with null, falling back to the baseline', async () => {
+    await put({ concurrency: 5 })
+    expect((await get()).effective.concurrency).toBe(5)
+    await put({ concurrency: null })
+    const body = await get()
+    expect(body.overrides.concurrency).toBeUndefined()
+    expect(body.effective.concurrency).toBe(body.baseline.concurrency)
+  })
+})
+
+describe('POST /api/v1/maintenance (async job-style)', () => {
+  type StartedRun = { id: string; channel: string; status: string; kind: string }
+  type PolledRun = {
+    status: 'running' | 'done' | 'error'
+    error?: string
+    result?: {
+      ok: boolean
+      lint?: { summary: Record<string, number>; sections: Array<{ title: string; findings: unknown[] }>; totalFindings: number }
+      reportPath?: string
+    }
+  }
+
+  /** Polls the run endpoint until it settles (or a bounded number of tries elapses). */
+  async function pollRun(id: string): Promise<PolledRun> {
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${baseUrl}/api/v1/maintenance/runs/${id}`)
+      expect(r.status).toBe(200)
+      const body = (await r.json()) as PolledRun
+      if (body.status !== 'running') return body
+      await new Promise((res) => setTimeout(res, 5))
+    }
+    throw new Error('maintenance run did not settle in time')
+  }
+
+  it('accepts a lint run immediately, then polls a structured, parsed report', async () => {
     // The lint agent writes a report file; the runner reads + parses it.
     maintAgent = async () => {
       fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
@@ -455,23 +656,24 @@ describe('POST /api/v1/maintenance', () => {
       return okResult('lint done')
     }
 
+    // POST returns at once with a run id — it does NOT hold the request for the run.
     const res = await fetch(`${baseUrl}/api/v1/maintenance/lint`, { method: 'POST' })
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      ok: boolean
-      channel: string
-      lint?: { summary: Record<string, number>; sections: Array<{ title: string; findings: unknown[] }>; totalFindings: number }
-      reportPath?: string
-    }
-    expect(body.ok).toBe(true)
-    expect(body.channel).toBe('maintenance:lint')
-    expect(body.lint?.summary['Pages scanned']).toBe(94)
-    expect(body.lint?.totalFindings).toBe(2)
-    expect(body.lint?.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
-    expect(body.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:lint')
+    expect(started.status).toBe('running')
+    expect(started.id).toBeTruthy()
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+    expect(run.result?.lint?.summary['Pages scanned']).toBe(94)
+    expect(run.result?.lint?.totalFindings).toBe(2)
+    expect(run.result?.lint?.sections.map((s) => s.title)).toEqual(['Orphan Pages', 'Dead Links'])
+    expect(run.result?.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
   })
 
-  it('research requires a topic; hot-cache runs', async () => {
+  it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -480,7 +682,17 @@ describe('POST /api/v1/maintenance', () => {
     expect(bad.status).toBe(400)
 
     const hot = await fetch(`${baseUrl}/api/v1/maintenance/hot-cache`, { method: 'POST' })
-    expect(hot.status).toBe(200)
-    expect(((await hot.json()) as { ok: boolean }).ok).toBe(true)
+    expect(hot.status).toBe(202)
+    const started = (await hot.json()) as StartedRun
+    expect(started.status).toBe('running')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+  })
+
+  it('returns 404 for an unknown run id', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/runs/does-not-exist`)
+    expect(res.status).toBe(404)
   })
 })

@@ -32,6 +32,9 @@ export function Ingestion(): React.ReactElement {
   // The vault name for obsidian:// links comes from /stats; cheap and already cached.
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
+  // Until stats load, assume the subscription default — marking a real cost as an estimate is
+  // a harmless caption, whereas showing an estimate as a real charge would be misleading.
+  const authMode = stats.data?.authMode ?? 'oauth'
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['jobs'],
@@ -81,7 +84,7 @@ export function Ingestion(): React.ReactElement {
         ) : (
           <div className="joblist">
             {active.map((j) => (
-              <JobCard key={j.id} job={j} variant="active" vaultName={vaultName} />
+              <JobCard key={j.id} job={j} variant="active" vaultName={vaultName} authMode={authMode} />
             ))}
           </div>
         )}
@@ -91,7 +94,7 @@ export function Ingestion(): React.ReactElement {
         <Section title={`Warteschlange (${queued.length})`}>
           <div className="joblist">
             {queued.map((j) => (
-              <JobCard key={j.id} job={j} variant="queue" vaultName={vaultName} />
+              <JobCard key={j.id} job={j} variant="queue" vaultName={vaultName} authMode={authMode} />
             ))}
           </div>
         </Section>
@@ -120,7 +123,7 @@ export function Ingestion(): React.ReactElement {
         ) : (
           <div className="joblist">
             {filteredHistory.map((j) => (
-              <JobCard key={j.id} job={j} variant="history" vaultName={vaultName} />
+              <JobCard key={j.id} job={j} variant="history" vaultName={vaultName} authMode={authMode} />
             ))}
           </div>
         )}
