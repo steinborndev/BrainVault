@@ -15,6 +15,8 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  SettingsResponse,
+  SettingsPatch,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -23,8 +25,11 @@ async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = ''
     try {
-      const body = (await res.json()) as { error?: string }
+      const body = (await res.json()) as { error?: string; issues?: string[] }
       detail = body.error ? `: ${body.error}` : ''
+      // Validation endpoints (e.g. PUT /settings) return per-field issues — surfacing them
+      // turns "400 Bad Request" into something the user can actually act on.
+      if (Array.isArray(body.issues) && body.issues.length > 0) detail += ` (${body.issues.join('; ')})`
     } catch {
       /* non-JSON error body */
     }
@@ -136,6 +141,17 @@ export const api = {
 
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  // ---- Settings ----
+
+  settings: (): Promise<SettingsResponse> => fetch(`${BASE}/settings`).then(json<SettingsResponse>),
+
+  saveSettings: (patch: SettingsPatch): Promise<SettingsResponse> =>
+    fetch(`${BASE}/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(json<SettingsResponse>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

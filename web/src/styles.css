@@ -875,3 +875,114 @@ button {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
 }
+
+/* ---- Settings editor (Wartung tab, SPEC.md §6.4) ---- */
+.settings-grid {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+}
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+.setting:last-child { border-bottom: none; }
+.setting-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.setting-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+  max-width: 52ch;
+}
+.setting-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.setting-control input[type="text"],
+.setting-control input[type="number"] {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.setting-control input[type="text"] { width: 260px; }
+.setting-control input[type="number"] { width: 92px; }
+.setting-control input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.setting-control input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+/* Inline tag — deliberately not .badge, which carries a status dot. */
+.setting-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.setting-tag.warn { color: var(--warn); background: var(--warn-bg); }
+
+.setting-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--text-dim);
+}
+.btn.ghost:hover { color: var(--text); }
+
+.toast.warn { background: var(--warn-bg); color: var(--warn); }
+
+.settings-ro-title {
+  margin: 22px 0 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.settings-ro {
+  display: grid;
+  gap: 6px;
+}
+.settings-ro-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+.settings-ro-label {
+  color: var(--text-dim);
+  min-width: 140px;
+}
+
+@media (max-width: 640px) {
+  .setting {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .setting-control input[type="text"] { width: 100%; }
+  .settings-ro-row { flex-direction: column; gap: 2px; }
+}

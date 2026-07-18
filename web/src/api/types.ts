@@ -188,6 +188,37 @@ export interface MaintenanceRun {
   error?: string
 }
 
+// ---- Settings (server/src/db/settings.ts, SPEC.md §6.4/§6.5) ----
+
+/** The runtime-settable configuration. Bind + credentials are deliberately NOT in here. */
+export interface EffectiveSettings {
+  watchFolder: string
+  concurrency: number
+  maxUploadBytes: number
+  gitAutoCommit: boolean
+}
+
+/**
+ * Precedence (defined server-side): env/env-file is the start-time `baseline`, the settings
+ * table holds `overrides`, and `effective` = override ?? baseline.
+ */
+export interface SettingsResponse {
+  effective: EffectiveSettings
+  baseline: EffectiveSettings
+  overrides: Partial<EffectiveSettings>
+  /** Read-only status incl. the API-key SOURCE — never the credential itself (hard rule 3). */
+  readOnly: Record<string, string>
+  /** Keys that only take effect after a service restart. */
+  restartRequiredKeys: string[]
+  /** Set on a PUT response: restart-required keys this write actually changed. */
+  pendingRestart?: string[]
+}
+
+/** A settings write. `null` clears an override, falling back to the baseline. */
+export type SettingsPatch = Partial<{
+  [K in keyof EffectiveSettings]: EffectiveSettings[K] | null
+}>
+
 /** SSE event payloads (server/src/api/routes/events.ts). */
 export type BusEvent =
   | { kind: 'job'; job: Job }

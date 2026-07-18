@@ -13,6 +13,7 @@ import type { LintReport, MaintenanceResult, MaintenanceRun } from '../api/types
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
+import { SettingsEditor } from '../components/SettingsEditor.tsx'
 
 interface MaintenanceRunState {
   start: () => void
@@ -142,9 +143,7 @@ export function Maintenance(): React.ReactElement {
 
       <div className="card card-pad section">
         <h3 className="section-title">Einstellungen</h3>
-        <p className="tab-hint">
-          Watch-Ordner, Parallelität, Datei-Limits und Git-Verhalten werden in Milestone&nbsp;5 als Editor ergänzt.
-        </p>
+        <SettingsEditor />
       </div>
     </div>
   )
