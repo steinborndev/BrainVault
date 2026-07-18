@@ -224,21 +224,32 @@ docker run --rm \
   brainvault
 ```
 
-Two things are not optional:
+Verified on Docker Desktop 4.52 / Engine 29.0.1 (linux/amd64): the image builds, ships bubblewrap
++ socat and the full preprocessing toolchain, `better-sqlite3` loads across the build/runtime
+stage boundary, and the service starts as PID 1 and serves both the API and the SPA.
+
+Three things to know:
 
 - **Publishing the port requires a token.** The localhost guard is not relaxed inside a container:
   to reach the service from outside you must set `HOST=0.0.0.0` **and** `HTTP_AUTH_MODE=token` +
-  `HTTP_AUTH_TOKEN`, otherwise the service refuses to start. Without them the container serves only
-  on its own loopback.
+  `HTTP_AUTH_TOKEN`, otherwise the service refuses to start (verified — it exits with a
+  configuration error). Without them the container serves only on its own loopback.
+- **In token mode the browser UI is not reachable, only the API.** The auth middleware protects
+  everything except `/api/v1/health`, including the SPA itself, so a browser gets a `401` before it
+  can load the page that would ask for a token. `curl -H "Authorization: Bearer <token>"` works
+  fine. A login screen is explicitly future work (SPEC.md §12.1, the auth "Ausbaustufe"); until it
+  exists, use the container for API/headless operation and the systemd path for browser use.
+  (`--network host` would sidestep this on a native Linux daemon by binding the host loopback
+  directly, but under Docker Desktop the container joins the Docker VM's network namespace instead,
+  so it does not help here — measured.)
 - **bubblewrap needs unprivileged user namespaces.** Depending on the host and daemon configuration
   the container may need `--security-opt seccomp=unconfined` (as above) or, on restrictive hosts,
   `--cap-add SYS_ADMIN`. If the sandbox cannot start, agent runs fail with a clear error — by
   design — so a failing ingest with a sandbox message means this, not a broken vault.
 
-> **Status:** the Dockerfile has not yet been built and run end-to-end — Docker is not installed in
-> the development WSL distro. Its build steps mirror the verified local ones (`npm ci`,
-> `npm run build`, `node dist/main.js` as a single process) and the runtime layout matches what the
-> systemd path runs, but treat the first `docker build` as unverified.
+**Bind-mounting your real vault:** the container runs as uid 10001, so a bind-mounted host
+directory owned by your user is readable but not writable by agent runs. Pass
+`--user "$(id -u):$(id -g)"` when you need the container to write into a host-mounted vault.
 
 ---
 

@@ -58,7 +58,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # autoremove pulling a python3 dependency out from under the extractors.)
 
 # Non-root: bubblewrap's normal mode is unprivileged user namespaces, and nothing here needs root.
-RUN useradd --create-home --uid 10001 vault
+#
+# The mount points must be created here AND chowned to that user. Letting the VOLUME instruction
+# below create them implicitly leaves them root-owned, and Docker seeds an anonymous volume from
+# the image directory — so the service failed at startup with SQLITE_CANTOPEN because it could not
+# create /data/jobs.db. Measured on the first real container run.
+RUN useradd --create-home --uid 10001 vault \
+    && mkdir -p /vault /data /inbox \
+    && chown vault:vault /vault /data /inbox
 WORKDIR /app
 
 COPY --from=prod-deps --chown=vault:vault /app/node_modules ./node_modules
