@@ -131,8 +131,10 @@ Four tabs, all live over SSE:
 - **Ingestion** — dropzone (files + URLs), active jobs with a live agent log, the queue, and a
   filterable history with created pages, duration, tokens and cost per job.
 - **Query/Chat** — chat against the read-only query runner; answers cite vault pages as clickable
-  chips. Multiple named sessions.
-- **Wartung** — lint (structured report), autoresearch, hot-cache refresh, and settings.
+  chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
+  sessions, each savable into the vault as a page ("In Vault sichern").
+- **Wartung** — lint (structured report), autoresearch, hot-cache refresh with its last-refresh
+  time, and the settings editor.
 
 ## Configuration
 
@@ -199,11 +201,21 @@ Because the sandbox is the real boundary, it is configured with `failIfUnavailab
 bubblewrap is missing or cannot start, an agent run **fails loudly** instead of silently running
 unconfined. That is why `bubblewrap` and `socat` are hard requirements.
 
-After any change to the permission wiring or an SDK upgrade, re-run the live probe — it is the only
-check that catches "the SDK stopped consulting our guard", which unit tests structurally cannot:
+A stuck agent run cannot outlive its timeout either: the runner owns the CLI spawn, puts it in its
+own process group, and escalates a timeout to a group `SIGKILL` — otherwise an aborted run leaves
+its `bash`/`python3` descendants running, which is what once made a lint outlive its 15-minute
+timeout by six minutes.
+
+Both guarantees rest on SDK behaviour that unit tests structurally cannot observe, so each has a
+live probe. Re-run them after any change to the permission/spawn wiring or an SDK upgrade:
 
 ```bash
-VAULT_ROOT=~/vault npm run permprobe --workspace server   # expects: canary outside vault: blocked
+# Is our guard still consulted at all? Expects: canary outside vault: blocked
+VAULT_ROOT=~/vault npm run permprobe --workspace server
+
+# Does a stuck tool really die with the run? Expects: PASS … descendants were reaped
+# Point this at a THROWAWAY vault — it runs write-enabled (see the script header).
+VAULT_ROOT=/tmp/throwaway-vault npm run killprobe --workspace server
 ```
 
 ---
@@ -292,13 +304,21 @@ GET    /events                   SSE: job updates, log streams, stats invalidati
 GET    /stats                    dashboard numbers, usage totals, budget
 POST   /query                    read-only question against the vault (+ citations)
 GET/POST/PATCH/DELETE /sessions  chat sessions
+POST   /sessions/:id/save        save a chat session into the vault (async run)
+GET    /pages?path=…             one wiki page's markdown, for the citation preview (read-only)
 POST   /maintenance/{lint,research,hot-cache}   starts an async run → { id, channel }
-GET    /maintenance/runs/:id     poll that run's result
+GET    /maintenance/runs         recent runs
+GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration
 ```
 
-Maintenance runs are asynchronous: the POST returns a run id immediately and streams its live log
-over the SSE channel, so a long lint can never wedge the HTTP request.
+Every vault-mutating agent run — lint, autoresearch, hot-cache, and saving a chat session — is
+asynchronous: the POST returns a run id immediately and streams its live log over the SSE channel,
+then you poll `/maintenance/runs/:id`. A long lint can never wedge the HTTP request.
+
+`GET /pages` is deliberately narrow: the path comes from agent-produced citations, so it is
+confined to `VAULT_ROOT/wiki`, must end in `.md`, and is re-checked after `realpath` so a symlink
+cannot become a read primitive.
 
 ## Troubleshooting
 
@@ -315,6 +335,12 @@ Check `~/.config/vault-service/env` and that only one credential variable is set
 
 **The watch folder never fires.** Windows mounts (`/mnt/*`) deliver no inotify events; the watcher
 switches to polling automatically. Force it with `WATCH_POLLING=true`.
+
+**A page the agent wrote is missing from the commit / `git status` shows an untracked page.**
+The commit pathspec is derived from the agent's `Write`/`Edit` tool calls. A page it creates or
+renames with `Bash` is invisible to that; the run sweeps such pages in automatically, but only
+while it can prove it was the sole vault writer — with a second run in flight the sweep is skipped
+rather than risk filing the page under the wrong job. Commit it by hand; nothing is lost.
 
 **Obsidian cannot open the vault over `\\wsl$`.** It can't — Obsidian for Windows fails with
 `EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4.
