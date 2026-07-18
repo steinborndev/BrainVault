@@ -124,7 +124,7 @@ vault, and silently replaying a mid-commit write risks vault integrity.
 
 ## The dashboard
 
-Four tabs, all live over SSE:
+Five tabs, all live over SSE:
 
 - **Übersicht** — page counts by type, wiki growth, recent pages as `obsidian://` deep links, the
   hot cache, 7-day KPIs, token/cost totals and the daily budget.
@@ -133,8 +133,17 @@ Four tabs, all live over SSE:
 - **Query/Chat** — chat against the read-only query runner; answers cite vault pages as clickable
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("In Vault sichern").
+- **Vault** — a read-only viewer that makes the Obsidian app optional for everyday use: an
+  interactive graph of the wikilink structure (search, per-bucket filters, and a local-
+  neighborhood mode around a focused page) and a page view with rendered markdown, clickable
+  `[[wikilinks]]`, a frontmatter properties panel, and backlink/outgoing panels. Deep-linkable:
+  `/vault` and `/vault/page/<path>` survive a reload and browser back/forward.
 - **Wartung** — lint (structured report), autoresearch, hot-cache refresh with its last-refresh
   time, and the settings editor.
+
+The graph renders on a canvas with the force layout in a web worker, so it stays smooth as the
+vault grows — deliberately, since the WSLg Obsidian graph does not. The vault itself is never
+written from here; only agent runs write (see the security model).
 
 ## Configuration
 
@@ -305,7 +314,9 @@ GET    /stats                    dashboard numbers, usage totals, budget
 POST   /query                    read-only question against the vault (+ citations)
 GET/POST/PATCH/DELETE /sessions  chat sessions
 POST   /sessions/:id/save        save a chat session into the vault (async run)
-GET    /pages?path=…             one wiki page's markdown, for the citation preview (read-only)
+GET    /pages?path=…[&full=1]    one wiki page's markdown — truncated preview, or the full
+                                 page + title/type/mtime with full=1 (read-only)
+GET    /graph                    the vault's wikilink graph: typed nodes + directed edges
 POST   /maintenance/{lint,research,hot-cache}   starts an async run → { id, channel }
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
@@ -316,11 +327,20 @@ Every vault-mutating agent run — lint, autoresearch, hot-cache, and saving a c
 asynchronous: the POST returns a run id immediately and streams its live log over the SSE channel,
 then you poll `/maintenance/runs/:id`. A long lint can never wedge the HTTP request.
 
-`GET /pages` is deliberately narrow: the path comes from agent-produced citations, so it is
-confined to `VAULT_ROOT/wiki`, must end in `.md`, and is re-checked after `realpath` so a symlink
-cannot become a read primitive.
+`GET /pages` is deliberately narrow: the path comes from agent-produced citations (and from
+client-side routes), so it is confined to `VAULT_ROOT/wiki`, must end in `.md`, and is re-checked
+after `realpath` so a symlink cannot become a read primitive.
+
+`GET /graph` derives everything from the filesystem and caches parses per file on (mtime, size),
+returning the previous graph unchanged when nothing moved — a repeat request on the real vault
+costs about 2 ms.
 
 ## Troubleshooting
+
+**Frontend changes don't show up after a rebuild.** The static file routes are registered at
+startup (`@fastify/static` with `wildcard: false`), so a running service keeps serving the old
+asset names and the new hashed files fall through to the SPA shell. Restart the service after
+`npm run build:web` (`systemctl --user restart vault-service`).
 
 **Port 8420 already in use.** Usually an orphaned process from a killed `tsx`/`npm` wrapper:
 `ss -ltnp | grep 8420`, then kill the PID. The systemd unit avoids this by running the built JS
