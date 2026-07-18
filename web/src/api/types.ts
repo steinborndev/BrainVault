@@ -167,6 +167,24 @@ export interface PageFull {
   mtime?: string
 }
 
+/** Result of a user page edit (PUT /pages) — every edit is one git commit. */
+export interface PageWriteResult {
+  ok: boolean
+  path: string
+  mtime: string
+  commit: string | null
+  committed: boolean
+}
+
+/** Result of a user page delete; staleLinks = backlinks that just went dangling. */
+export interface PageDeleteResult {
+  ok: boolean
+  path: string
+  staleLinks: number
+  commit: string | null
+  committed: boolean
+}
+
 /** A resolved page citation for a chat answer (server/src/pipeline/citations.ts). */
 export interface Citation {
   label: string

@@ -1335,3 +1335,53 @@ button {
   margin: 0;
   color: var(--text-dim);
 }
+
+/* --- Vault editor + stale-links banner (SPEC §12.4 editing) --- */
+
+.page-editor textarea {
+  width: 100%;
+  min-height: 60vh;
+  resize: vertical;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.page-editor textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.btn.danger {
+  border-color: var(--err);
+  color: var(--err);
+  font-weight: 600;
+}
+
+.stale-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--warn-bg);
+  color: var(--text);
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.stale-banner svg {
+  color: var(--warn);
+  flex-shrink: 0;
+}

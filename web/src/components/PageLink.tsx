@@ -1,12 +1,14 @@
 /**
- * A created/updated wiki page rendered as an Obsidian deep-link (TASKS-M3 §0, §3, §4) with
- * a copy-path fallback: if the `obsidian://` handler isn't wired across the WSLg boundary,
- * the copy button still gives the user the vault-relative path. This is the DoD's "result
- * page links open in Obsidian — or the documented fallback".
+ * A created/updated wiki page as a chip. The PRIMARY action is the in-dashboard vault viewer
+ * (`/vault/page/…`) — it works from any browser, including Windows, where the obsidian://
+ * handler routes to Windows-Obsidian, which cannot open a WSL vault over `\\wsl$` (EISDIR,
+ * won't-fix; SPEC.md §3/§11). Obsidian stays available as a secondary action for WSLg
+ * setups, plus the copy-path fallback.
  */
 
 import { useState } from 'react'
 import { obsidianUri, pageLabel, pageBucket } from '../lib/obsidian.ts'
+import { navigate, pageRoute } from '../lib/router.ts'
 import { Icon } from './Icon.tsx'
 
 /**
@@ -52,10 +54,28 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
     })
   }
 
+  const openObsidian = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Assigning the protocol URI triggers the handler without leaving the page.
+    window.location.href = obsidianUri(vaultName, path)
+  }
+
   return (
-    <a className="pagelink" href={obsidianUri(vaultName, path)} title={`In Obsidian öffnen: ${path}`}>
+    <a
+      className="pagelink"
+      href={pageRoute(path)}
+      onClick={(e) => {
+        e.preventDefault()
+        navigate(pageRoute(path))
+      }}
+      title={`Im Vault-Viewer öffnen: ${path}`}
+    >
       <span className="bucket">{pageBucket(path)}</span>
       {pageLabel(path)}
+      <button className="copy" onClick={openObsidian} title="In Obsidian öffnen" aria-label="In Obsidian öffnen">
+        <Icon name="link" />
+      </button>
       <button
         className="copy"
         onClick={copy}

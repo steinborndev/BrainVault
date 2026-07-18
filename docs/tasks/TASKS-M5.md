@@ -300,3 +300,31 @@ and all four pre-existing tabs still fine under the new router.
 binds one route per file AT STARTUP. After a frontend rebuild the running service still serves
 the old asset names and new hashed files 404 into the SPA fallback — **restart the service after
 `npm run build:web`**. Pre-existing behaviour, not introduced by this work.
+
+
+### §8 addendum — editing + Windows-first links (2026-07-18, user-requested)
+
+The viewer is no longer read-only, and the dashboard no longer depends on `obsidian://`:
+
+- **In-app links everywhere:** `PageLink` (used by Overview, Ingestion history, chat citation
+  chips, maintenance results) now navigates to `/vault/page/…` as its primary action; the
+  obsidian:// deep link became a secondary icon. This is the fix for "Windows browser can't use
+  the deep links" — Windows-Obsidian cannot open a WSL vault over `\\wsl$` (M0 finding), so the
+  in-app viewer is the path that works everywhere.
+- **Edit + delete in the page view:** `PUT`/`DELETE /api/v1/pages`, same wiki confinement as GET.
+  Every mutation is ONE git commit (`edit: <title>` / `delete: <title>`) behind the shared commit
+  mutex, via the new `commitPaths()` in `pipeline/git.ts` — deliberately NOT `commitVault()`,
+  whose `git add -A` fallback would sweep a concurrently running agent's half-written pages into
+  the user's commit (covered by a regression test). Optimistic locking via `baseMtime` → 409.
+  `gitAutoCommit=false` is honoured (write without commit, like ingest). Page creation stays
+  agent-only by design.
+- **Stale-links banner:** DELETE returns `staleLinks` (the page's in-degree from the shared
+  GraphBuilder, computed before the unlink). The frontend accumulates these across deletions in
+  a sessionStorage-backed store and shows a dismissable banner with the counter, guiding the
+  user to the Wartung tab for a lint run — the vault's own mechanism for cleaning dangling
+  references. Hard rule 1 and SPEC §12.4 were amended accordingly (user decision 2026-07-18).
+- Verified end-to-end in a real browser against an ISOLATED throwaway instance
+  (`VAULT_ROOT`/`PORT`/`DB_PATH`/`WATCH_FOLDER` env — the real vault was never touched):
+  in-app links, edit→commit, 409 conflict path with reload, delete→commit, banner counter (2),
+  guidance navigation, clean git history (`seed`, `edit:` ×2, `delete:`), clean tree.
+  Server suite: 270 tests green (`pages-write.test.ts` added).

@@ -21,6 +21,8 @@ import type { EventBus } from '../pipeline/events.js'
 import type { QueryRunner } from '../pipeline/query-runner.js'
 import type { MaintenanceRunner } from '../pipeline/maintenance.js'
 import type { SettingsStore } from '../db/settings.js'
+import type { Mutex } from '../util/mutex.js'
+import { GraphBuilder } from '../pipeline/graph.js'
 import { registerAuth } from './auth.js'
 import { registerHealthRoute } from './routes/health.js'
 import { registerJobsRoute } from './routes/jobs.js'
@@ -46,6 +48,14 @@ export interface AppContext {
   readonly runQuery?: QueryRunner
   /** Maintenance runner (lint / autoresearch / hot-cache). */
   readonly maintenance: MaintenanceRunner
+  /**
+   * The commit mutex shared with the queue and the maintenance runner. User page edits
+   * (PUT/DELETE /pages) commit behind it so they never interleave with an agent commit.
+   * Optional so tests can omit it (the pages route falls back to a private mutex).
+   */
+  readonly commitMutex?: Mutex
+  /** gitAutoCommit provider (SPEC.md §6.4), same live-settings pattern as the queue's. */
+  readonly autoCommit?: () => boolean
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
 }
@@ -76,8 +86,11 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerQueryRoute(app, ctx)
   registerMaintenanceRoute(app, ctx)
   registerSettingsRoute(app, ctx)
-  registerPagesRoute(app, ctx)
-  registerGraphRoute(app, ctx)
+  // One shared graph builder: the graph endpoint serves it, and the pages DELETE consults
+  // it for the backlink count (its per-file cache makes both cheap).
+  const graphBuilder = new GraphBuilder(ctx.config.vaultRoot)
+  registerPagesRoute(app, ctx, graphBuilder)
+  registerGraphRoute(app, ctx, graphBuilder)
 
   await registerFrontend(app)
 

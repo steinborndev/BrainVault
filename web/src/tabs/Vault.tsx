@@ -10,9 +10,10 @@
  * (hard rule 1: the vault is only ever written by agent runs).
  */
 
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
 import type { GraphNode, VaultGraph } from '../api/types.ts'
 import { GraphCanvas } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
@@ -202,6 +203,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   return (
     <div className="vault-graph">
+      <StaleLinksBanner />
       <div className="graph-toolbar">
         <div className="graph-search">
           <Icon name="search" />
@@ -272,9 +274,57 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 // ---------------------------------------------------------------------------- page view
 
 function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.ReactElement {
+  const qc = useQueryClient()
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
   const pageQ = useQuery({ queryKey: ['page-full', path], queryFn: () => api.pageFull(path), staleTime: 30_000 })
+
+  // ---- editing (SPEC.md §12.4 as amended: every dashboard mutation is one git commit) ----
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const deleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (deleteTimer.current) clearTimeout(deleteTimer.current)
+  }, [])
+
+  const save = useMutation({
+    mutationFn: () => api.savePage(path, draft, pageQ.data?.mtime),
+    onSuccess: () => {
+      setEditing(false)
+      qc.invalidateQueries({ queryKey: ['page-full', path] })
+      qc.invalidateQueries({ queryKey: ['page', path] }) // the citation-preview cache
+      qc.invalidateQueries({ queryKey: ['graph'] }) // links may have changed
+      qc.invalidateQueries({ queryKey: ['stats'] }) // a commit landed
+    },
+  })
+  const saveConflict = save.isError && (save.error as Error).message.startsWith('409')
+
+  const del = useMutation({
+    mutationFn: () => api.deletePage(path),
+    onSuccess: (res) => {
+      // Feed the lint-guidance banner: these backlinks just went dangling.
+      staleLinks.add(res.staleLinks, pageQ.data?.title ?? path)
+      qc.invalidateQueries({ queryKey: ['graph'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      navigate('/vault')
+    },
+  })
+
+  const startEdit = (): void => {
+    setDraft(pageQ.data?.markdown ?? '')
+    save.reset()
+    setEditing(true)
+  }
+  const requestDelete = (): void => {
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      deleteTimer.current = setTimeout(() => setConfirmDelete(false), 4000)
+      return
+    }
+    if (deleteTimer.current) clearTimeout(deleteTimer.current)
+    del.mutate()
+  }
 
   // Title → path map for resolving clicked wikilinks — same first-wins, case-insensitive
   // rule as the server, so the viewer and the graph can never disagree.
@@ -346,11 +396,65 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
         >
           <Icon name="graph" /> Im Graph
         </button>
+        {!editing && pageQ.data && (
+          <button className="btn" onClick={startEdit} title="Seite bearbeiten (jede Änderung wird ein Git-Commit)">
+            <Icon name="edit" /> Bearbeiten
+          </button>
+        )}
+        {!editing && pageQ.data && (
+          <button
+            className={`btn${confirmDelete ? ' danger' : ''}`}
+            onClick={requestDelete}
+            disabled={del.isPending}
+            title={confirmDelete ? 'Wirklich löschen? (als Git-Commit, rückholbar)' : 'Seite löschen'}
+          >
+            {del.isPending ? 'Lösche…' : confirmDelete ? 'Wirklich löschen?' : <Icon name="x" />}
+          </button>
+        )}
         <a className="btn" href={obsidianUri(vaultName, path)} title="In Obsidian öffnen">
           <Icon name="link" /> Obsidian
         </a>
       </div>
 
+      <StaleLinksBanner />
+      {del.isError && <div className="toast err">Löschen fehlgeschlagen: {(del.error as Error).message}</div>}
+
+      {editing ? (
+        <div className="page-editor">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            aria-label="Seiteninhalt (Markdown)"
+          />
+          <div className="editor-actions">
+            <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending}>
+              {save.isPending ? 'Speichere…' : 'Speichern (Commit)'}
+            </button>
+            <button className="btn" onClick={() => setEditing(false)} disabled={save.isPending}>
+              Abbrechen
+            </button>
+            {saveConflict && (
+              <span className="toast err">
+                Die Seite wurde zwischenzeitlich geändert (z. B. durch einen Agent-Run).{' '}
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    save.reset()
+                    setEditing(false)
+                    void qc.invalidateQueries({ queryKey: ['page-full', path] })
+                  }}
+                >
+                  Neu laden
+                </button>
+              </span>
+            )}
+            {save.isError && !saveConflict && (
+              <span className="toast err">Speichern fehlgeschlagen: {(save.error as Error).message}</span>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="page-columns">
         <article className="page-body">
           {pageQ.isLoading && <div className="empty">Lade Seite…</div>}
@@ -418,6 +522,41 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
           )}
         </aside>
       </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Banner shown after manual deletions: N backlinks now point at nothing, and the vault's own
+ * cleanup mechanism for that is a lint run — guide the user there instead of leaving the
+ * dangling references to be discovered weeks later.
+ */
+function StaleLinksBanner(): React.ReactElement | null {
+  const state = useStaleLinks()
+  if (state.count === 0) return null
+  const pages = state.pages.join(', ')
+  return (
+    <div className="stale-banner" role="status">
+      <Icon name="graph" />
+      <span>
+        Durch das Löschen von <strong>{pages}</strong> {state.count === 1 ? 'ist' : 'sind'}{' '}
+        <strong>{state.count}</strong> Link{state.count === 1 ? '' : 's'} verwaist. Ein Lint-Lauf findet und
+        bereinigt die Verweise.
+      </span>
+      <span className="spacer" />
+      <button
+        className="btn primary"
+        onClick={() => {
+          staleLinks.clear()
+          navigate('/wartung')
+        }}
+      >
+        Zur Wartung
+      </button>
+      <button className="btn ghost" onClick={() => staleLinks.clear()} title="Ausblenden" aria-label="Banner ausblenden">
+        <Icon name="x" />
+      </button>
     </div>
   )
 }

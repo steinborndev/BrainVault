@@ -95,7 +95,19 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
   })
 
-  const app = await buildServer({ config: effectiveConfig, store, chat, queue, events, maintenance, settings })
+  const app = await buildServer({
+    config: effectiveConfig,
+    store,
+    chat,
+    queue,
+    events,
+    maintenance,
+    settings,
+    // User page edits/deletes commit behind the same mutex as ingest + maintenance, and
+    // honour the live gitAutoCommit setting exactly like the queue does.
+    commitMutex,
+    autoCommit: () => settings.effective(config).gitAutoCommit,
+  })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
 

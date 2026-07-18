@@ -20,6 +20,8 @@ import type {
   PagePreview,
   PageFull,
   VaultGraph,
+  PageWriteResult,
+  PageDeleteResult,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -137,6 +139,21 @@ export const api = {
 
   /** The vault's wikilink graph (server-side cached; cheap to refetch). */
   graph: (): Promise<VaultGraph> => fetch(`${BASE}/graph`).then(json<VaultGraph>),
+
+  /**
+   * User edit of one page (SPEC.md §12.4). `baseMtime` is the optimistic lock: the server
+   * 409s if the page changed since it was loaded, instead of silently overwriting.
+   */
+  savePage: (path: string, markdown: string, baseMtime?: string): Promise<PageWriteResult> =>
+    fetch(`${BASE}/pages`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, markdown, ...(baseMtime ? { baseMtime } : {}) }),
+    }).then(json<PageWriteResult>),
+
+  /** User delete of one page; the response's staleLinks feeds the lint-guidance banner. */
+  deletePage: (path: string): Promise<PageDeleteResult> =>
+    fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).then(json<PageDeleteResult>),
 
   /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
   saveSession: (id: string): Promise<MaintenanceRun> =>

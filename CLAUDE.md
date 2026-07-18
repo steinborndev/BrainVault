@@ -26,7 +26,7 @@ The vault itself lives OUTSIDE this repo (default `~/vault`, a claude-obsidian c
 
 ## Hard rules
 
-1. **Vault integrity first.** The service writes to the vault only through agent runs and git commits. Never delete or rewrite vault content from pipeline code. SQLite holds operational state only; losing the DB must never damage the vault (SPEC.md §8).
+1. **Vault integrity first.** The service writes to the vault only through agent runs, git commits, and **user-initiated page edits/deletes via `PUT`/`DELETE /api/v1/pages`** (added 2026-07-18, SPEC.md §12.4) — and every such mutation IS one immediate git commit behind the shared commit mutex, so it stays versioned and revertable and can never interleave with an agent commit. Never delete or rewrite vault content from *pipeline* code. SQLite holds operational state only; losing the DB must never damage the vault (SPEC.md §8).
 2. **Localhost guard.** Server binds `127.0.0.1` by default. If bind ≠ localhost and no auth mode with a token/password is active, refuse to start (SPEC.md §9). Do not weaken this.
 3. **Credentials** (`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`) live only in the service environment. Never in the repo, logs, frontend, or SQLite. Refuse to start if both are set (SPEC.md §7.1).
 4. **Agent run permissions** (wording corrected from M0 evidence — read this before touching the runner's permission wiring):

@@ -8,10 +8,10 @@ import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
 import { GraphBuilder } from '../../pipeline/graph.js'
 
-export function registerGraphRoute(app: FastifyInstance, ctx: AppContext): void {
-  const builder = new GraphBuilder(ctx.config.vaultRoot)
+export function registerGraphRoute(app: FastifyInstance, ctx: AppContext, builder?: GraphBuilder): void {
+  const graph = builder ?? new GraphBuilder(ctx.config.vaultRoot)
 
   app.get('/api/v1/graph', async () => {
-    return builder.build()
+    return graph.build()
   })
 }

@@ -106,6 +106,31 @@ function wikiPagesFrom(files: string): string[] {
     .map((p) => p.split(path.sep).join(path.posix.sep))
 }
 
+/**
+ * Commits EXACTLY the given paths — used by user-initiated page edits/deletes from the
+ * dashboard (SPEC.md §12.4 editing). Unlike commitVault there is deliberately NO
+ * `git add -A` fallback and the commit itself is pathspec-limited: these commits can run
+ * while an agent is mid-write (the agent's own commit comes later, under the same mutex),
+ * and sweeping its half-written pages into a user's edit commit would file them under the
+ * wrong change. `git add -- <path>` stages a deletion of a tracked file just fine.
+ */
+export async function commitPaths(
+  vaultRoot: string,
+  message: string,
+  paths: readonly string[],
+): Promise<CommitResult> {
+  await git(vaultRoot, ['add', '--', ...paths])
+  const staged = await git(vaultRoot, ['diff', '--cached', '--name-only', '--', ...paths])
+  if (staged.trim() === '') {
+    return { committed: false, committedPages: [], note: 'nothing to commit — content unchanged' }
+  }
+  // `commit -- <paths>` commits only these paths, leaving anything else staged untouched.
+  await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message, '--', ...paths])
+  const hash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
+  const files = await git(vaultRoot, ['show', '--name-only', '--pretty=format:', 'HEAD'])
+  return { committed: true, hash, committedPages: wikiPagesFrom(files) }
+}
+
 export interface CommitOptions {
   /**
    * Vault-relative paths to stage for THIS commit (F4). Staging only a job's own paths

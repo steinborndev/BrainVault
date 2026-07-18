@@ -301,8 +301,22 @@ deep-linkbaren Routen (`/vault` = Graph, `/vault/page/<pfad>` = Seite), strikt l
   ruckelnde Obsidian-Graph-View (Abschnitt 3/11) ist genau das, was hier nicht reproduziert
   werden soll. Der Vault-Tab ist als eigener Chunk code-gesplittet.
 
-Der `obsidian://`-Deep-Link bleibt als Brücke bestehen; Schreibzugriff auf den Vault gibt es
-weiterhin ausschließlich über Agent-Runs (Hard Rule 1).
+Der `obsidian://`-Deep-Link bleibt als Brücke bestehen, ist aber seit 2026-07-18 die
+**Sekundäraktion**: alle Seiten-Links im Dashboard (Übersicht, Ingestion-Historie, Chat-Zitate,
+Wartung) öffnen primär den In-App-Viewer — damit ist das Dashboard aus einem **Windows-Browser**
+vollwertig nutzbar (Windows-Obsidian kann den WSL-Vault über `\\wsl$` nicht öffnen, Abschnitt 3/11).
+
+**Bearbeiten/Löschen (Erweiterung 2026-07-18, User-Entscheidung):** Der Viewer ist nicht mehr rein
+lesend. `PUT /api/v1/pages` (Bearbeiten, mit optimistischem Locking über `baseMtime` → 409 bei
+zwischenzeitlicher Änderung) und `DELETE /api/v1/pages` (Löschen mit Zwei-Schritt-Bestätigung).
+Hard Rule 1 bleibt dem Geist nach intakt und wurde präzisiert: **jede Dashboard-Mutation ist genau
+ein Git-Commit** (`edit: <Seite>` / `delete: <Seite>`), ausgeführt hinter demselben Commit-Mutex
+wie Ingest- und Wartungs-Commits und strikt pfadbegrenzt (kein `git add -A`-Fallback), sodass
+halbfertige Seiten eines parallel laufenden Agent-Runs nie in einen User-Commit geraten. Neue
+Seiten entstehen weiterhin nur über Ingestion/Agent-Runs — das Dashboard editiert und löscht
+Bestehendes. Nach einem Löschen zeigt das Dashboard ein Banner mit der Zahl der dadurch
+verwaisten Backlinks und führt den Nutzer zum Lint-Lauf (dem vault-eigenen Aufräummechanismus
+für hängende Verweise).
 
 ### 12.5 Reihenfolge
 

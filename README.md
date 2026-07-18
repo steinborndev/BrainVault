@@ -133,11 +133,20 @@ Five tabs, all live over SSE:
 - **Query/Chat** — chat against the read-only query runner; answers cite vault pages as clickable
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("In Vault sichern").
-- **Vault** — a read-only viewer that makes the Obsidian app optional for everyday use: an
+- **Vault** — the viewer that makes the Obsidian app optional for everyday use: an
   interactive graph of the wikilink structure (search, per-bucket filters, and a local-
   neighborhood mode around a focused page) and a page view with rendered markdown, clickable
-  `[[wikilinks]]`, a frontmatter properties panel, and backlink/outgoing panels. Deep-linkable:
-  `/vault` and `/vault/page/<path>` survive a reload and browser back/forward.
+  `[[wikilinks]]`, a frontmatter properties panel, and backlink/outgoing panels. Pages can be
+  **edited and deleted right here** — every mutation is one git commit (`edit:`/`delete:`),
+  serialized behind the same commit mutex as agent commits, with an optimistic lock (409 if an
+  agent changed the page since you loaded it). After a delete, a banner counts the backlinks
+  that just went dangling and points you at a lint run. Deep-linkable: `/vault` and
+  `/vault/page/<path>` survive a reload and browser back/forward.
+
+  All page links across the dashboard open this viewer first; the `obsidian://` deep link is
+  the secondary action on each chip. That makes the dashboard fully usable from a **Windows**
+  browser — Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only
+  work from a WSLg browser.
 - **Wartung** — lint (structured report), autoresearch, hot-cache refresh with its last-refresh
   time, and the settings editor.
 
@@ -315,7 +324,11 @@ POST   /query                    read-only question against the vault (+ citatio
 GET/POST/PATCH/DELETE /sessions  chat sessions
 POST   /sessions/:id/save        save a chat session into the vault (async run)
 GET    /pages?path=…[&full=1]    one wiki page's markdown — truncated preview, or the full
-                                 page + title/type/mtime with full=1 (read-only)
+                                 page + title/type/mtime with full=1
+PUT    /pages                    user edit {path, markdown, baseMtime} → write + git commit
+                                 (409 when the page changed since baseMtime)
+DELETE /pages?path=…             user delete → unlink + git commit; returns staleLinks
+                                 (backlinks that now dangle, drives the lint banner)
 GET    /graph                    the vault's wikilink graph: typed nodes + directed edges
 POST   /maintenance/{lint,research,hot-cache}   starts an async run → { id, channel }
 GET    /maintenance/runs         recent runs
