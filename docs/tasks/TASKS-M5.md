@@ -260,3 +260,43 @@ fixed on `fix/deep-review`. Highlights — details in the two `fix:` commits:
 Still deliberately open (unchanged): queue-reorder endpoint (M3 optional), git-revert button
 (v1.1), token streaming for chat, login screen (SPEC §12.1 Ausbaustufe), per-job-type model
 choice, multiple watch folders, live budget-pause trigger (unit-tested only).
+
+
+---
+
+## 8. Vault-Viewer + Graph-View (SPEC §12.4) — DONE (2026-07-18)
+
+Pulled forward from the §12.5 roadmap (it was step 6) because the WSLg Obsidian graph is
+unusable and the goal is to make the Obsidian app optional for everyday use.
+
+**Server (read-only):** `pipeline/graph.ts` + `GET /api/v1/graph`; `GET /api/v1/pages` gained
+`full=1`. The graph builder reuses `parseWikilinks` from `citations.ts` (so chat citations and
+graph edges resolve identically) and caches per file on (mtime, size), returning the previous
+graph object outright when nothing changed. Real vault: 111 nodes / 802 edges, 35 ms cold,
+2 ms cached, 19 KB JSON. Covered by `test/graph.test.ts` (resolution rules + both cache layers).
+
+**Frontend:** new `Vault` tab, hand-rolled history router (`lib/router.ts`), Canvas-2D renderer
+(`components/GraphCanvas.tsx`) driven by a d3-force web worker (`lib/graphLayout.worker.ts`).
+Scale decisions, deliberate because the vault keeps growing: canvas over SVG, layout off the
+UI thread and cooling to a stop, label LOD by zoom + hub degree, viewport culling, local-
+neighborhood mode (BFS depth 1/2) so a huge vault never has to lay out in full, and the tab is
+code-split (13 kB + 16 kB worker). Only new dependency: `d3-force`.
+
+**Four bugs the browser found that tests could not** (all fixed, see the fix commit):
+1. `flex: 1` on the canvas wrapper overrode `height` in a column flex container → canvas stuck
+   at min-height.
+2. Fit-to-view used the absolute bounding box, so a few far-flung orphan pages shrank the
+   cluster to a speck → 5th–95th percentile fit + degree-dependent centering force.
+3. A global `.md { max-height: 420px; overflow: auto }` (written for the hot-cache snippet)
+   silently clipped full pages to 420 px of 3026 → scoped to the embedding containers.
+4. YAML frontmatter rendered as prose → now a properties panel with navigable wikilinks.
+
+**Verified end-to-end in a real browser** (headless Chromium driving the live systemd service):
+graph paints and fits, search matches, node click opens the page, wikilink navigation + browser
+back, "Im Graph" focus jump, deep-link reload, no console errors, no mobile horizontal overflow,
+and all four pre-existing tabs still fine under the new router.
+
+**Operational note learned here:** `@fastify/static` is registered with `wildcard: false`, which
+binds one route per file AT STARTUP. After a frontend rebuild the running service still serves
+the old asset names and new hashed files 404 into the SPA fallback — **restart the service after
+`npm run build:web`**. Pre-existing behaviour, not introduced by this work.

@@ -283,8 +283,27 @@ Diese drei Anforderungen hängen architektonisch zusammen und werden deshalb gem
 
 **Ausbaustufe:** Ein zusätzlicher Bereich (oder eine Erweiterung der Übersicht), der die Wiki-Seiten direkt rendert: Markdown mit aufgelösten `[[Wikilinks]]` als klickbare In-App-Navigation, Backlinks-Panel, und ein **Graph-View** aus dem Wikilink-Graphen (die Links sind vollständig parsebar; ein neuer read-only Endpunkt `GET /api/v1/graph` liefert Knoten/Kanten, `GET /api/v1/page/*` den gerenderten Seiteninhalt). Bleibt strikt lesend — Schreibzugriff auf den Vault gibt es weiterhin nur über Agent-Runs (Hard Rule 1). obsidian://-Deep-Links und der Copy-Pfad-Fallback bleiben als Brücke bestehen, solange Obsidian parallel genutzt wird.
 
-**Nicht in M0–M5.** Kandidat für M6 bzw. eine bewusste Produktentscheidung; die v1-Architektur (Vault-Root als Konfigwert, API-first, alles read-only ableitbar aus FS+git) trägt das ohne Umbau.
+**Status: UMGESETZT (2026-07-18, nach M5).** Realisiert als fünfter Tab „Vault" mit zwei
+deep-linkbaren Routen (`/vault` = Graph, `/vault/page/<pfad>` = Seite), strikt lesend:
+
+- **Server:** `GET /api/v1/graph` (Knoten je Wiki-Seite, typisiert nach Wiki-Verzeichnis;
+  gerichtete Kanten als Index-Paare; Zähler für unaufgelöste Links) und
+  `GET /api/v1/pages?path=…&full=1` (Volltext + Titel/Typ/mtime). Der Graph-Builder cacht
+  Parses pro Datei über (mtime, size) und liefert bei unverändertem Vault dasselbe Objekt
+  zurück — gemessen am realen Vault: 111 Seiten / 802 Kanten, 35 ms kalt, 2 ms gecacht, 19 KB JSON.
+- **Frontend:** Canvas-2D-Rendering (kein DOM-Knoten pro Seite), d3-force-Simulation in einem
+  Web Worker, die abkühlt und stoppt; Label-Level-of-Detail nach Zoom und Knotengrad,
+  Viewport-Culling, Pan/Zoom/Touch, Nachbarschafts-Hervorhebung. Suche, Typ-Filter und ein
+  lokaler Graph-Modus (BFS-Tiefe 1/2 um eine fokussierte Seite) halten die Ansicht auch bei
+  großem Vault handhabbar. Seitenansicht mit Backlinks-/Ausgehend-Panel, Frontmatter als
+  Eigenschaften-Panel und klickbaren `[[Wikilinks]]` (gleiche Auflösungsregel wie serverseitig).
+- **Skalierung** ist bewusstes Entwurfskriterium: der Vault wächst kontinuierlich, und die
+  ruckelnde Obsidian-Graph-View (Abschnitt 3/11) ist genau das, was hier nicht reproduziert
+  werden soll. Der Vault-Tab ist als eigener Chunk code-gesplittet.
+
+Der `obsidian://`-Deep-Link bleibt als Brücke bestehen; Schreibzugriff auf den Vault gibt es
+weiterhin ausschließlich über Agent-Runs (Hard Rule 1).
 
 ### 12.5 Reihenfolge
 
-Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits, (6) In-Dashboard Vault-Viewer (12.4) — macht die Obsidian-App im Alltag optional.
+Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits. ~~(6) In-Dashboard Vault-Viewer~~ — **vorgezogen und am 2026-07-18 umgesetzt** (12.4); die Obsidian-App ist damit im Alltag optional.
