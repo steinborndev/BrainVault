@@ -111,12 +111,14 @@ Windows 11
 |---|---|---|---|
 | PDF | Extension + Magic Bytes | Text-Extraktion; bei Text-Ausbeute < 100 Zeichen/Seite: Seiten rastern + OCR | `pdftotext` (poppler), Fallback `ocrmypdf`/tesseract (deu+eng) |
 | Office (docx, pptx, xlsx) | Extension | Konvertierung nach Markdown/Plaintext | `pandoc` (docx), `python-pptx`/`openpyxl`-basierte Extraktoren aus WSL |
-| Webseite/URL | URL-Job | Abruf + Boilerplate-Entfernung nach den Egress-Hygiene-Regeln des Repos (kein `file://`, kein RFC1918, DNS-Pinning gegen Rebinding, Größenlimit) | `defuddle-cli` (vom Repo als Extraktor vorgesehen), Fallback: eingebauter HTML-zu-Text-Extraktor (readability als mögliche spätere Aufwertung) |
+| Webseite/URL | URL-Job | Abruf + Boilerplate-Entfernung nach den Egress-Hygiene-Regeln des Repos (kein `file://`, kein RFC1918, DNS-Pinning gegen Rebinding, Größenlimit); danach **Sanity-Gate**: Mindestlänge + Muster-Erkennung für Login-Walls/JS-Hüllen/Anti-Bot-Seiten — schlägt das Gate an, endet der Job `failed` mit Begründung, bevor ein Agent-Run läuft (kein Müll im Vault) | `defuddle-cli` (vom Repo als Extraktor vorgesehen), Fallback: eingebauter HTML-zu-Text-Extraktor (readability als mögliche spätere Aufwertung) |
+| X/Twitter-Post | URL-Job (Domain-Handler) | Öffentliche Posts via FxTwitter-JSON-API (`api.fxtwitter.com`, ohne Login) statt HTML-Abruf — X liefert per HTML nur eine Login-Hülle. Private/gelöschte Posts → `failed` mit klarer Meldung | eingebauter Handler (`url-handlers.ts`), Fetch über die SSRF-geschützte Pipeline |
+| YouTube-Video | URL-Job (Domain-Handler) | Metadaten + Untertitel/Auto-Captions (de, en) statt der inhaltsleeren Watch-Seite; ohne Untertitel: Metadaten + Beschreibung mit Hinweis | `yt-dlp` (optionales Tool; fehlt es, endet der Job `failed` mit Installationshinweis) |
 | Bild (png, jpg, webp) | Extension + Magic Bytes | Kein lokales OCR nötig: Bild wird dem Agent-Run direkt als Anhang mitgegeben (Claude liest Bildinhalt/Screenshot-Text selbst); zusätzlich EXIF-Metadaten in `manifest.json` | Agent SDK (Bild-Input), `exiftool` |
 | Markdown/Text/Code | Extension | Durchreichen | — |
 | Audio/Video | Extension | v1: `deferred` (siehe 4.2) | später: faster-whisper oder Cloud-API, Schnittstelle: Preprocessing-Plugin |
 
-Das Preprocessing ist als Plugin-Kette implementiert (`detect → normalize → manifest`), damit die Transkription später als weiteres Plugin einrastet, ohne Pipeline-Umbau.
+Das Preprocessing ist als Plugin-Kette implementiert (`detect → normalize → manifest`), damit die Transkription später als weiteres Plugin einrastet, ohne Pipeline-Umbau. URL-Jobs haben analog eine **Domain-Handler-Registry** (`url-handlers.ts`): Domains, deren HTML nicht ingestierbar ist (X/Twitter, YouTube), bekommen je einen Handler, der den Inhalt über einen besseren Kanal beschafft — neue Domains werden als Handler ergänzt, nie als Sonderfall in `preprocessUrl`. Handler-HTTP läuft über denselben SSRF-geschützten Fetch; `yt-dlp` ist die bewusste Ausnahme (externes Tool mit eigenem Egress, nur für YouTube-Hosts).
 
 ---
 

@@ -26,6 +26,9 @@ if python3 -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)' 
 fi
 python3 -m pip install ${PIP_USER_FLAG} --upgrade python-pptx openpyxl odfpy
 
+echo "==> yt-dlp (pip, for YouTube URL ingestion: metadata + subtitles)"
+python3 -m pip install ${PIP_USER_FLAG} --upgrade yt-dlp
+
 echo "==> defuddle (npm, for URL/web extraction)"
 # Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
 # Ships the `defuddle` binary (the old `defuddle-cli` package merged into it).
@@ -33,7 +36,7 @@ npm install -g defuddle
 
 echo "==> Verifying"
 missing=0
-for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle; do
+for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle yt-dlp; do
   if command -v "$tool" >/dev/null 2>&1; then
     printf '  ok   %s\n' "$tool"
   else

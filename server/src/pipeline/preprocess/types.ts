@@ -62,6 +62,7 @@ export interface ToolAvailability {
   readonly python3: boolean
   readonly exiftool: boolean
   readonly defuddle: boolean
+  readonly ytDlp: boolean
 }
 
 export interface Manifest {

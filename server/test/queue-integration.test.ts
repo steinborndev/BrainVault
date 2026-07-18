@@ -30,6 +30,7 @@ const NO_TOOLS: ToolAvailability = {
   python3: false,
   exiftool: false,
   defuddle: false,
+  ytDlp: false,
 }
 
 const git = (cwd: string, ...args: string[]): string =>

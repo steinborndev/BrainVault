@@ -24,7 +24,7 @@ git repository on disk, and the only thing that leaves the box is the agent's tr
 | Vault | a claude-obsidian clone (v1.9.2, Generic mode), by default at `~/vault` |
 | Credential | a Claude subscription token **or** an Anthropic API key (exactly one) |
 | Sandbox | `bubblewrap` + `socat` — **required**, agent runs fail without them |
-| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle |
+| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube-URLs: Metadaten + Untertitel) |
 
 ### 1. The vault
 

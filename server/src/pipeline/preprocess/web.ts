@@ -21,6 +21,7 @@ import type { Manifest, PreprocessResult, ToolAvailability } from './types.js'
 import { PreprocessError } from './types.js'
 import { runTool } from './tools.js'
 import { detectTools } from './tools.js'
+import { findUrlHandler } from './url-handlers.js'
 
 /** Default response cap. Web pages are larger than the 50 KB autoresearch fetch cap. */
 export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024
@@ -139,6 +140,11 @@ export function pinnedRequest(
     const req = client.request(
       v.url,
       {
+        // Some sites (e.g. Wikipedia) return 403 to requests without a User-Agent.
+        headers: {
+          'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) vault-service/0.1 (+local ingestion)',
+          accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        },
         lookup: (_hostname, options, callback) => {
           if (options.all) {
             callback(null, [{ address: v.address, family }])
@@ -198,6 +204,44 @@ export function htmlToText(html: string): string {
     .trim()
 }
 
+/** Minimum characters the generic extraction must yield before a job proceeds to ingest. */
+export const MIN_WEB_CONTENT_CHARS = 300
+/**
+ * Only short extractions are pattern-checked: a real article that merely QUOTES a login
+ * prompt is long, so the length bound keeps the patterns from false-positive matching.
+ */
+const GATE_PATTERN_MAX_CHARS = 5000
+
+const BLOCKED_PAGE_PATTERNS: ReadonlyArray<{ readonly re: RegExp; readonly reason: string }> = [
+  { re: /javascript is not available/i, reason: 'the site serves a JavaScript-only shell (X/Twitter login wall)' },
+  { re: /please (enable|turn on) javascript|(enable|activate) javascript and cookies/i, reason: 'the page requires JavaScript rendering' },
+  { re: /(log|sign) ?in to (continue|view|read)|sign ?up to (continue|view|read)/i, reason: 'login required' },
+  { re: /you (must|need to) be logged in|create an account to (continue|read|view)/i, reason: 'login required' },
+  { re: /subscribe (now )?to (continue|read|keep reading)|subscription required/i, reason: 'paywall' },
+  { re: /checking your browser|verify(ing)? (that )?you are (a )?human|just a moment\.\.\.|attention required.{0,5}cloudflare/i, reason: 'anti-bot interstitial (e.g. Cloudflare)' },
+  { re: /melde dich an|melden sie sich an|jetzt anmelden|jetzt registrieren/i, reason: 'login required (German)' },
+  { re: /abonnieren, um weiter ?zu ?lesen|jetzt abonnieren und weiterlesen/i, reason: 'paywall (German)' },
+]
+
+/**
+ * Sanity gate for the generic fetch+extract path (SPEC.md §5): returns a human-readable
+ * reason when the extraction is junk (app shell, login wall, anti-bot page), else null.
+ * Failing here turns the job `failed` with that reason BEFORE an agent run burns tokens
+ * on it and writes a garbage page into the vault.
+ */
+export function assessExtractedContent(markdown: string): string | null {
+  const text = markdown.trim()
+  if (text.length < MIN_WEB_CONTENT_CHARS) {
+    return `only ${text.length} characters of extractable content — the page is likely a JavaScript app shell, empty, or blocked`
+  }
+  if (text.length <= GATE_PATTERN_MAX_CHARS) {
+    for (const p of BLOCKED_PAGE_PATTERNS) {
+      if (p.re.test(text)) return `page looks like a login/anti-bot/paywall shell: ${p.reason}`
+    }
+  }
+  return null
+}
+
 export interface PreprocessUrlInput {
   readonly jobId: string
   readonly url: string
@@ -212,27 +256,53 @@ export async function preprocessUrl(input: PreprocessUrlInput): Promise<Preproce
   fs.mkdirSync(input.jobDir, { recursive: true })
   const validated = await validateUrl(input.url)
   const { url } = validated
-  const html = await fetchCapped(validated, input.maxBytes ?? DEFAULT_MAX_BYTES, input.timeoutMs ?? 30_000)
-
-  const rawPath = path.join(input.jobDir, 'raw.html')
-  fs.writeFileSync(rawPath, html, 'utf8')
-
+  const maxBytes = input.maxBytes ?? DEFAULT_MAX_BYTES
+  const timeoutMs = input.timeoutMs ?? 30_000
   const tools = input.tools ?? (await detectTools())
   const notes: string[] = []
   let markdown: string
+  let original: string
 
-  if (tools.defuddle) {
-    try {
-      const { stdout } = await runTool('defuddle', ['parse', rawPath, '--md'], { timeoutMs: 30_000 })
-      markdown = stdout.trim()
-      notes.push('extracted via defuddle')
-    } catch {
-      markdown = htmlToText(html)
-      notes.push('defuddle failed — used built-in HTML-to-text fallback')
-    }
+  const handler = findUrlHandler(url)
+  if (handler) {
+    // Domain handler path: content comes from a structured channel (API / yt-dlp), which
+    // does its own error handling — the generic junk gate below does not apply (a
+    // legitimate tweet is shorter than any sane minimum for an article).
+    const result = await handler.handle({
+      url,
+      jobDir: input.jobDir,
+      tools,
+      fetchText: async (raw: string) => fetchCapped(await validateUrl(raw), maxBytes, timeoutMs),
+    })
+    markdown = result.markdown
+    original = result.original
+    notes.push(`handled by ${handler.name}`, ...result.notes)
   } else {
-    markdown = htmlToText(html)
-    notes.push('defuddle not installed — used built-in HTML-to-text fallback')
+    const html = await fetchCapped(validated, maxBytes, timeoutMs)
+    const rawPath = path.join(input.jobDir, 'raw.html')
+    fs.writeFileSync(rawPath, html, 'utf8')
+    original = 'raw.html'
+
+    if (tools.defuddle) {
+      try {
+        const { stdout } = await runTool('defuddle', ['parse', rawPath, '--md'], { timeoutMs: 30_000 })
+        markdown = stdout.trim()
+        notes.push('extracted via defuddle')
+      } catch {
+        markdown = htmlToText(html)
+        notes.push('defuddle failed — used built-in HTML-to-text fallback')
+      }
+    } else {
+      markdown = htmlToText(html)
+      notes.push('defuddle not installed — used built-in HTML-to-text fallback')
+    }
+
+    const problem = assessExtractedContent(markdown)
+    if (problem) {
+      throw new PreprocessError(
+        `web content sanity check failed for ${url.href}: ${problem}. Nothing was ingested — the page would only have produced a junk vault entry.`,
+      )
+    }
   }
 
   const normalizedPath = path.join(input.jobDir, 'normalized.md')
@@ -246,7 +316,7 @@ export async function preprocessUrl(input: PreprocessUrlInput): Promise<Preproce
     originalName: url.href,
     url: url.href,
     createdAt: nowIso(),
-    original: 'raw.html',
+    original,
     normalized: 'normalized.md',
     normalizedChars: markdown.length,
     ocrApplied: false,
