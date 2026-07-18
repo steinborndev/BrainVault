@@ -89,7 +89,7 @@ export function startWatcher(opts: StartWatcherOptions): Watcher {
     quietTimer = undefined
     capTimer = undefined
     const group = buffer.splice(0)
-    if (group.length > 0) void handleGroup(group, opts.queue, log)
+    if (group.length > 0) void handleGroup(group, opts.queue, log, maxBytes)
   }
 
   const schedule = (): void => {
@@ -110,6 +110,7 @@ export function startWatcher(opts: StartWatcherOptions): Watcher {
   })
   if (usePolling) log('info', `polling mode (Windows mount) for ${folder}`)
 
+  const maxBytes = opts.config.server.maxUploadBytes
   watcher.on('add', (filePath) => {
     buffer.push({ filePath, name: path.basename(filePath) })
     schedule()
@@ -130,11 +131,27 @@ async function handleGroup(
   group: Array<{ filePath: string; name: string }>,
   queue: IngestQueue,
   log: LogFn,
+  maxBytes: number,
 ): Promise<void> {
   const items: BatchItem[] = []
   const inboxFiles: string[] = []
   for (const { filePath, name } of group) {
     try {
+      // The watch folder honours the same size cap as uploads (SPEC.md §4.2 "wie 4.1");
+      // an over-limit file becomes a visible failed job and the inbox is still emptied.
+      const size = fs.statSync(filePath).size
+      if (size > maxBytes) {
+        const job = queue.rejectOversizedFile({
+          sourcePath: filePath,
+          originalName: name,
+          source: 'watch',
+          sizeBytes: size,
+          limitBytes: maxBytes,
+        })
+        log('warn', `refused oversized ${name} (${size} bytes > ${maxBytes}) → failed job ${job.id}`)
+        fs.rmSync(filePath, { force: true })
+        continue
+      }
       // .url/.webloc shortcut, or a Web Clipper .md carrying a frontmatter URL → URL job.
       const url = isShortcut(name)
         ? readShortcutUrl(filePath)

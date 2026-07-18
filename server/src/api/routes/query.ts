@@ -15,14 +15,28 @@ import type { AppContext } from '../server.js'
 import { runQuery as defaultRunQuery, type QueryRunner } from '../../pipeline/query-runner.js'
 import { extractCitations, indexWikiPages } from '../../pipeline/citations.js'
 
+/**
+ * Concurrent query ceiling. Each query spawns a full sandboxed agent subprocess; unlike the
+ * ingest queue (capped by `concurrency`) and maintenance (serialized on the run mutex), this
+ * route had no limit — N reloading tabs meant N five-minute CLI processes. Excess requests get
+ * a 429 instead of queueing: a stale chat tab retrying is better served by failing fast.
+ */
+const MAX_CONCURRENT_QUERIES = 2
+
 export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void {
   const { config, chat } = ctx
   const runQuery: QueryRunner = ctx.runQuery ?? defaultRunQuery
+  let activeQueries = 0
 
   app.post('/api/v1/query', async (req, reply) => {
     const body = (req.body ?? {}) as { question?: unknown; sessionId?: unknown }
     const question = typeof body.question === 'string' ? body.question.trim() : ''
     if (question === '') return reply.code(400).send({ error: 'provide a non-empty "question"' })
+    if (activeQueries >= MAX_CONCURRENT_QUERIES) {
+      return reply
+        .code(429)
+        .send({ error: `already answering ${activeQueries} question(s) — try again in a moment` })
+    }
 
     // Resolve or create the session; a follow-up carries the SDK session id to resume.
     let session = typeof body.sessionId === 'string' ? chat.getSession(body.sessionId) : undefined
@@ -33,12 +47,18 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
 
     chat.addMessage({ sessionId: session.id, role: 'user', content: question })
 
-    const res = await runQuery({
-      vaultRoot: config.vaultRoot,
-      question,
-      auth: config.auth,
-      ...(session.sdk_session_id ? { resumeSessionId: session.sdk_session_id } : {}),
-    })
+    activeQueries++
+    let res: Awaited<ReturnType<QueryRunner>>
+    try {
+      res = await runQuery({
+        vaultRoot: config.vaultRoot,
+        question,
+        auth: config.auth,
+        ...(session.sdk_session_id ? { resumeSessionId: session.sdk_session_id } : {}),
+      })
+    } finally {
+      activeQueries--
+    }
 
     if (!res.ok) {
       const message = chat.addMessage({

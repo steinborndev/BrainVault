@@ -41,16 +41,29 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
 
     if (req.isMultipart()) {
       const staged: Array<{ tempPath: string; name: string }> = []
-      for await (const part of req.files()) {
-        const name = part.filename || `upload-${ulid()}`
-        const tempPath = path.join(stagingDir(), `${ulid()}-${path.basename(name)}`)
-        await fs.promises.writeFile(tempPath, await part.toBuffer())
-        staged.push({ tempPath, name })
-      }
-      if (staged.length === 0) {
-        return reply.code(400).send({ error: 'multipart request contained no files' })
-      }
       try {
+        // The staging loop is INSIDE the cleanup scope: when a later part exceeds the size
+        // limit, the parts already written must still be removed, and the client deserves
+        // the honest 413 rather than a generic 500.
+        try {
+          for await (const part of req.files()) {
+            const name = part.filename || `upload-${ulid()}`
+            const tempPath = path.join(stagingDir(), `${ulid()}-${path.basename(name)}`)
+            staged.push({ tempPath, name })
+            await fs.promises.writeFile(tempPath, await part.toBuffer())
+          }
+        } catch (err) {
+          const code = (err as { code?: string }).code
+          if (code === 'FST_REQ_FILE_TOO_LARGE' || code === 'FST_FILES_LIMIT') {
+            return reply.code(413).send({
+              error: `upload exceeds the configured limit (${ctx.config.server.maxUploadBytes} bytes per file, 50 files)`,
+            })
+          }
+          throw err
+        }
+        if (staged.length === 0) {
+          return reply.code(400).send({ error: 'multipart request contained no files' })
+        }
         // A .url/.webloc becomes a URL item; everything else is a file item.
         const items: BatchItem[] = staged.map(({ tempPath, name }) => {
           const url = isShortcut(name) ? readShortcutUrl(tempPath) : undefined
@@ -111,14 +124,14 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
     return reply.code(400).send({ error: 'provide a file upload (multipart), a "url", or "text"' })
   })
 
-  // List recent jobs for the Ingestion tab (SPEC.md §6.2).
+  // List recent jobs for the Ingestion tab, filterable by status AND type (SPEC.md §6.2, §6.5).
   app.get('/api/v1/jobs', async (req) => {
-    const query = req.query as { status?: string; limit?: string }
+    const query = req.query as { status?: string; type?: string; limit?: string }
     const limit = Math.min(Number(query.limit ?? '100') || 100, 500)
-    const rows = query.status
-      ? store.listByStatus(query.status as never).slice(0, limit)
-      : store.recent(limit)
-    return { jobs: rows }
+    const filters: { status?: JobStatus; type?: string } = {}
+    if (query.status) filters.status = query.status as JobStatus
+    if (query.type) filters.type = query.type
+    return { jobs: store.list({ ...filters, limit }) }
   })
 
   app.get('/api/v1/jobs/:id', async (req, reply) => {

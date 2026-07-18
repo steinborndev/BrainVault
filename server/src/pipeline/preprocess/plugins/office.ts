@@ -26,10 +26,11 @@ const EXTRACT_SCRIPT = path.resolve(
 export const officePlugin: PreprocessPlugin = {
   name: 'office',
   type: 'office',
-  // Extension-driven: OLE/zip magic only disambiguates a mislabelled file. A bare .zip
-  // is NOT office (archive plugin handles it); office requires an office extension.
-  matches: (probe: Probe): boolean =>
-    OFFICE_EXTS.has(probe.ext) && (isZip(probe.head) || isOle(probe.head) || probe.ext.length > 0),
+  // An office extension AND office magic (zip container for OOXML/ODF, OLE for legacy).
+  // A bare .zip is NOT office (archive plugin handles it); a text file renamed to .docx
+  // fails the magic check and falls through to the text plugin instead of crashing pandoc.
+  // (The previous `|| probe.ext.length > 0` disjunct made the magic check dead code.)
+  matches: (probe: Probe): boolean => OFFICE_EXTS.has(probe.ext) && (isZip(probe.head) || isOle(probe.head)),
 
   async normalize(ctx: NormalizeContext): Promise<NormalizeResult> {
     const src = ctx.probe.filePath

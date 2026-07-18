@@ -230,6 +230,28 @@ export class JobStore {
   }
 
   /**
+   * Filterable job list for `GET /jobs?status=&type=` (SPEC.md §6.5). Unknown status/type
+   * values simply match nothing — the CHECK-constrained columns can't contain them anyway.
+   */
+  list(filters: { readonly status?: JobStatus; readonly type?: string; readonly limit?: number }): JobRow[] {
+    const clauses: string[] = []
+    const params: unknown[] = []
+    if (filters.status !== undefined) {
+      clauses.push('status = ?')
+      params.push(filters.status)
+    }
+    if (filters.type !== undefined) {
+      clauses.push('type = ?')
+      params.push(filters.type)
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+    params.push(filters.limit ?? 100)
+    return this.db
+      .prepare(`SELECT * FROM jobs ${where} ORDER BY created_at DESC LIMIT ?`)
+      .all(...params) as JobRow[]
+  }
+
+  /**
    * Token/cost totals over jobs whose agent run FINISHED at or after `sinceIso` — the aggregate
    * usage display and the daily budget (SPEC.md §7.1, §11.3).
    *
@@ -399,9 +421,15 @@ export class JobStore {
              error = COALESCE(@error, error),
              raw_path = COALESCE(@raw_path, raw_path),
              created_pages = COALESCE(@created_pages, created_pages),
-             tokens_in = COALESCE(@tokens_in, tokens_in),
-             tokens_out = COALESCE(@tokens_out, tokens_out),
-             cost_usd = COALESCE(@cost_usd, cost_usd),
+             -- Usage ACCUMULATES across attempts: a failed attempt's tokens were spent and
+             -- count against the subscription/budget just like the retry's. Overwriting here
+             -- (the old COALESCE) made a retry-then-success job under-report its real usage.
+             tokens_in = CASE WHEN @tokens_in IS NULL THEN tokens_in
+                              ELSE COALESCE(tokens_in, 0) + @tokens_in END,
+             tokens_out = CASE WHEN @tokens_out IS NULL THEN tokens_out
+                               ELSE COALESCE(tokens_out, 0) + @tokens_out END,
+             cost_usd = CASE WHEN @cost_usd IS NULL THEN cost_usd
+                             ELSE COALESCE(cost_usd, 0) + @cost_usd END,
              batch_id = COALESCE(@batch_id, batch_id),
              started_at = CASE WHEN started_at IS NULL AND @set_started = 1 THEN @now ELSE started_at END,
              finished_at = CASE WHEN @set_finished = 1 THEN @now ELSE NULL END

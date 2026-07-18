@@ -126,8 +126,18 @@ UPDATE jobs
    AND finished_at IS NULL;
 `
 
+/**
+ * v4 — index for the `finished_at`-filtered aggregates (`usageSince`, `countsSince`). The
+ * budget check runs `usageSince` on every queue pump, so this is a hot path; without an index
+ * `countsSince` scans the table.
+ */
+const V4 = `
+CREATE INDEX idx_jobs_finished ON jobs(finished_at);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
   { version: 3, up: V3 },
+  { version: 4, up: V4 },
 ]

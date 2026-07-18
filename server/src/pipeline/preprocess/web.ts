@@ -10,6 +10,8 @@
  */
 
 import fs from 'node:fs'
+import http from 'node:http'
+import https from 'node:https'
 import path from 'node:path'
 import dns from 'node:dns/promises'
 import net from 'node:net'
@@ -89,53 +91,99 @@ async function defaultResolve(host: string): Promise<string[]> {
   return records.map((r) => r.address)
 }
 
-/** Fetches with a byte cap, manual redirect handling (each hop re-validated), and a timeout. */
-async function fetchCapped(start: URL, maxBytes: number, timeoutMs: number): Promise<string> {
+/**
+ * Fetches with a byte cap, manual redirect handling (each hop re-validated), and a timeout.
+ *
+ * Every hop connects to the ADDRESS that passed the SSRF check, never to the hostname:
+ * letting the HTTP client re-resolve the name would reopen the guard to DNS rebinding
+ * (public answer during validation, private answer at connect time). TLS still verifies
+ * against the hostname — only the socket target is pinned.
+ */
+async function fetchCapped(
+  start: ValidatedUrl,
+  maxBytes: number,
+  timeoutMs: number,
+  resolve?: (host: string) => Promise<string[]>,
+): Promise<string> {
   let current = start
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    try {
-      const res = await fetch(current, { redirect: 'manual', signal: controller.signal })
-      if (res.status >= 300 && res.status < 400) {
-        const location = res.headers.get('location')
-        if (!location) throw new PreprocessError(`redirect with no Location from ${current.href}`)
-        const next = new URL(location, current)
-        await validateUrl(next.href) // re-validate every hop against the SSRF guard
-        current = next
-        continue
-      }
-      if (!res.ok) throw new PreprocessError(`fetch failed: HTTP ${res.status} for ${current.href}`)
-
-      const declared = Number(res.headers.get('content-length') ?? '0')
-      if (declared > maxBytes) {
-        throw new PreprocessError(`response too large: ${declared} bytes > cap ${maxBytes}`)
-      }
-      return await readCapped(res, maxBytes)
-    } finally {
-      clearTimeout(timer)
+    const res = await pinnedRequest(current, timeoutMs, maxBytes)
+    if (res.status >= 300 && res.status < 400) {
+      if (!res.location) throw new PreprocessError(`redirect with no Location from ${current.url.href}`)
+      const next = new URL(res.location, current.url)
+      // Re-validate every hop against the SSRF guard; the returned address is the pin.
+      current = resolve ? await validateUrl(next.href, resolve) : await validateUrl(next.href)
+      continue
     }
+    if (res.status < 200 || res.status >= 300) {
+      throw new PreprocessError(`fetch failed: HTTP ${res.status} for ${current.url.href}`)
+    }
+    return res.body
   }
-  throw new PreprocessError(`too many redirects (> ${MAX_REDIRECTS}) starting at ${start.href}`)
+  throw new PreprocessError(`too many redirects (> ${MAX_REDIRECTS}) starting at ${start.url.href}`)
 }
 
-/** Reads the body, aborting if it exceeds the cap even when content-length lied. */
-async function readCapped(res: Response, maxBytes: number): Promise<string> {
-  const reader = res.body?.getReader()
-  if (!reader) return await res.text()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > maxBytes) {
-      await reader.cancel()
-      throw new PreprocessError(`response exceeded cap ${maxBytes} bytes mid-stream`)
-    }
-    chunks.push(value)
-  }
-  return Buffer.concat(chunks).toString('utf8')
+/**
+ * One HTTP(S) request to the validated address (exported for the pinning tests). The `lookup`
+ * override is what makes the pin real: whatever DNS says now, the socket goes to `v.address`.
+ * The body is read under the cap and the request destroyed the moment it exceeds it.
+ */
+export function pinnedRequest(
+  v: ValidatedUrl,
+  timeoutMs: number,
+  maxBytes: number,
+): Promise<{ status: number; location?: string; body: string }> {
+  return new Promise((resolvePromise, reject) => {
+    const family = net.isIP(v.address)
+    const client = v.url.protocol === 'https:' ? https : http
+    const req = client.request(
+      v.url,
+      {
+        lookup: (_hostname, options, callback) => {
+          if (options.all) {
+            callback(null, [{ address: v.address, family }])
+          } else {
+            ;(callback as (err: null, address: string, family: number) => void)(null, v.address, family)
+          }
+        },
+      },
+      (res) => {
+        const status = res.statusCode ?? 0
+        const declared = Number(res.headers['content-length'] ?? '0')
+        if (declared > maxBytes) {
+          res.destroy()
+          reject(new PreprocessError(`response too large: ${declared} bytes > cap ${maxBytes}`))
+          return
+        }
+        const chunks: Buffer[] = []
+        let total = 0
+        res.on('data', (chunk: Buffer) => {
+          total += chunk.byteLength
+          if (total > maxBytes) {
+            res.destroy()
+            reject(new PreprocessError(`response exceeded cap ${maxBytes} bytes mid-stream`))
+            return
+          }
+          chunks.push(chunk)
+        })
+        res.on('end', () => {
+          const result: { status: number; location?: string; body: string } = {
+            status,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }
+          const location = res.headers['location']
+          if (typeof location === 'string') result.location = location
+          resolvePromise(result)
+        })
+        res.on('error', (err) => reject(new PreprocessError(`fetch failed for ${v.url.href}: ${err.message}`)))
+      },
+    )
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`timed out after ${timeoutMs} ms`))
+    })
+    req.on('error', (err) => reject(new PreprocessError(`fetch failed for ${v.url.href}: ${err.message}`)))
+    req.end()
+  })
 }
 
 /** Bare-minimum HTML→text when defuddle is unavailable — strips tags, collapses space. */
@@ -162,8 +210,9 @@ export interface PreprocessUrlInput {
 
 export async function preprocessUrl(input: PreprocessUrlInput): Promise<PreprocessResult> {
   fs.mkdirSync(input.jobDir, { recursive: true })
-  const { url } = await validateUrl(input.url)
-  const html = await fetchCapped(url, input.maxBytes ?? DEFAULT_MAX_BYTES, input.timeoutMs ?? 30_000)
+  const validated = await validateUrl(input.url)
+  const { url } = validated
+  const html = await fetchCapped(validated, input.maxBytes ?? DEFAULT_MAX_BYTES, input.timeoutMs ?? 30_000)
 
   const rawPath = path.join(input.jobDir, 'raw.html')
   fs.writeFileSync(rawPath, html, 'utf8')

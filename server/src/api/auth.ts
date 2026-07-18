@@ -6,6 +6,7 @@
  * enforced auth, never an unguarded default.
  */
 
+import crypto from 'node:crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ServerConfig } from '../config.js'
 
@@ -19,6 +20,17 @@ declare module 'fastify' {
 /** Paths reachable without auth — the health check must answer the systemd probe (M5). */
 const PUBLIC_PATHS = new Set(['/api/v1/health'])
 
+/**
+ * Constant-time token comparison. In `token` mode this check is the sole barrier justifying a
+ * non-loopback bind (config.assertBindAllowed), so a timing side-channel matters. Hashing both
+ * sides first gives equal-length buffers for `timingSafeEqual` without leaking length.
+ */
+function tokenMatches(provided: string, expected: string): boolean {
+  const a = crypto.createHash('sha256').update(provided).digest()
+  const b = crypto.createHash('sha256').update(expected).digest()
+  return crypto.timingSafeEqual(a, b)
+}
+
 function bearerToken(req: FastifyRequest): string | undefined {
   const header = req.headers['authorization']
   if (typeof header === 'string' && header.startsWith('Bearer ')) return header.slice(7).trim()
@@ -31,7 +43,7 @@ export function registerAuth(app: FastifyInstance, server: ServerConfig): void {
   app.addHook('onRequest', async (req, reply) => {
     if (server.authMode === 'token' && !PUBLIC_PATHS.has(req.url.split('?')[0] ?? req.url)) {
       const provided = bearerToken(req)
-      if (provided === undefined || provided !== server.authToken) {
+      if (provided === undefined || !tokenMatches(provided, server.authToken ?? '')) {
         await reply.code(401).send({ error: 'unauthorized' })
         return reply
       }

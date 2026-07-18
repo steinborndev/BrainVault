@@ -49,14 +49,26 @@ export function registerEventsRoute(app: FastifyInstance, ctx: AppContext): void
     }
 
     const unsubscribe = bus.subscribe(send)
-    const heartbeat = setInterval(() => res.write(': ping\n\n'), HEARTBEAT_MS)
+    // The write is guarded: a connection that reset mid-write surfaces as a throw here (or as
+    // an 'error' event below), and either must tear the subscription down, not crash the server.
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n')
+      } catch {
+        close()
+      }
+    }, HEARTBEAT_MS)
 
     const close = (): void => {
       clearInterval(heartbeat)
       unsubscribe()
     }
-    // Fires when the browser navigates away, the tab closes, or the socket drops.
+    // Fires when the browser navigates away, the tab closes, or the socket drops. A hijacked
+    // response has no Fastify error handling left, so the raw 'error' event needs a listener
+    // of its own — an unhandled 'error' on the stream would take the process down.
     req.raw.on('close', close)
     reply.raw.on('close', close)
+    req.raw.on('error', close)
+    reply.raw.on('error', close)
   })
 }

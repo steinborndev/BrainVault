@@ -131,6 +131,29 @@ export function classifyFailure(res: AgentRunResult): FailureClass {
   return 'permanent'
 }
 
+/**
+ * Tries to extract "when does the limit lift" from a usage-limit error (SPEC.md §7.1 wants the
+ * pause to honour the expected release time when it is available). Understood shapes: a
+ * `retry-after: <seconds>` header echo, the Claude usage-limit `…|<epoch-seconds>` marker, and
+ * an ISO `resets at <timestamp>`. Returns undefined when nothing parseable is present — the
+ * caller falls back to its fixed pause.
+ */
+export function parseRetryAfterMs(text: string, now: number = Date.now()): number | undefined {
+  const secs = text.match(/retry[- ]?after[:\s]+(\d{1,6})(?:\D|$)/i)
+  if (secs) return Number(secs[1]) * 1000
+  const epoch = text.match(/\|(\d{10})(?:\D|$)/)
+  if (epoch) {
+    const ms = Number(epoch[1]) * 1000 - now
+    return ms > 0 ? ms : undefined
+  }
+  const iso = text.match(/resets?\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)/i)
+  if (iso) {
+    const t = Date.parse(iso[1]!)
+    return Number.isNaN(t) || t <= now ? undefined : t - now
+  }
+  return undefined
+}
+
 /** Provisional type from the extension — corrected to the real type after preprocessing. */
 export function guessType(name: string): JobType {
   const ext = extensionOf(name)
@@ -304,7 +327,19 @@ export class IngestQueue {
       ...(input.batchId ? { batchId: input.batchId } : {}),
     })
     if (created.duplicateOf === undefined) {
-      this.stageFile(created.job.id, input.sourcePath, originalName)
+      try {
+        this.stageFile(created.job.id, input.sourcePath, originalName)
+      } catch (err) {
+        // The row exists but the original never reached `.raw/` — the job could only hang in
+        // `queued` forever. Fail it visibly instead; a retry after fixing the cause re-stages.
+        const job = this.store.transition(created.job.id, 'failed', {
+          patch: { error: `staging failed: ${(err as Error).message}` },
+          log: `staging into .raw/ failed: ${(err as Error).message}`,
+          level: 'error',
+        })
+        this.pump()
+        return { job }
+      }
     }
     this.pump()
     return created
@@ -336,15 +371,59 @@ export class IngestQueue {
         continue
       }
       const originalName = item.originalName ?? path.basename(item.sourcePath)
-      const sha256 = await sha256File(item.sourcePath)
-      const created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId })
-      if (created.duplicateOf === undefined) this.stageFile(created.job.id, item.sourcePath, originalName)
-      jobs.push(created)
+      // One unreadable member must not strand its siblings: without the pending-batch unit
+      // (pushed only after this loop) queued batch members are never claimed, so a throw here
+      // used to freeze the whole batch until a restart. Fail the member visibly and carry on.
+      let created: CreateJobResult | undefined
+      try {
+        const sha256 = await sha256File(item.sourcePath)
+        created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId })
+        if (created.duplicateOf === undefined) this.stageFile(created.job.id, item.sourcePath, originalName)
+        jobs.push(created)
+      } catch (err) {
+        created ??= this.store.create({ source, type: guessType(originalName), originalName, batchId })
+        const job = this.store.transition(created.job.id, 'failed', {
+          patch: { error: `could not read/stage the file: ${(err as Error).message}` },
+          log: `batch member failed before preprocessing: ${(err as Error).message}`,
+          level: 'error',
+        })
+        jobs.push({ job })
+      }
     }
-    const memberIds = jobs.filter((r) => r.duplicateOf === undefined).map((r) => r.job.id)
+    // Only members still queued join the combined run — duplicates and stage-failed drop out.
+    const memberIds = jobs.filter((r) => r.duplicateOf === undefined && r.job.status === 'queued').map((r) => r.job.id)
     if (memberIds.length > 0) this.pendingBatches.push({ batchId, memberIds })
     this.pump()
     return { batchId, jobs }
+  }
+
+  /**
+   * Records an over-limit file as a visible `failed` job (SPEC.md §4.2 applies the §4.1 size
+   * cap to the watch folder too — uploads get a 413, the watcher lands here). The original is
+   * still staged into `.raw/<job-id>/` so the inbox can be emptied without losing data, and a
+   * retry after raising `maxUploadBytes` re-enters the pipeline normally. No hash is computed —
+   * hashing a file we refuse to process would cost the most exactly when it helps the least.
+   */
+  rejectOversizedFile(input: {
+    readonly sourcePath: string
+    readonly originalName: string
+    readonly source: JobSource
+    readonly sizeBytes: number
+    readonly limitBytes: number
+  }): JobRow {
+    const created = this.store.create({
+      source: input.source,
+      type: guessType(input.originalName),
+      originalName: input.originalName,
+    })
+    this.stageFile(created.job.id, input.sourcePath, input.originalName)
+    return this.store.transition(created.job.id, 'failed', {
+      patch: {
+        error: `file is ${input.sizeBytes} bytes — over the ${input.limitBytes}-byte limit (maxUploadBytes); raise the limit in settings and retry`,
+      },
+      log: `refused: ${input.sizeBytes} bytes exceeds the configured maxUploadBytes (${input.limitBytes})`,
+      level: 'error',
+    })
   }
 
   /** Enqueues a URL job (not content-addressed, so not deduped). */
@@ -563,7 +642,7 @@ export class IngestQueue {
     if (outcome === 'rate_limit') {
       this.store.decrementAttempts(job.id) // a usage-limit pause is not the job's fault
       this.store.transition(job.id, 'queued', { log: 'requeued — will retry after the usage-limit pause' })
-      this.pauseForRateLimit(job.id)
+      this.pauseForRateLimit(job.id, res.error)
       return
     }
     if (outcome === 'transient' && attempt <= this.maxRetries) {
@@ -720,13 +799,23 @@ export class IngestQueue {
 
     endRun()
     const outcome = classifyFailure(res)
-    for (const r of ready) {
+    // A failed batch run still spent tokens — split them like the success path does, or the
+    // usage aggregate and daily budget under-count exactly the runs that waste the most.
+    const n = ready.length
+    const perIn = Math.floor(res.usage.tokensIn / n)
+    const perOut = Math.floor(res.usage.tokensOut / n)
+    ready.forEach((r, i) => {
       this.store.transition(r.id, 'failed', {
-        patch: { error: res.error ?? 'batch ingest failed' },
+        patch: {
+          error: res.error ?? 'batch ingest failed',
+          tokensIn: perIn + (i === 0 ? res.usage.tokensIn - perIn * n : 0),
+          tokensOut: perOut + (i === 0 ? res.usage.tokensOut - perOut * n : 0),
+          costUsd: res.usage.costUsd / n,
+        },
         log: `batch ingest failed (${outcome}): ${res.error ?? 'unknown error'}`,
         level: 'error',
       })
-    }
+    })
     const requeue = (logLine: string): void => {
       for (const r of ready) this.store.transition(r.id, 'queued', { log: logLine })
       this.pendingBatches.push({ batchId: unit.batchId, memberIds: ready.map((r) => r.id) })
@@ -734,7 +823,7 @@ export class IngestQueue {
     if (outcome === 'rate_limit') {
       for (const r of ready) this.store.decrementAttempts(r.id)
       requeue('batch requeued — will retry after the usage-limit pause')
-      this.pauseForRateLimit(lead)
+      this.pauseForRateLimit(lead, res.error)
       return
     }
     if (outcome === 'transient' && attempt <= this.maxRetries) {
@@ -781,16 +870,23 @@ export class IngestQueue {
     fs.renameSync(src, path.join(deferredDir, `${job.id}-${job.original_name}`))
   }
 
-  private pauseForRateLimit(jobId: string): void {
+  private pauseForRateLimit(jobId: string, errorText?: string): void {
     if (this.paused) return
     this.paused = true
     this.pauseReason = 'rate-limit'
+    // Honour the expected release time when the error carries one (SPEC.md §7.1), clamped to
+    // sane bounds: never shorter than the configured pause, never longer than 6 h (a garbled
+    // timestamp must not park the queue for a week).
+    const parsed = errorText ? parseRetryAfterMs(errorText) : undefined
+    const pauseMs =
+      parsed === undefined ? this.rateLimitPauseMs : Math.min(Math.max(parsed, this.rateLimitPauseMs), 6 * 3600_000)
     this.store.log(
       jobId,
       'warn',
-      `queue paused on a usage-limit signal; auto-resume in ${Math.round(this.rateLimitPauseMs / 1000)}s (SPEC.md §7.1)`,
+      `queue paused on a usage-limit signal; auto-resume in ${Math.round(pauseMs / 1000)}s` +
+        `${parsed !== undefined ? ' (from the reported reset time)' : ''} (SPEC.md §7.1)`,
     )
-    this.setTimeoutFn(() => this.resume(), this.rateLimitPauseMs)
+    this.setTimeoutFn(() => this.resume(), pauseMs)
   }
 
   /**
