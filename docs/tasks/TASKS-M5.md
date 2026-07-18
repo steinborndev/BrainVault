@@ -130,14 +130,20 @@ This directly undercuts the M5 §4 DoD ("failed jobs are diagnosable") — the d
 failure count lies. `usageSince()` sidesteps it with `COALESCE(finished_at, started_at,
 created_at)`, but that is a workaround, not the fix.
 
-**Proposed fix (small, not yet applied — needs a decision):** the code conflates two different
-concepts in one constant. Split them:
+**FIXED.** The code conflated two concepts in one constant — and `TERMINAL_STATES` was in fact
+used *only* for the finished-stamping, never for transition legality (that comes from
+`ALLOWED_TRANSITIONS`). Split them:
 - `TERMINAL_STATES` = "no transition is legal" → stays `done | duplicate | cancelled` (retry from
   `failed`/`deferred` must remain legal).
-- new `FINISHED_STATES` = "the run stopped" → `done | duplicate | cancelled | failed | deferred`,
-  used for `set_finished` only.
-A retry already clears `finished_at` when moving back to `queued`, so this stays consistent. It
-would fix the KPIs and let `usageSince` drop its COALESCE.
+- new `FINISHED_STATES` = "the run stopped" → adds `failed | deferred`, used for `set_finished`.
+
+A retry already clears `finished_at` when moving back to `queued`, so this stays consistent
+(covered by a regression test). Migration **v3** backfills `finished_at = COALESCE(started_at,
+created_at)` for rows written under the old behaviour, so historical KPIs are right too, and
+`usageSince` dropped its COALESCE workaround.
+
+Verified on the real database: `user_version` 2 → 3, the existing failed job was backfilled, and
+`/stats` `kpis7d.failures` went **0 → 1** (`usage.last7d.ingests` 9 = 8 done + 1 failed).
 
 **Async/job model (separate, additive):** move `POST /maintenance/*` off the synchronous
 `await`-the-whole-run hold (`routes/maintenance.ts:16-32`) to return `{runId, channel}`
