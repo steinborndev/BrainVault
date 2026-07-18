@@ -1,16 +1,26 @@
 /**
- * A deliberately small, safe Markdown renderer for the Overview hot-cache panel (SPEC.md
- * §6.1). It builds React elements (never raw HTML), so ingested content can't inject markup.
- * Scope is what `wiki/hot.md` actually uses: headings, lists, hr, bold, inline code, links,
- * and `[[wikilinks]]` (shown as plain emphasized text). Not a full CommonMark implementation.
+ * A deliberately small, safe Markdown renderer. It builds React elements (never raw HTML),
+ * so ingested content can't inject markup. Grown for the vault viewer (SPEC.md §12.4) beyond
+ * the original hot-cache scope: headings, ul/ol lists, hr, bold, italic, inline code, fenced
+ * code blocks, blockquotes, tables, http links, and `[[wikilinks]]`.
+ *
+ * Wikilinks render as plain emphasized text by default (the hot-cache/chat behaviour); the
+ * vault viewer passes `renderWikilink` to turn them into in-app navigation. Still not a full
+ * CommonMark implementation — by design.
  */
 
 import type { ReactNode } from 'react'
 
-function inline(text: string, keyBase: string): ReactNode[] {
+export type WikilinkRenderer = (target: string, label: string, key: string) => ReactNode
+
+interface InlineCtx {
+  renderWikilink?: WikilinkRenderer
+}
+
+function inline(text: string, keyBase: string, ctx: InlineCtx): ReactNode[] {
   const nodes: ReactNode[] = []
-  // Order matters: code first (so ** inside code stays literal), then links, then bold.
-  const re = /(`[^`]+`)|(\[\[[^\]]+\]\])|(\[[^\]]+\]\([^)]+\))|(\*\*[^*]+\*\*)/g
+  // Order matters: code first (so ** inside code stays literal), then wikilinks, links, bold, italic.
+  const re = /(`[^`]+`)|(\[\[[^\]]+\]\])|(\[[^\]]+\]\([^)]+\))|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)/g
   let last = 0
   let m: RegExpExecArray | null
   let i = 0
@@ -21,7 +31,15 @@ function inline(text: string, keyBase: string): ReactNode[] {
     if (tok.startsWith('`')) {
       nodes.push(<code key={key}>{tok.slice(1, -1)}</code>)
     } else if (tok.startsWith('[[')) {
-      nodes.push(<em key={key}>{tok.slice(2, -2)}</em>)
+      // [[Target]], [[Target|Alias]], [[Target#Heading]] — label shows the alias if present.
+      const body = tok.slice(2, -2)
+      const target = body.split('|')[0]!.split('#')[0]!.trim()
+      const label = (body.split('|')[1] ?? body.split('#')[0])!.trim()
+      if (ctx.renderWikilink && target !== '') {
+        nodes.push(ctx.renderWikilink(target, label || target, key))
+      } else {
+        nodes.push(<em key={key}>{label || body}</em>)
+      }
     } else if (tok.startsWith('[')) {
       const lm = /\[([^\]]+)\]\(([^)]+)\)/.exec(tok)!
       const href = lm[2]!
@@ -35,8 +53,10 @@ function inline(text: string, keyBase: string): ReactNode[] {
           <span key={key}>{lm[1]}</span>
         ),
       )
-    } else {
+    } else if (tok.startsWith('**')) {
       nodes.push(<strong key={key}>{tok.slice(2, -2)}</strong>)
+    } else {
+      nodes.push(<em key={key}>{tok.slice(1, -1)}</em>)
     }
     last = m.index + tok.length
   }
@@ -44,10 +64,32 @@ function inline(text: string, keyBase: string): ReactNode[] {
   return nodes
 }
 
-export function Markdown({ source }: { source: string }): React.ReactElement {
+/** True when a line looks like a table row (`| a | b |`). */
+const isTableRow = (line: string): boolean => /^\s*\|.*\|\s*$/.test(line)
+const isTableSeparator = (line: string): boolean => /^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$/.test(line)
+
+function tableCells(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((c) => c.trim())
+}
+
+export function Markdown({
+  source,
+  renderWikilink,
+}: {
+  source: string
+  renderWikilink?: WikilinkRenderer
+}): React.ReactElement {
+  const ctx: InlineCtx = renderWikilink ? { renderWikilink } : {}
   const lines = source.split('\n')
   const blocks: ReactNode[] = []
   let list: ReactNode[] = []
+  let orderedList: ReactNode[] = []
+  let quote: string[] = []
   let para: string[] = []
   let key = 0
 
@@ -56,49 +98,140 @@ export function Markdown({ source }: { source: string }): React.ReactElement {
       blocks.push(<ul key={`ul-${key++}`}>{list}</ul>)
       list = []
     }
+    if (orderedList.length) {
+      blocks.push(<ol key={`ol-${key++}`}>{orderedList}</ol>)
+      orderedList = []
+    }
   }
   const flushPara = (): void => {
     if (para.length) {
       const text = para.join(' ')
-      blocks.push(<p key={`p-${key++}`}>{inline(text, `p${key}`)}</p>)
+      blocks.push(<p key={`p-${key++}`}>{inline(text, `p${key}`, ctx)}</p>)
       para = []
     }
   }
+  const flushQuote = (): void => {
+    if (quote.length) {
+      blocks.push(<blockquote key={`q-${key++}`}>{inline(quote.join(' '), `q${key}`, ctx)}</blockquote>)
+      quote = []
+    }
+  }
+  const flushAll = (): void => {
+    flushPara()
+    flushList()
+    flushQuote()
+  }
 
-  for (const raw of lines) {
+  for (let li = 0; li < lines.length; li++) {
+    const raw = lines[li]!
     const line = raw.replace(/\s+$/, '')
-    if (line.trim() === '') {
-      flushPara()
-      flushList()
+
+    // Fenced code block: swallow lines until the closing fence.
+    if (/^```/.test(line.trim())) {
+      flushAll()
+      const code: string[] = []
+      let j = li + 1
+      while (j < lines.length && !/^```/.test(lines[j]!.trim())) {
+        code.push(lines[j]!)
+        j++
+      }
+      blocks.push(
+        <pre key={`pre-${key++}`}>
+          <code>{code.join('\n')}</code>
+        </pre>,
+      )
+      li = j // skip past the closing fence (or EOF)
       continue
     }
-    const h = /^(#{1,3})\s+(.*)$/.exec(line)
-    if (h) {
+
+    // Table: a row line followed by a separator line starts one.
+    if (isTableRow(line) && li + 1 < lines.length && isTableSeparator(lines[li + 1]!)) {
+      flushAll()
+      const header = tableCells(line)
+      const rows: string[][] = []
+      let j = li + 2
+      while (j < lines.length && isTableRow(lines[j]!)) {
+        rows.push(tableCells(lines[j]!))
+        j++
+      }
+      blocks.push(
+        <div className="md-table" key={`tw-${key++}`}>
+          <table>
+            <thead>
+              <tr>
+                {header.map((h, hi) => (
+                  <th key={hi}>{inline(h, `th${key}-${hi}`, ctx)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((cells, ri) => (
+                <tr key={ri}>
+                  {cells.map((c, ci) => (
+                    <td key={ci}>{inline(c, `td${key}-${ri}-${ci}`, ctx)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      li = j - 1
+      continue
+    }
+
+    if (line.trim() === '') {
+      flushAll()
+      continue
+    }
+    const bq = /^\s*>\s?(.*)$/.exec(line)
+    if (bq) {
       flushPara()
       flushList()
+      quote.push(bq[1]!)
+      continue
+    }
+    flushQuote()
+    const h = /^(#{1,4})\s+(.*)$/.exec(line)
+    if (h) {
+      flushAll()
       const level = h[1]!.length
-      const content = inline(h[2]!, `h${key}`)
+      const content = inline(h[2]!, `h${key}`, ctx)
       blocks.push(
-        level === 1 ? <h1 key={`h-${key++}`}>{content}</h1> : level === 2 ? <h2 key={`h-${key++}`}>{content}</h2> : <h3 key={`h-${key++}`}>{content}</h3>,
+        level === 1 ? (
+          <h1 key={`h-${key++}`}>{content}</h1>
+        ) : level === 2 ? (
+          <h2 key={`h-${key++}`}>{content}</h2>
+        ) : level === 3 ? (
+          <h3 key={`h-${key++}`}>{content}</h3>
+        ) : (
+          <h4 key={`h-${key++}`}>{content}</h4>
+        ),
       )
       continue
     }
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
-      flushPara()
-      flushList()
+      flushAll()
       blocks.push(<hr key={`hr-${key++}`} />)
       continue
     }
-    const li = /^\s*[-*]\s+(.*)$/.exec(line)
-    if (li) {
+    const uli = /^\s*[-*]\s+(.*)$/.exec(line)
+    if (uli) {
       flushPara()
-      list.push(<li key={`li-${key++}`}>{inline(li[1]!, `li${key}`)}</li>)
+      flushQuote()
+      list.push(<li key={`li-${key++}`}>{inline(uli[1]!, `li${key}`, ctx)}</li>)
+      continue
+    }
+    const oli = /^\s*\d+[.)]\s+(.*)$/.exec(line)
+    if (oli) {
+      flushPara()
+      flushQuote()
+      orderedList.push(<li key={`oli-${key++}`}>{inline(oli[1]!, `oli${key}`, ctx)}</li>)
       continue
     }
     para.push(line.trim())
   }
-  flushPara()
-  flushList()
+  flushAll()
 
   return <div className="md">{blocks}</div>
 }

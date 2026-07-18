@@ -18,6 +18,8 @@ import type {
   SettingsResponse,
   SettingsPatch,
   PagePreview,
+  PageFull,
+  VaultGraph,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -128,6 +130,13 @@ export const api = {
   /** Raw markdown of one wiki page, for the Chat tab's inline citation preview. */
   page: (path: string): Promise<PagePreview> =>
     fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`).then(json<PagePreview>),
+
+  /** Full page content + metadata for the vault viewer (SPEC.md §12.4). */
+  pageFull: (path: string): Promise<PageFull> =>
+    fetch(`${BASE}/pages?path=${encodeURIComponent(path)}&full=1`).then(json<PageFull>),
+
+  /** The vault's wikilink graph (server-side cached; cheap to refetch). */
+  graph: (): Promise<VaultGraph> => fetch(`${BASE}/graph`).then(json<VaultGraph>),
 
   /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
   saveSession: (id: string): Promise<MaintenanceRun> =>

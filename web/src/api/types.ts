@@ -139,6 +139,34 @@ export interface Health {
   limits?: { maxUploadBytes: number }
 }
 
+/** One node of the vault's wikilink graph (GET /api/v1/graph, SPEC.md §12.4). */
+export interface GraphNode {
+  path: string
+  title: string
+  /** Top-level wiki bucket: concepts | entities | sources | meta | … | root. */
+  type: string
+  out: number
+  in: number
+}
+
+export interface VaultGraph {
+  nodes: GraphNode[]
+  /** Directed edges as [fromIndex, toIndex] into `nodes`. */
+  edges: Array<[number, number]>
+  unresolved: number
+  builtAt: string
+}
+
+/** Full page content for the vault viewer (GET /api/v1/pages?full=1). */
+export interface PageFull {
+  path: string
+  markdown: string
+  truncated: false
+  title: string
+  type: string
+  mtime?: string
+}
+
 /** A resolved page citation for a chat answer (server/src/pipeline/citations.ts). */
 export interface Citation {
   label: string
