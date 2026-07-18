@@ -55,8 +55,10 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 
 ## 3. Cost / usage display + daily budget (SPEC.md §7.1, §11.3)
 
-- [ ] Surface per-job and aggregate token/cost from the SDK usage already stored on `jobs` (and returned by `/query`, `/maintenance/*`). In **oauth (subscription) mode** label `cost_usd` as **"Schätzwert (Abo)"** everywhere it appears (Ingestion history, Chat, Overview) — the value is an API-price equivalent, not real money. `authMode` is already returned by `/query`; expose it via `/stats` or `/health` for the whole UI.
-- [ ] Configurable **daily budget** (jobs/day in oauth mode, USD in api-key mode): queue pauses when exceeded, shows it in the dashboard, resumes next day. Ties into the existing rate-limit pause/resume in `IngestQueue`.
+- [x] Aggregate usage: new `JobStore.usageSince()` (tokens in/out, cost, ingest count) surfaced on `/stats` as `usage.today` / `usage.last7d`, plus `authMode` for the whole UI. Overview gained a "Kosten (7 T.)" tile; Chat now renders the per-answer usage the server had always returned but nothing displayed.
+- [x] "Schätzwert (Abo)" marking centralised in `components/Cost.tsx` (`Cost`/`CostFootnote`) so the caveat can't be forgotten at a call site — applied in Overview, the Ingestion history (`JobCard`) and Chat. In api-key mode the marking disappears automatically.
+- [x] Configurable **daily budget** via settings (`dailyBudget`, live-applied). Unit follows the auth mode per SPEC §7.1: **ingests/day in oauth**, **USD/day with an API key** — decided once in the new `pipeline/budget.ts`, which both the queue's pause decision and the dashboard's display read, so they cannot disagree. Queue pauses before claiming (in-flight runs always finish, so a budget overshoots by at most the runs already started) and auto-resumes at the next local midnight, reusing the rate-limit pause machinery. `queue.pauseReason` (`rate-limit` | `budget` | null) now distinguishes the two in the UI; Overview shows a budget bar.
+- [x] Verified live against the running service: `/stats` reports real usage (9 ingests / 24.9M tokens / $13.72 est. over 7 d, unit `jobs` in oauth), budget round-trips live with no restart, `dailyBudget: 0` is a 400. **The pause path itself is covered by unit tests only** — triggering it live would need real ingests (today's usage was 0).
 
 ## 4. Error paths & diagnosability (SPEC.md §10 DoD)
 
@@ -113,6 +115,29 @@ at the kernel level: "Read-only file system"), skills invocable. Hard rule 4 int
 forces a long `bash sleep`, to confirm the custom detached spawner works with the real SDK
 stream and the group-SIGKILL reaps an actual CLI-spawned grandchild. Deferred until the
 implementation lands.
+
+### F2 — PRE-EXISTING BUG: the Overview's 7-day "Fehler"/"deferred" KPIs are always 0
+
+Found while building the usage aggregate (§3), **not introduced by M5**. `JobStore.countsSince()`
+filters `WHERE finished_at IS NOT NULL`, but `TERMINAL_STATES` (which drives `set_finished` in
+`transition()`) is only `done | duplicate | cancelled` — `failed` and `deferred` are excluded
+because a failed job is *retryable*. So neither ever gets a `finished_at`, and
+`kpis7d.failures` / `kpis7d.deferred` on the Overview are **hard-wired to 0 even when failures
+exist**. Verified empirically: with one done + one failed + one deferred job, `countsSince`
+returns `{ done: 1 }`.
+
+This directly undercuts the M5 §4 DoD ("failed jobs are diagnosable") — the dashboard's headline
+failure count lies. `usageSince()` sidesteps it with `COALESCE(finished_at, started_at,
+created_at)`, but that is a workaround, not the fix.
+
+**Proposed fix (small, not yet applied — needs a decision):** the code conflates two different
+concepts in one constant. Split them:
+- `TERMINAL_STATES` = "no transition is legal" → stays `done | duplicate | cancelled` (retry from
+  `failed`/`deferred` must remain legal).
+- new `FINISHED_STATES` = "the run stopped" → `done | duplicate | cancelled | failed | deferred`,
+  used for `set_finished` only.
+A retry already clears `finished_at` when moving back to `queued`, so this stays consistent. It
+would fix the KPIs and let `usageSince` drop its COALESCE.
 
 **Async/job model (separate, additive):** move `POST /maintenance/*` off the synchronous
 `await`-the-whole-run hold (`routes/maintenance.ts:16-32`) to return `{runId, channel}`
