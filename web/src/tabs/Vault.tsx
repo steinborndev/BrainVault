@@ -21,6 +21,67 @@ import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { timeAgo } from '../lib/format.ts'
 
+/**
+ * Splits YAML frontmatter off a page. Obsidian renders it as a properties panel rather than
+ * body text, and so do we — dumping `type: concept created: …` into the prose is just noise.
+ * Deliberately shallow (top-level `key: value` and `- item` lists); anything it can't read
+ * stays in the body rather than being silently dropped.
+ */
+function frontmatter(markdown: string): { fields: Array<[string, string]>; body: string } {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(markdown)
+  if (!m) return { fields: [], body: markdown }
+  const fields: Array<[string, string]> = []
+  let currentKey: string | null = null
+  let listItems: string[] = []
+  const flush = (): void => {
+    if (currentKey !== null && listItems.length > 0) fields.push([currentKey, listItems.join(', ')])
+    listItems = []
+  }
+  for (const line of m[1]!.split('\n')) {
+    const item = /^\s*-\s+(.*)$/.exec(line)
+    if (item && currentKey !== null) {
+      listItems.push(item[1]!.replace(/^["']|["']$/g, '').trim())
+      continue
+    }
+    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line)
+    if (!kv) continue
+    flush()
+    const key = kv[1]!
+    const value = kv[2]!.replace(/^["']|["']$/g, '').trim()
+    if (value === '') {
+      currentKey = key // a list or block follows
+    } else {
+      fields.push([key, value])
+      currentKey = null
+    }
+  }
+  flush()
+  return { fields, body: markdown.slice(m[0].length) }
+}
+
+/** Splits a frontmatter value into text and wikilink parts, rendering the links via `linkTo`. */
+function renderMetaValue(
+  value: string,
+  linkTo: (target: string, label: string, key: string) => React.ReactNode,
+): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  const re = /\[\[([^\]]+)\]\]/g
+  let last = 0
+  let m: RegExpExecArray | null
+  let i = 0
+  while ((m = re.exec(value)) !== null) {
+    if (m.index > last) parts.push(value.slice(last, m.index))
+    const body = m[1]!
+    const target = body.split('|')[0]!.split('#')[0]!.trim()
+    const label = (body.split('|')[1] ?? body.split('#')[0])!.trim()
+    parts.push(linkTo(target, label || target, `meta-${i++}`))
+    last = m.index + m[0].length
+  }
+  if (parts.length === 0) return value
+  if (last < value.length) parts.push(value.slice(last))
+  return parts
+}
+
 /** German labels for the wiki buckets (fallback: the raw directory name). */
 const TYPE_LABELS: Record<string, string> = {
   concepts: 'Konzepte',
@@ -243,6 +304,31 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   }, [graph, nodeIndex])
 
   const node = nodeIndex >= 0 ? graph.nodes[nodeIndex] : undefined
+  /** Renders one wikilink target as an in-app link, or plain text when it resolves to nothing. */
+  const linkTo = (target: string, label: string, key: string): React.ReactNode => {
+    const resolved = byTitle.get(target.toLowerCase())
+    return resolved !== undefined ? (
+      <a
+        key={key}
+        className="wikilink"
+        href={pageRoute(resolved)}
+        onClick={(e) => {
+          e.preventDefault()
+          navigate(pageRoute(resolved))
+        }}
+      >
+        {label}
+      </a>
+    ) : (
+      <span key={key} className="wikilink unresolved" title="Seite existiert (noch) nicht">
+        {label}
+      </span>
+    )
+  }
+  const parsed = useMemo(
+    () => (pageQ.data ? frontmatter(pageQ.data.markdown) : { fields: [], body: '' }),
+    [pageQ.data],
+  )
 
   return (
     <div className="vault-page">
@@ -271,30 +357,20 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
           {pageQ.isError && (
             <div className="empty">Seite konnte nicht geladen werden: {(pageQ.error as Error)?.message}</div>
           )}
+          {parsed.fields.length > 0 && (
+            <dl className="page-meta">
+              {parsed.fields.map(([k, v]) => (
+                <div key={k}>
+                  <dt>{k}</dt>
+                  {/* Frontmatter carries wikilinks too (`related: [[index]]`) — make them
+                      navigable rather than showing the raw brackets. */}
+                  <dd>{renderMetaValue(v, linkTo)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {pageQ.data && (
-            <Markdown
-              source={pageQ.data.markdown}
-              renderWikilink={(target, label, key) => {
-                const resolved = byTitle.get(target.toLowerCase())
-                return resolved !== undefined ? (
-                  <a
-                    key={key}
-                    className="wikilink"
-                    href={pageRoute(resolved)}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      navigate(pageRoute(resolved))
-                    }}
-                  >
-                    {label}
-                  </a>
-                ) : (
-                  <span key={key} className="wikilink unresolved" title="Seite existiert (noch) nicht">
-                    {label}
-                  </span>
-                )
-              }}
-            />
+            <Markdown source={parsed.body} renderWikilink={linkTo} />
           )}
           {pageQ.data?.mtime && <div className="page-mtime">Zuletzt geändert {timeAgo(pageQ.data.mtime)}</div>}
         </article>

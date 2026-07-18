@@ -618,9 +618,17 @@ button {
   color: var(--accent);
 }
 
-/* ---- Markdown (hot cache) ---- */
+/* ---- Markdown ---- */
+/* The height cap belongs to the EMBEDDED uses (hot-cache panel, citation preview), where the
+   markdown is a snippet inside a card. The vault page view renders a whole page and must not
+   be clipped, so the cap is scoped to those containers instead of applying to every .md. */
 .md {
   font-size: 14px;
+}
+.hot-cache .md,
+.cite-preview .md,
+.md-fallback .md,
+.bubble-body .md {
   max-height: 420px;
   overflow-y: auto;
 }
@@ -629,7 +637,7 @@ button {
 .md h2 { font-size: 17px; }
 .md h3 { font-size: 15px; }
 .md p { margin: 6px 0; }
-.md ul { margin: 6px 0; padding-left: 20px; }
+.md ul, .md ol { margin: 6px 0; padding-left: 20px; }
 .md code {
   font-family: var(--mono);
   font-size: 12px;
@@ -1117,9 +1125,13 @@ button {
 }
 .graph-canvas-wrap {
   position: relative;
-  flex: 1;
-  min-height: 380px;
-  height: calc(100dvh - 240px);
+  /* No `flex: 1` here: in a column flex container it sets flex-basis:0 and OVERRIDES the
+     height below, collapsing the canvas to min-height. */
+  min-height: 420px;
+  /* vh first, dvh second: a browser without dvh keeps the vh value instead of
+     dropping the declaration and collapsing to min-height. */
+  height: calc(100vh - 230px);
+  height: calc(100dvh - 230px);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
@@ -1277,6 +1289,49 @@ button {
     position: static;
   }
   .graph-canvas-wrap {
-    height: calc(100dvh - 300px);
+    height: calc(100vh - 290px);
+    height: calc(100dvh - 290px);
   }
+}
+
+/* The graph wants the whole width — the 1080px reading column is for text tabs. */
+.content:has(.vault-graph) {
+  max-width: 1600px;
+}
+
+.graph-controls {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+}
+.graph-controls .btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+/* Frontmatter shown as properties, the way Obsidian does — not as prose. */
+.page-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 14px;
+  margin: 0 0 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.page-meta > div {
+  display: contents;
+}
+.page-meta dt {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  padding-top: 2px;
+}
+.page-meta dd {
+  margin: 0;
+  color: var(--text-dim);
 }

@@ -107,7 +107,7 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
       <ServiceStatus stats={data} />
 
       {data.hotCache && (
-        <div className="card card-pad section">
+        <div className="card card-pad section hot-cache">
           <h3 className="section-title">Hot Cache</h3>
           <Markdown source={data.hotCache} />
         </div>

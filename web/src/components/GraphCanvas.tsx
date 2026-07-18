@@ -171,6 +171,46 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
   }, [nodes, edges, focusIndex, matches, neighbors, radius])
 
   const scheduleDraw = useRafDraw(draw)
+  const fittedRef = useRef(false)
+  /** Set once the user pans/zooms, so an automatic re-fit never yanks the view away. */
+  const userMovedRef = useRef(false)
+
+  /** Centers and scales the transform so the whole layout fits with a small margin. */
+  const fitToView = useCallback((): void => {
+    const canvas = canvasRef.current
+    const pos = positionsRef.current
+    if (!canvas || pos.length < 2) return
+    const dpr = window.devicePixelRatio || 1
+    const w = canvas.width / dpr
+    const h = canvas.height / dpr
+    // Robust bounds: a handful of disconnected pages drift far from the core, and fitting
+    // to absolute min/max would shrink the cluster everyone actually looks at to a speck.
+    // The 5th–95th percentile frames the body of the graph; stragglers stay reachable by panning.
+    const xs: number[] = []
+    const ys: number[] = []
+    for (let i = 0; i < pos.length; i += 2) {
+      xs.push(pos[i]!)
+      ys.push(pos[i + 1]!)
+    }
+    xs.sort((a, b) => a - b)
+    ys.sort((a, b) => a - b)
+    const lo = (arr: number[]): number => arr[Math.floor(arr.length * 0.05)]!
+    const hi = (arr: number[]): number => arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95))]!
+    const minX = lo(xs)
+    const maxX = hi(xs)
+    const minY = lo(ys)
+    const maxY = hi(ys)
+    const spanX = Math.max(1, maxX - minX)
+    const spanY = Math.max(1, maxY - minY)
+    const pad = 110 // room for the labels that sit around the rim
+    const k = Math.min(8, Math.max(0.15, Math.min((w - pad) / spanX, (h - pad) / spanY)))
+    transformRef.current = {
+      k,
+      x: -((minX + maxX) / 2) * k,
+      y: -((minY + maxY) / 2) * k,
+    }
+    scheduleDraw()
+  }, [scheduleDraw])
 
   // Layout worker: restart when the node/edge set changes. Positions carry over by index
   // where the count matches (smooth filter transitions are not worth index-mapping).
@@ -181,10 +221,19 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       return
     }
     setLayouting(true)
+    fittedRef.current = false
     const worker = new Worker(new URL('../lib/graphLayout.worker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (ev: MessageEvent<{ type: 'tick' | 'done'; positions: Float32Array }>) => {
       positionsRef.current = ev.data.positions
-      if (ev.data.type === 'done') setLayouting(false)
+      if (ev.data.type === 'done') {
+        setLayouting(false)
+        // Frame the finished layout once, so a graph of any size lands filling the
+        // viewport instead of as a speck (or spilling past the edges).
+        if (!fittedRef.current) {
+          fittedRef.current = true
+          fitToView()
+        }
+      }
       scheduleDraw()
     }
     worker.postMessage({
@@ -195,7 +244,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       worker.terminate()
       setLayouting(false)
     }
-  }, [nodes, edges, scheduleDraw])
+  }, [nodes, edges, scheduleDraw, fitToView])
 
   // Canvas sizing (device-pixel aware) + redraw on resize and theme change.
   useEffect(() => {
@@ -208,7 +257,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       canvas.height = parent.clientHeight * dpr
       canvas.style.width = `${parent.clientWidth}px`
       canvas.style.height = `${parent.clientHeight}px`
-      scheduleDraw()
+      // Re-frame on resize (including the first layout pass, which lands before the
+      // element has its final size) — but never fight a user who has panned or zoomed.
+      if (fittedRef.current && !userMovedRef.current) fitToView()
+      else scheduleDraw()
     }
     resize()
     const ro = new ResizeObserver(resize)
@@ -220,7 +272,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       ro.disconnect()
       mq.removeEventListener('change', onTheme)
     }
-  }, [scheduleDraw])
+  }, [scheduleDraw, fitToView])
 
   /** Screen → world coordinates under the current transform. */
   const toWorld = useCallback((sx: number, sy: number): { x: number; y: number } => {
@@ -270,6 +322,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.current.moved = true
       transformRef.current.x += dx
       transformRef.current.y += dy
+      userMovedRef.current = true
       drag.current.x = e.clientX
       drag.current.y = e.clientY
       scheduleDraw()
@@ -301,6 +354,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
     t.x = cx - ((cx - t.x) / t.k) * next
     t.y = cy - ((cy - t.y) / t.k) * next
     t.k = next
+    userMovedRef.current = true
     scheduleDraw()
   }
 
@@ -323,6 +377,18 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
         aria-label={`Wikilink-Graph mit ${nodes.length} Seiten`}
         style={{ cursor: hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
       />
+      <div className="graph-controls">
+        <button
+          className="btn ghost"
+          onClick={() => {
+            userMovedRef.current = false
+            fitToView()
+          }}
+          title="Ansicht einpassen"
+        >
+          Einpassen
+        </button>
+      </div>
       {layouting && <div className="graph-status">Layout läuft…</div>}
       {hover !== null && nodes[hover] && <div className="graph-tooltip">{nodes[hover]!.title}</div>}
     </div>

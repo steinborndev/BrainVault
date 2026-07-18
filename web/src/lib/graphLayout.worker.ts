@@ -45,9 +45,11 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
     .force('charge', forceManyBody().strength(-120).distanceMax(600))
     .force('center', forceCenter(0, 0))
     .force('collide', forceCollide<SimNode>().radius((d) => 6 + Math.sqrt(d.degree) * 2))
-    // A gentle pull keeps disconnected components from drifting off-screen.
-    .force('x', forceX(0).strength(0.04))
-    .force('y', forceY(0).strength(0.04))
+    // Centering pull, stronger the fewer links a node has. Without this, orphan and
+    // near-orphan pages have nothing but repulsion acting on them and drift far outside
+    // the cluster — which then blows up the bounding box and makes fit-to-view useless.
+    .force('x', forceX<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
+    .force('y', forceY<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
     .stop()
 
   const positions = (): Float32Array => {
