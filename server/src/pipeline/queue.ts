@@ -73,6 +73,12 @@ export interface IngestQueueOptions {
   /** Hot-cache refresh hook; returns a note logged against the job. See file note in queue.ts. */
   readonly refreshHotCache?: (vaultRoot: string) => Promise<string>
   readonly setTimeoutFn?: (fn: () => void, ms: number) => void
+  /**
+   * Whether an ingest auto-commits to the vault ("Git-Commit-Verhalten", SPEC.md §6.4). Read
+   * per commit — a provider, not a value — so a settings change applies live without a restart.
+   * When it returns false the pages still land on disk; only the commit is skipped.
+   */
+  readonly autoCommit?: () => boolean
   /** Live-update bus; the queue signals `stats` when a commit changes vault-visible numbers. */
   readonly events?: EventBus
   /**
@@ -116,7 +122,8 @@ export class IngestQueue {
   private readonly store: JobStore
   private readonly vaultRoot: string
   private readonly auth: AgentAuth
-  private readonly concurrency: number
+  /** Not readonly: settings can raise/lower it live (SPEC.md §6.4 "Parallelität"). */
+  private concurrency: number
   private readonly timeoutMs: number
   private readonly maxRetries: number
   private readonly rateLimitPauseMs: number
@@ -128,6 +135,7 @@ export class IngestQueue {
   private readonly refreshHotCache: (vaultRoot: string) => Promise<string>
   private readonly setTimeoutFn: (fn: () => void, ms: number) => void
   private readonly events: EventBus | undefined
+  private readonly autoCommit: () => boolean
 
   private readonly commitMutex: Mutex
   private running = false
@@ -157,7 +165,17 @@ export class IngestQueue {
         'hot cache is maintained by the ingest skill itself (M0 evidence); no separate refresh pass in M1')
     this.setTimeoutFn = opts.setTimeoutFn ?? ((fn, ms) => void setTimeout(fn, ms))
     this.events = opts.events
+    this.autoCommit = opts.autoCommit ?? ((): boolean => true)
     this.commitMutex = opts.commitMutex ?? new Mutex()
+  }
+
+  /**
+   * Live-applies a concurrency change from settings (SPEC.md §6.4). Raising it starts more work
+   * immediately; lowering it lets in-flight jobs finish and simply claims fewer afterwards.
+   */
+  setConcurrency(concurrency: number): void {
+    this.concurrency = Math.max(1, Math.floor(concurrency))
+    this.pump()
   }
 
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
@@ -499,6 +517,12 @@ export class IngestQueue {
 
   private async commitStep(job: JobRow, pathspec: string[]): Promise<void> {
     const label = job.original_name ?? job.url ?? job.id
+    if (!this.autoCommit()) {
+      // Pages are already written; only the commit is skipped, so nothing is lost — the
+      // operator (or the next run with auto-commit on) picks them up.
+      this.store.log(job.id, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
+      return
+    }
     try {
       const result = await this.commitMutex.runExclusive(() =>
         this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
@@ -641,6 +665,10 @@ export class IngestQueue {
   /** One commit for a whole batch; every member is attributed the same committed pages. */
   private async batchCommit(memberIds: string[], names: string[], pathspec: string[]): Promise<void> {
     const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
+    if (!this.autoCommit()) {
+      this.store.log(memberIds[0]!, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
+      return
+    }
     try {
       const result = await this.commitMutex.runExclusive(() =>
         this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),

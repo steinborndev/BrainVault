@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { ChatStore } from '../src/db/chat.js'
+import { SettingsStore } from '../src/db/settings.js'
 import { IngestQueue } from '../src/pipeline/queue.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
@@ -123,6 +124,7 @@ beforeEach(async () => {
     queue,
     events,
     maintenance,
+    settings: new SettingsStore(db),
     runQuery: (input) => queryImpl(input),
     logger: false,
   })
@@ -431,6 +433,78 @@ describe('POST /api/v1/query + sessions', () => {
       body: JSON.stringify({ question: '  ' }),
     })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('GET/PUT /api/v1/settings', () => {
+  interface SettingsResp {
+    effective: { watchFolder: string; concurrency: number; maxUploadBytes: number; gitAutoCommit: boolean }
+    baseline: { concurrency: number }
+    overrides: Record<string, unknown>
+    readOnly: Record<string, string>
+    restartRequiredKeys: string[]
+    pendingRestart?: string[]
+  }
+  const get = async (): Promise<SettingsResp> =>
+    (await (await fetch(`${baseUrl}/api/v1/settings`)).json()) as SettingsResp
+  const put = async (body: unknown): Promise<Response> =>
+    fetch(`${baseUrl}/api/v1/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+  it('reports effective/baseline/overrides and the key STATUS but never the credential', async () => {
+    const body = await get()
+    expect(body.overrides).toEqual({})
+    expect(body.effective.concurrency).toBe(body.baseline.concurrency)
+    expect(body.readOnly.authMode).toBe('oauth')
+    expect(body.readOnly.credentialSource).toBe('CLAUDE_CODE_OAUTH_TOKEN')
+    // Hard rule 3: only the STATUS is exposed — no field carries the credential value.
+    expect(Object.keys(body.readOnly)).not.toContain('credential')
+    expect(Object.keys(body.readOnly)).not.toContain('authToken')
+    expect(body.readOnly.credentialConfigured).toBe('yes')
+    expect(body.restartRequiredKeys.sort()).toEqual(['maxUploadBytes', 'watchFolder'])
+  })
+
+  it('applies a concurrency change live to the running queue', async () => {
+    expect(queue.stats().concurrency).toBe(2)
+    const res = await put({ concurrency: 4 })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SettingsResp
+    expect(body.effective.concurrency).toBe(4)
+    expect(body.pendingRestart).toEqual([]) // concurrency is live, no restart needed
+    expect(queue.stats().concurrency).toBe(4)
+  })
+
+  it('flags a restart-required key instead of pretending it applied', async () => {
+    const res = await put({ watchFolder: '/tmp/other-inbox' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SettingsResp
+    expect(body.effective.watchFolder).toBe('/tmp/other-inbox')
+    expect(body.pendingRestart).toEqual(['watchFolder'])
+  })
+
+  it('rejects keys that would breach the bind or credential rules', async () => {
+    const bindBefore = (await get()).readOnly.bind
+    for (const bad of [{ host: '0.0.0.0' }, { port: 80 }, { CLAUDE_CODE_OAUTH_TOKEN: 'leak' }]) {
+      const res = await put(bad)
+      expect(res.status).toBe(400)
+    }
+    // The bind is unchanged by the rejected writes, and still loopback (hard rule 2).
+    const after = await get()
+    expect(after.readOnly.bind).toBe(bindBefore)
+    expect(after.readOnly.bind ?? '').toMatch(/^127\.0\.0\.1:/)
+    expect(after.overrides).toEqual({})
+  })
+
+  it('clears an override with null, falling back to the baseline', async () => {
+    await put({ concurrency: 5 })
+    expect((await get()).effective.concurrency).toBe(5)
+    await put({ concurrency: null })
+    const body = await get()
+    expect(body.overrides.concurrency).toBeUndefined()
+    expect(body.effective.concurrency).toBe(body.baseline.concurrency)
   })
 })
 
