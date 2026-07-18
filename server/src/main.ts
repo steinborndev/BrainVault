@@ -13,6 +13,7 @@ import { SettingsStore } from './db/settings.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
+import { RunRegistry } from './pipeline/run-registry.js'
 import { budgetStatus } from './pipeline/budget.js'
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
@@ -44,6 +45,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // One commit mutex shared by the ingest queue and the maintenance runner so their commits
   // never interleave (one vault writer at a time, TASKS-M4 §2).
   const commitMutex = new Mutex()
+  // Shared so ingest and maintenance can see each other's in-flight runs: a run may only sweep
+  // unattributed vault changes into its commit while it is the SOLE writer (finding F4).
+  const runRegistry = new RunRegistry()
   // Runtime settings (SPEC.md §6.4): env is the start-time baseline, these are the overrides.
   // `watchFolder`/`maxUploadBytes` are read once here (they bind at startup — changing them is
   // flagged "restart required"); `concurrency`/`gitAutoCommit` apply live via the queue.
@@ -56,6 +60,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     events,
     commitMutex,
     concurrency: effective.concurrency,
+    runRegistry,
     // A provider, not a value: a settings change takes effect on the next commit, no restart.
     autoCommit: () => settings.effective(config).gitAutoCommit,
     // Same pattern for the daily budget — evaluated through the shared budget module so the
@@ -69,6 +74,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     auth: config.auth,
     events,
     commitMutex,
+    runRegistry,
   })
 
   // The start-time-bound settings folded into the config the watcher and HTTP server see. The

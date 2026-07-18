@@ -21,7 +21,8 @@ import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { formatMessage } from './format-message.js'
-import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { parseLintReport, type LintReport } from './lint-report.js'
 import { indexWikiPages } from './citations.js'
@@ -51,6 +52,11 @@ export interface MaintenanceRunnerOptions {
   readonly runAgent?: MaintenanceAgentRunner
   readonly commit?: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   readonly timeoutMs?: number
+  /**
+   * Shared with the ingest queue so each side can tell whether it is the sole vault writer
+   * (finding F4). Defaults to a private registry when this runner is the only writer.
+   */
+  readonly runRegistry?: RunRegistry
 }
 
 export interface MaintenanceResult {
@@ -106,6 +112,7 @@ export class MaintenanceRunner {
   private readonly runAgentFn: MaintenanceAgentRunner
   private readonly commit: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   private readonly timeoutMs: number
+  private readonly runRegistry: RunRegistry
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
   /** In-memory registry of async runs, keyed by run id (insertion-ordered for eviction). */
@@ -119,6 +126,7 @@ export class MaintenanceRunner {
     this.runAgentFn = opts.runAgent ?? runAgent
     this.commit = opts.commit ?? commitVault
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.runRegistry = opts.runRegistry ?? new RunRegistry()
   }
 
   /** Starts a lint run in the background; returns its tracked run immediately. */
@@ -277,6 +285,10 @@ export class MaintenanceRunner {
         this.events.publish({ kind: 'log', log: { jobId: channel, ts: new Date().toISOString(), level, message } })
 
       log('info', `maintenance: ${kind} started`)
+      // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
+      // can still be committed — but only if we turn out to be the sole writer (F4).
+      const dirtyBefore = await dirtyPaths(this.vaultRoot)
+      const endRun = this.runRegistry.begin()
       const written = new Set<string>()
       const res = await this.runAgentFn({
         vaultRoot: this.vaultRoot,
@@ -296,15 +308,28 @@ export class MaintenanceRunner {
       })
 
       if (!res.ok) {
+        endRun()
         log('error', `maintenance: ${kind} failed: ${res.error ?? 'unknown error'}`)
         return { ok: false, kind, pages: [], usage: res.usage, error: res.error ?? `${kind} failed` }
       }
 
-      // One commit per run, serialized against ingest commits.
-      const pathspec = [...written, ...BOOKKEEPING_PATHS]
-      const commit = await this.commitMutex.runExclusive(() =>
-        this.commit(this.vaultRoot, opts.commitMessage ?? `maintenance: ${kind}`, { pathspec }),
-      )
+      // One commit per run, serialized against ingest commits. The sole-writer check and the
+      // sweep both happen INSIDE the commit mutex, so no other run can start writing between
+      // asking the question and acting on the answer.
+      const commit = await this.commitMutex.runExclusive(async () => {
+        const swept = this.runRegistry.isSoleWriter()
+          ? newWikiPaths(dirtyBefore, await dirtyPaths(this.vaultRoot))
+          : []
+        if (swept.length > 0) {
+          // These are pages the Write/Edit stream never reported — created or renamed via Bash.
+          log('info', `staging ${swept.length} page(s) the tool stream did not report (F4)`)
+        } else if (!this.runRegistry.isSoleWriter()) {
+          log('info', 'another run is writing — staging only tool-reported paths (F4 sweep skipped)')
+        }
+        const pathspec = [...new Set([...written, ...swept, ...BOOKKEEPING_PATHS])]
+        return this.commit(this.vaultRoot, opts.commitMessage ?? `maintenance: ${kind}`, { pathspec })
+      })
+      endRun()
       const pages = commit.committed ? commit.committedPages : []
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')
       this.events.publish({ kind: 'stats' })

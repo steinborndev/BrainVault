@@ -29,7 +29,8 @@ import { sha256File } from './hash.js'
 import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
 import type { EventBus } from './events.js'
@@ -96,6 +97,23 @@ export interface IngestQueueOptions {
    * Defaults to a fresh mutex when the queue is the only writer.
    */
   readonly commitMutex?: Mutex
+  /**
+   * Shared with the maintenance runner so each side can tell whether it is the sole vault writer
+   * (finding F4). Defaults to a private registry when the queue is the only writer.
+   */
+  readonly runRegistry?: RunRegistry
+}
+
+/**
+ * What a run wants staged for its commit. `written` (Write/Edit tool calls) is the only signal
+ * that is reliably per-run; `dirtyBefore` lets a SOLE writer additionally recover pages the agent
+ * created or renamed via Bash, which the tool stream never reports (finding F4).
+ */
+interface CommitScope {
+  readonly written: ReadonlySet<string>
+  readonly dirtyBefore: ReadonlySet<string>
+  /** Job-specific extras, e.g. `.raw/<job-id>`. */
+  readonly extra: readonly string[]
 }
 
 /** Classifies an agent failure to decide retry vs pause vs give-up. */
@@ -149,6 +167,7 @@ export class IngestQueue {
   private readonly msUntilBudgetReset: () => number
 
   private readonly commitMutex: Mutex
+  private readonly runRegistry: RunRegistry
   private running = false
   private paused = false
   /** Why the queue is paused — the dashboard distinguishes a rate limit from a spent budget. */
@@ -182,6 +201,7 @@ export class IngestQueue {
     this.budgetExceeded = opts.budgetExceeded ?? ((): boolean => false)
     this.msUntilBudgetReset = opts.msUntilBudgetReset ?? ((): number => msUntilReset())
     this.commitMutex = opts.commitMutex ?? new Mutex()
+    this.runRegistry = opts.runRegistry ?? new RunRegistry()
   }
 
   /**
@@ -488,6 +508,10 @@ export class IngestQueue {
     const prompt = `ingest ${pre.primaryArtifact}`
     this.store.log(job.id, 'info', `ingest attempt ${attempt}: ${prompt}`)
 
+    // Bracket + register as a writer so Bash-written pages can be swept into the commit, but
+    // only when this turns out to be the sole writer (finding F4).
+    const dirtyBefore = await dirtyPaths(this.vaultRoot)
+    const endRun = this.runRegistry.begin()
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
@@ -512,13 +536,18 @@ export class IngestQueue {
       })
       // created_pages comes from the actual commit (see commitVault): the only
       // authoritative record of what landed, correct even at concurrency 2.
-      const pathspec = [...written, path.posix.join('.raw', job.id), ...BOOKKEEPING_PATHS]
-      await this.commitStep(job, pathspec)
+      await this.commitStep(job, {
+        written,
+        dirtyBefore,
+        extra: [path.posix.join('.raw', job.id)],
+      })
+      endRun()
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(job.id, 'info', note)
       return
     }
 
+    endRun()
     const outcome = classifyFailure(res)
     this.store.transition(job.id, 'failed', {
       patch: {
@@ -552,7 +581,22 @@ export class IngestQueue {
     )
   }
 
-  private async commitStep(job: JobRow, pathspec: string[]): Promise<void> {
+  /**
+   * Builds the commit pathspec. MUST be called inside the commit mutex: the sole-writer question
+   * and the sweep have to happen together, or another run could start writing in between.
+   */
+  private async buildPathspec(scope: CommitScope, log: (message: string) => void): Promise<string[]> {
+    const sole = this.runRegistry.isSoleWriter()
+    const swept = sole ? newWikiPaths(scope.dirtyBefore, await dirtyPaths(this.vaultRoot)) : []
+    if (swept.length > 0) {
+      log(`staging ${swept.length} page(s) the tool stream did not report (F4)`)
+    } else if (!sole) {
+      log('another run is writing — staging only tool-reported paths (F4 sweep skipped)')
+    }
+    return [...new Set([...scope.written, ...swept, ...scope.extra, ...BOOKKEEPING_PATHS])]
+  }
+
+  private async commitStep(job: JobRow, scope: CommitScope): Promise<void> {
     const label = job.original_name ?? job.url ?? job.id
     if (!this.autoCommit()) {
       // Pages are already written; only the commit is skipped, so nothing is lost — the
@@ -561,9 +605,10 @@ export class IngestQueue {
       return
     }
     try {
-      const result = await this.commitMutex.runExclusive(() =>
-        this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
-      )
+      const result = await this.commitMutex.runExclusive(async () => {
+        const pathspec = await this.buildPathspec(scope, (m) => this.store.log(job.id, 'info', m))
+        return this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec })
+      })
       if (result.committed) {
         this.store.setCreatedPages(job.id, result.committedPages)
         this.store.log(
@@ -630,6 +675,9 @@ export class IngestQueue {
     const prompt = `ingest all of these:\n${ready.map((r) => `- ${r.artifact}`).join('\n')}`
     this.store.log(lead, 'info', `batch combined ingest of ${ready.length} artifact(s), attempt ${attempt}`)
 
+    // Same F4 bracket as the single-job path.
+    const dirtyBefore = await dirtyPaths(this.vaultRoot)
+    const endRun = this.runRegistry.begin()
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
@@ -659,17 +707,18 @@ export class IngestQueue {
           log: `batch ingest complete (member ${i + 1}/${n}, ${res.numTurns} turns)`,
         })
       })
-      const pathspec = [
-        ...written,
-        ...ready.map((r) => path.posix.join('.raw', r.id)),
-        ...BOOKKEEPING_PATHS,
-      ]
-      await this.batchCommit(ready.map((r) => r.id), names, pathspec)
+      await this.batchCommit(ready.map((r) => r.id), names, {
+        written,
+        dirtyBefore,
+        extra: ready.map((r) => path.posix.join('.raw', r.id)),
+      })
+      endRun()
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(lead, 'info', note)
       return
     }
 
+    endRun()
     const outcome = classifyFailure(res)
     for (const r of ready) {
       this.store.transition(r.id, 'failed', {
@@ -700,16 +749,17 @@ export class IngestQueue {
   }
 
   /** One commit for a whole batch; every member is attributed the same committed pages. */
-  private async batchCommit(memberIds: string[], names: string[], pathspec: string[]): Promise<void> {
+  private async batchCommit(memberIds: string[], names: string[], scope: CommitScope): Promise<void> {
     const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
     if (!this.autoCommit()) {
       this.store.log(memberIds[0]!, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
       return
     }
     try {
-      const result = await this.commitMutex.runExclusive(() =>
-        this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec }),
-      )
+      const result = await this.commitMutex.runExclusive(async () => {
+        const pathspec = await this.buildPathspec(scope, (m) => this.store.log(memberIds[0]!, 'info', m))
+        return this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec })
+      })
       if (result.committed) {
         for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
         this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)

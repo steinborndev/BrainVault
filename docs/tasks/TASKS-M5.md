@@ -200,24 +200,31 @@ path no longer existed and the real one was never staged.
 Not data loss — the file is on disk — but it stays unversioned and leaves `git status` dirty, and
 a later scoped commit will not sweep it either. It affects ingest equally, not just maintenance.
 
-**Attempted fix — BUILT, THEN REVERTED as unsound. Read this before trying again.**
-The obvious approach is to bracket a run: snapshot `git status --porcelain` before and after, and
-stage the wiki paths that are newly dirty. The helpers for it are implemented and tested
-(`dirtyPaths` / `newWikiPaths` in `pipeline/git.ts`, `test/git-dirty.test.ts` — 8 tests including
-an end-to-end reproduction of the write-then-rename case, and `-z` parsing so page names with
-colons and spaces are not returned quoted).
+**FIXED — with an exclusivity proof.** The first attempt bracketed each run with a
+before/after `git status` diff and staged the newly-dirty wiki paths. It was reverted: at
+concurrency 2 the runs overlap, so job A's bracket also captured pages job B was concurrently
+writing — A committed B's page and B's own commit then found nothing. The M1 acceptance test
+("one page per ingest commit") caught it immediately. Time-bracketing cannot attribute a page to
+a run whenever two runs can overlap, and here they always can (ingest↔ingest at concurrency 2;
+ingest↔maintenance hold separate run mutexes and share only the commit mutex).
 
-**Wiring it into the queue broke the M1 acceptance test, correctly.** At concurrency 2 the runs
-overlap, so job A's bracket also captures the pages job B is writing concurrently: A commits B's
-page, and B's own commit then finds nothing. The test asserts each ingest commit contains exactly
-one page and caught it immediately. Time-bracketing cannot attribute a page to a run whenever two
-runs can overlap — and here they always can (ingest↔ingest at concurrency 2, and ingest↔maintenance
-hold separate run mutexes, sharing only the commit mutex). Committing "everything dirty under
-`wiki/` at commit time" has the same attribution blur plus it sweeps the user's concurrent edits.
+The bracket is sound the moment exclusivity can be *proven*, so that is what was added:
+`pipeline/run-registry.ts` counts runs currently able to write the vault, shared between the
+ingest queue and the maintenance runner exactly like the commit mutex already is. A run may sweep
+unattributed wiki changes into its commit **only while `isSoleWriter()`**; with another run in
+flight the sweep is skipped and only tool-reported paths are staged. Losing a page from a commit
+is visible and fixable by hand; filing it silently under the wrong job is not.
 
-So F4 stays open. The `written` set (Write/Edit) is the only signal that is actually per-run;
-closing this properly probably means getting per-run attribution for Bash writes too — e.g. a
-PreToolUse hook recording Bash-tool paths, or running the agent with a per-run filesystem view —
-rather than inferring it from timing. Consequence meanwhile: a page the agent creates or renames
-via Bash stays untracked in the vault. It is visible in `git status` and can be committed by hand
-(that is what was done for the autoresearch synthesis page, vault commit `3988a4e`).
+Both checks happen INSIDE the commit mutex (`buildPathspec` in `queue.ts`, and the equivalent in
+`maintenance.ts`), so no run can start writing between asking the question and acting on it. The
+writer registration is released on every path, including failures and retries, so the count cannot
+leak and permanently disable the sweep.
+
+Covered by `test/f4-sweep.test.ts` against a real git vault: the sweep stages a Bash-written page
+when sole writer, skips it when another writer is active, and never touches files the user already
+had dirty (SPEC risk 5). Plus `test/git-dirty.test.ts` for the `-z` parsing (page names with
+colons and spaces must not come back quoted, or `git add` would fail on them). 248 tests green.
+
+Residual, accepted: while two runs genuinely overlap, a Bash-written page from either still stays
+untracked. It is visible in `git status` and committable by hand — which is what was done for the
+autoresearch synthesis page (vault commit `3988a4e`).
