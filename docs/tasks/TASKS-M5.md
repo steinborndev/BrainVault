@@ -34,7 +34,7 @@ A fresh session can rely on all of this being built, tested (195 vitest tests gr
 - [x] **Lint async rework + hard kill (BIGGEST carryover).** DONE in code on `feat/m5-maintenance-async` (see Finding F1). (a) **Hard kill:** agent runs now spawn the SDK CLI through `Options.spawnClaudeCodeProcess` in a detached process group (`pipeline/agent-spawn.ts`) and the runner escalates timeout/abort → graceful abort → group `SIGKILL` after a 5 s grace, reaping the CLI + any stuck `bash`/`python3` descendants (generalizes to ingest — it's in `runAgent`). (b) **Async/job:** `POST /maintenance/*` returns `202 {id,channel,status}` immediately; the run executes in the background; `GET /maintenance/runs/:id` polls the result; live log still streams over `maintenance:<kind>`. Frontend Wartung tab polls via `useMaintenanceRun`. Server 198 tests green (+ new `agent-spawn` group-kill test), web builds. **Still pending (user-gated):** one real agent run that forces a long `bash sleep` to confirm the detached spawner + group-SIGKILL end-to-end, and a `permprobe` re-run (permission/spawn wiring changed).
 - [x] **`.raw/.manifest.json` commit-scoping residual.** Fixed: `BOOKKEEPING_PATHS` now includes `.raw/.manifest.json` and was moved to `pipeline/git.ts` (the shared commit module) so the ingest queue and the maintenance runner can't drift apart — maintenance had the two paths duplicated as literals. Both the single-job and batch ingest pathspecs pick it up. Regression test added (`queue.test.ts`, asserts the commit pathspec). Vault is currently clean for this file (an earlier hot-cache run swept it in); the fix stops future ingests re-dirtying it.
 - [x] **Save-to-vault** (`POST /sessions/:id/save`, SPEC §6.3). Resumes the chat's `sdk_session_id` and prompts `/save` under the **`ingest`** profile — the chat itself is read-only by design, so the save needs a write-enabled run to produce the page. Implemented as a new `save` kind on `MaintenanceRunner` rather than a separate module: it needs the same commit discipline, and sharing that runner's **run mutex is what stops a save interleaving with a lint** (two concurrent vault writers is exactly what the mutex prevents). Async like the other runs (202 + poll). 400 if the session never completed a query (nothing to resume). Chat tab gained an "In Vault sichern" button with the live log and resulting page links.
-- [ ] **Autoresearch not yet run with a real agent** (only mocked). Verify end-to-end once (web egress path) with a small topic; watch cost.
+- [x] **Autoresearch verified end-to-end with a real agent** (2026-07-18, topic: endosomal escape of lipid nanoparticles). 10 pages created + 8 updated, committed as `8b28ca0 maintenance: research`; vault 98 → 108 pages. 4.74 M in / 53.7 k out tokens, **$3.45 estimated (Abo)**. Web egress worked (5 search angles, 8 fetches, 2 paywalled and logged). Quality note: it correctly filed a *contradiction* between a Nov 2025 ACS Nano perspective and a Sept 2025 review as unresolved instead of overwriting the vault's existing claim. **Two real bugs surfaced — see F3 and F4.**
 - [x] Polish: **citation preview** — new read-only `GET /api/v1/pages?path=…` plus a `CitationChip` that keeps the obsidian:// deep link as the primary action and lazily fetches the page on expand. The path comes from agent-produced citations, i.e. attacker-adjacent input, so it is confined to `VAULT_ROOT/wiki`, must end in `.md`, and is re-checked after `realpath` (symlink escapes). Traversal attempts are covered by tests and were verified against the real vault — `../.git/config`, `/etc/passwd` and `wiki/../../.config/vault-service/env` all 400.
 - [x] Polish: **hot-cache last-refresh timestamp** — `hotCacheUpdatedAt` (mtime of `wiki/hot.md`, the honest source since agent runs write it) on `/stats`, shown next to the refresh button.
 
@@ -169,3 +169,40 @@ Verified on the real database: `user_version` 2 → 3, the existing failed job w
 immediately, stream the live log over the existing `maintenance:<kind>` bus, and poll a
 new `GET /maintenance/runs/:id`. This frees the HTTP request + worker slot regardless of
 the hard-kill; the two fixes are independent and both wanted.
+
+### F3 — FIXED: `/autoresearch` was never a valid invocation
+
+The first real autoresearch run failed instantly with `Unknown command: /autoresearch`. M4 shipped
+`startResearch` sending the literal slash form, and **it never worked**: the vault is loaded as a
+plugin (`plugins: [{type:'local', …}]`), so its `commands/` are namespaced — the bare
+`/autoresearch` does not resolve. Mocked tests could not catch this; the task existed precisely
+because the flow had only ever been mocked.
+
+The **zero-token guard** in `agent-runner.ts` is what made it visible: the SDK reported the run as
+`subtype: 'success'`, and without that guard it would have been recorded as a completed research
+run that did nothing. It was built in M0 against auth failures and caught an unrelated class of
+bug. Cost of the failure: **0 tokens**.
+
+Fixed by spelling the flow out in the prompt (mirroring the vault's own `commands/autoresearch.md`:
+load `references/program.md`, run the loop, update index/log/hot), the same natural-language style
+the working lint prompt already used. That avoids depending on a namespaced command name and
+respects hard rule 5 (no edits to vault internals).
+
+### F4 — OPEN: a Bash-written/renamed page can miss the commit pathspec
+
+The research run's **synthesis page** — the central output — was left **uncommitted** as an
+untracked file. `pipeline/written-paths.ts` derives the commit pathspec from `Write`/`Edit` tool
+calls only; the module documents that Bash-only writes are invisible and relies on
+`BOOKKEEPING_PATHS` for the known ones. That assumption broke here: the agent wrote the page with
+`Write` (path A) and then **renamed it via Bash** (`Research- …` → `Research: …`), so the staged
+path no longer existed and the real one was never staged.
+
+Not data loss — the file is on disk — but it stays unversioned and leaves `git status` dirty, and
+a later scoped commit will not sweep it either. It affects ingest equally, not just maintenance.
+
+**Proposed fix (not yet applied — changes commit scoping, which is vault-integrity-adjacent):**
+capture `git status --porcelain` immediately BEFORE the run and again after, and stage the paths
+under the wiki that are new/changed relative to the pre-run snapshot. That catches Bash-written and
+renamed pages while still excluding files the user already had dirty (SPEC risk 5: the user may be
+editing the vault while the pipeline runs). Widening the pathspec to all of `wiki/` would be simpler
+but would sweep those concurrent user edits into our commit.

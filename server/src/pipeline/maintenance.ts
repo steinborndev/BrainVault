@@ -140,9 +140,33 @@ export class MaintenanceRunner {
     )
   }
 
-  /** Starts an autoresearch run in the background; returns its tracked run immediately. */
+  /**
+   * Starts an autoresearch run in the background; returns its tracked run immediately.
+   *
+   * The prompt spells the flow out rather than sending `/autoresearch <topic>`. That slash form
+   * was what M4 shipped, and the first REAL run proved it never worked: the vault is loaded as a
+   * plugin, so its commands are namespaced and the bare `/autoresearch` came back as
+   * "Unknown command" — a zero-token no-op the SDK still reported as success (the zero-token
+   * guard in agent-runner is what turned it into a visible failure). Mocked tests could never
+   * have caught it.
+   *
+   * The steps below mirror the vault's own `commands/autoresearch.md`, so behaviour is preserved
+   * without depending on a namespaced command name or editing the vault (hard rule 5): load the
+   * skill's research program, run the loop, then update the wiki's index/log/hot pages.
+   */
   startResearch(topic: string): MaintenanceRun {
-    return this.start('research', `/autoresearch ${topic}`, 'research')
+    return this.start(
+      'research',
+      'Use the autoresearch skill to research this topic and file the findings into the wiki: ' +
+        `${topic}\n\n` +
+        'Before starting, read skills/autoresearch/references/program.md to load the research ' +
+        'constraints and objectives. Then run the research loop: search the web, fetch sources, ' +
+        'synthesize, and file structured pages into the wiki. ' +
+        'Afterwards update wiki/index.md, wiki/log.md and wiki/hot.md. ' +
+        'Finally report how many pages you created and the key findings. ' +
+        'Stay focused on the stated topic rather than broadening the scope.',
+      'research',
+    )
   }
 
   /** Starts a hot-cache refresh in the background; returns its tracked run immediately. */
