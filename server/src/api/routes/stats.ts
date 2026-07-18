@@ -16,6 +16,7 @@ import {
   recentCommits,
   growth,
   readHotCache,
+  hotCacheUpdatedAt,
   type PageCounts,
   type RecentPage,
   type Commit,
@@ -32,6 +33,7 @@ interface VaultDerived {
   readonly commits: Commit[]
   readonly growth: GrowthPoint[]
   readonly hotCache: string | null
+  readonly hotCacheUpdatedAt: string | null
 }
 
 export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void {
@@ -59,6 +61,7 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       commits,
       growth: growthPoints,
       hotCache: readHotCache(config.vaultRoot),
+      hotCacheUpdatedAt: hotCacheUpdatedAt(config.vaultRoot),
     }
     cache = { at: now, data }
     return data
@@ -95,6 +98,7 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       commits: derived.commits,
       growth: derived.growth,
       hotCache: derived.hotCache,
+      hotCacheUpdatedAt: derived.hotCacheUpdatedAt,
       kpis7d: {
         ingests: finishedSince['done'] ?? 0,
         failures: finishedSince['failed'] ?? 0,

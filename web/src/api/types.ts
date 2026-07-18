@@ -110,6 +110,8 @@ export interface Stats {
   commits: Commit[]
   growth: GrowthPoint[]
   hotCache: string | null
+  /** mtime of wiki/hot.md — the Wartung tab's "letzter Refresh". null if never written. */
+  hotCacheUpdatedAt: string | null
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
   usage: { today: UsageTotals; last7d: UsageTotals }
   budget: Budget
@@ -191,7 +193,8 @@ export interface LintReport {
   totalFindings: number
 }
 
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache'
+/** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
 
 export interface MaintenanceResult {
   ok: boolean
@@ -256,6 +259,14 @@ export interface SettingsResponse {
 export type SettingsPatch = Partial<{
   [K in keyof EffectiveSettings]: EffectiveSettings[K] | null
 }>
+
+/** One wiki page's markdown for the citation preview (server/src/api/routes/pages.ts). */
+export interface PagePreview {
+  path: string
+  markdown: string
+  /** True when the page was cut to the preview limit. */
+  truncated: boolean
+}
 
 /** SSE event payloads (server/src/api/routes/events.ts). */
 export type BusEvent =

@@ -436,6 +436,110 @@ describe('POST /api/v1/query + sessions', () => {
   })
 })
 
+describe('GET /api/v1/pages (citation preview)', () => {
+  beforeEach(() => {
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Foo.md'), '# Foo\n\nbody text')
+    // A secret OUTSIDE the wiki, to prove the guard actually confines reads.
+    fs.writeFileSync(path.join(vaultRoot, 'secret.md'), 'TOP SECRET')
+  })
+
+  it('returns the markdown of a wiki page', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/pages?path=wiki/concepts/Foo.md`)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { markdown: string; truncated: boolean }
+    expect(body.markdown).toContain('body text')
+    expect(body.truncated).toBe(false)
+  })
+
+  it('refuses to read outside the wiki', async () => {
+    // The path comes from agent-produced citations, so it is attacker-adjacent input.
+    for (const p of [
+      'secret.md',
+      '../secret.md',
+      'wiki/../secret.md',
+      'wiki/concepts/../../secret.md',
+      '/etc/passwd',
+      '../../../../etc/passwd',
+    ]) {
+      const res = await fetch(`${baseUrl}/api/v1/pages?path=${encodeURIComponent(p)}`)
+      expect(res.status, `${p} must be rejected`).toBe(400)
+      expect(await res.text()).not.toContain('TOP SECRET')
+    }
+  })
+
+  it('rejects non-markdown and missing paths', async () => {
+    expect((await fetch(`${baseUrl}/api/v1/pages`)).status).toBe(400)
+    expect((await fetch(`${baseUrl}/api/v1/pages?path=wiki/notes.txt`)).status).toBe(400)
+    expect((await fetch(`${baseUrl}/api/v1/pages?path=wiki/nope.md`)).status).toBe(404)
+  })
+})
+
+describe('POST /api/v1/sessions/:id/save', () => {
+  const poll = async (id: string): Promise<{ status: string; result?: { ok: boolean; pages: string[] } }> => {
+    for (let i = 0; i < 100; i++) {
+      const r = await fetch(`${baseUrl}/api/v1/maintenance/runs/${id}`)
+      const body = (await r.json()) as { status: string; result?: { ok: boolean; pages: string[] } }
+      if (body.status !== 'running') return body
+      await new Promise((res) => setTimeout(res, 5))
+    }
+    throw new Error('save run did not settle')
+  }
+
+  it('404s for an unknown session', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/sessions/nope/save`, { method: 'POST' })
+    expect(res.status).toBe(404)
+  })
+
+  it('400s when the session never completed a query (nothing to resume)', async () => {
+    const created = await fetch(`${baseUrl}/api/v1/sessions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'empty' }),
+    })
+    const { session } = (await created.json()) as { session: { id: string } }
+    const res = await fetch(`${baseUrl}/api/v1/sessions/${session.id}/save`, { method: 'POST' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toMatch(/nothing to save/)
+  })
+
+  it('resumes the chat SDK session under a WRITE profile and commits', async () => {
+    // Ask something first so the session records an sdk_session_id to resume.
+    await fetch(`${baseUrl}/api/v1/query`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'what is in the vault?' }),
+    })
+    const list = (await (await fetch(`${baseUrl}/api/v1/sessions`)).json()) as {
+      sessions: Array<{ id: string }>
+    }
+    const sessionId = list.sessions[0]!.id
+
+    let seen: { profile: string | undefined; resumeSessionId: string | undefined } = {
+      profile: undefined,
+      resumeSessionId: undefined,
+    }
+    maintAgent = async (opts) => {
+      seen = { profile: opts.profile, resumeSessionId: opts.resumeSessionId }
+      return okResult('saved')
+    }
+
+    const res = await fetch(`${baseUrl}/api/v1/sessions/${sessionId}/save`, { method: 'POST' })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as { id: string; kind: string; channel: string }
+    expect(started.kind).toBe('save')
+    expect(started.channel).toBe('maintenance:save')
+
+    const run = await poll(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+    // The chat is read-only by design, so the save must run write-enabled and carry the
+    // conversation forward — otherwise it has nothing to write, or no permission to write it.
+    expect(seen.profile).toBe('ingest')
+    expect(seen.resumeSessionId).toBe('sdk-session-1')
+  })
+})
+
 describe('GET/PUT /api/v1/settings', () => {
   interface SettingsResp {
     effective: { watchFolder: string; concurrency: number; maxUploadBytes: number; gitAutoCommit: boolean }

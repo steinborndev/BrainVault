@@ -211,3 +211,17 @@ export function readHotCache(vaultRoot: string): string | null {
     return null
   }
 }
+
+/**
+ * When `wiki/hot.md` was last written, as an ISO string — the "Anzeige des letzten
+ * Refresh-Zeitpunkts" the Wartung tab shows next to its refresh button (SPEC.md §6.4).
+ * The file's mtime is the honest source: the hot cache is refreshed by agent runs writing it,
+ * so nothing else would know when that last happened.
+ */
+export function hotCacheUpdatedAt(vaultRoot: string): string | null {
+  try {
+    return fs.statSync(path.join(vaultRoot, 'wiki', 'hot.md')).mtime.toISOString()
+  } catch {
+    return null
+  }
+}
