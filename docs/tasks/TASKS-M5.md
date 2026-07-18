@@ -200,9 +200,24 @@ path no longer existed and the real one was never staged.
 Not data loss — the file is on disk — but it stays unversioned and leaves `git status` dirty, and
 a later scoped commit will not sweep it either. It affects ingest equally, not just maintenance.
 
-**Proposed fix (not yet applied — changes commit scoping, which is vault-integrity-adjacent):**
-capture `git status --porcelain` immediately BEFORE the run and again after, and stage the paths
-under the wiki that are new/changed relative to the pre-run snapshot. That catches Bash-written and
-renamed pages while still excluding files the user already had dirty (SPEC risk 5: the user may be
-editing the vault while the pipeline runs). Widening the pathspec to all of `wiki/` would be simpler
-but would sweep those concurrent user edits into our commit.
+**Attempted fix — BUILT, THEN REVERTED as unsound. Read this before trying again.**
+The obvious approach is to bracket a run: snapshot `git status --porcelain` before and after, and
+stage the wiki paths that are newly dirty. The helpers for it are implemented and tested
+(`dirtyPaths` / `newWikiPaths` in `pipeline/git.ts`, `test/git-dirty.test.ts` — 8 tests including
+an end-to-end reproduction of the write-then-rename case, and `-z` parsing so page names with
+colons and spaces are not returned quoted).
+
+**Wiring it into the queue broke the M1 acceptance test, correctly.** At concurrency 2 the runs
+overlap, so job A's bracket also captures the pages job B is writing concurrently: A commits B's
+page, and B's own commit then finds nothing. The test asserts each ingest commit contains exactly
+one page and caught it immediately. Time-bracketing cannot attribute a page to a run whenever two
+runs can overlap — and here they always can (ingest↔ingest at concurrency 2, and ingest↔maintenance
+hold separate run mutexes, sharing only the commit mutex). Committing "everything dirty under
+`wiki/` at commit time" has the same attribution blur plus it sweeps the user's concurrent edits.
+
+So F4 stays open. The `written` set (Write/Edit) is the only signal that is actually per-run;
+closing this properly probably means getting per-run attribution for Bash writes too — e.g. a
+PreToolUse hook recording Bash-tool paths, or running the agent with a per-run filesystem view —
+rather than inferring it from timing. Consequence meanwhile: a page the agent creates or renames
+via Bash stays untracked in the vault. It is visible in `git status` and can be committed by hand
+(that is what was done for the autoresearch synthesis page, vault commit `3988a4e`).

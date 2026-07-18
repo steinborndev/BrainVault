@@ -46,6 +46,57 @@ async function git(vaultRoot: string, args: readonly string[]): Promise<string> 
   return stdout
 }
 
+/**
+ * Vault-relative paths git currently reports as dirty (modified, staged, or untracked).
+ *
+ * Used to bracket an agent run: what is dirty AFTER minus what was dirty BEFORE is what the run
+ * actually touched — including files it created or renamed with **Bash**, which the Write/Edit
+ * derived pathspec cannot see (finding F4: an autoresearch run's synthesis page was written with
+ * Write and then renamed with Bash, so the staged path no longer existed and the real one was
+ * never staged, leaving the page unversioned).
+ *
+ * `-z` is deliberate: the default porcelain output quotes and escapes paths containing spaces or
+ * colons, which vault page names routinely have. NUL-separated output needs no unquoting.
+ */
+export async function dirtyPaths(vaultRoot: string): Promise<Set<string>> {
+  let raw: string
+  try {
+    raw = await git(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+  } catch {
+    // Not a repo, or git unavailable. Degrade to the Write/Edit-derived pathspec rather than
+    // sinking the run: a commit that stages a little less is recoverable, a failed ingest is not.
+    return new Set()
+  }
+  const fields = raw.split('\0')
+  const paths = new Set<string>()
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i]
+    if (entry === undefined || entry.length < 4) continue
+    const status = entry.slice(0, 2)
+    paths.add(entry.slice(3))
+    // A rename/copy entry is followed by its ORIGIN path in the next NUL field; consume it so it
+    // is not misread as another status entry, and record it — the old name needs staging too, or
+    // the deletion half of the rename never lands.
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const origin = fields[++i]
+      if (origin !== undefined && origin !== '') paths.add(origin)
+    }
+  }
+  return paths
+}
+
+/**
+ * Wiki paths that became dirty during a run — `after` minus `before`, scoped to `wiki/`.
+ *
+ * Scoping matters twice over: it keeps the vault's own churn (Obsidian rewriting
+ * `.obsidian/workspace.json` mid-run) out of our commits, and it means files the user already had
+ * dirty before the run are never swept in (SPEC.md §11.3 risk 5 — the user may be editing the
+ * vault while the pipeline runs). Only what this run newly touched under the wiki is returned.
+ */
+export function newWikiPaths(before: ReadonlySet<string>, after: ReadonlySet<string>): string[] {
+  return [...after].filter((p) => !before.has(p) && p.startsWith('wiki/')).sort()
+}
+
 /** Wiki markdown paths from a newline list of files, vault-relative POSIX. */
 function wikiPagesFrom(files: string): string[] {
   return files
