@@ -43,6 +43,17 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "         it holds CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token')." >&2
 fi
 
+# yt-dlp (YouTube URL ingestion) is often installed under pyenv shims or ~/.local/bin,
+# neither of which is on systemd's minimal PATH. Append its directory LAST so it never
+# shadows the system python3/bash the unit deliberately resolves first.
+YTDLP="$(command -v yt-dlp || true)"
+EXTRA_PATH=""
+if [ -n "$YTDLP" ]; then
+  EXTRA_PATH=":$(dirname "$YTDLP")"
+else
+  echo "warning: yt-dlp not found on PATH — YouTube URL jobs will fail until it is installed" >&2
+fi
+
 # Ensure a production build exists (single-process `node dist/main.js`).
 if [ ! -f "$REPO/server/dist/main.js" ]; then
   echo "building server + web (no dist yet)…"
@@ -54,6 +65,7 @@ sed -e "s#@REPO@#$REPO#g" \
     -e "s#@NODE@#$NODE#g" \
     -e "s#@NODEDIR@#$NODEDIR#g" \
     -e "s#@VAULT_ROOT@#$VAULT_ROOT#g" \
+    -e "s#@EXTRA_PATH@#$EXTRA_PATH#g" \
     "$TEMPLATE" > "$UNIT"
 echo "wrote $UNIT"
 

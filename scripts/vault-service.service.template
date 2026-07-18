@@ -18,7 +18,7 @@ Environment=NODE_ENV=production
 # nvm's node is NOT on systemd's minimal PATH, and the Agent SDK spawns its CLI via
 # `spawn('node', …)`. Put the resolved node dir first, then the system dirs that hold the
 # sandbox deps (bwrap, socat) and preprocessing tools (python3, bash).
-Environment=PATH=@NODEDIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=@NODEDIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin@EXTRA_PATH@
 # VAULT_ROOT is a config value (hard rule 1), passed here — it is intentionally NOT in the
 # credential env file. The Anthropic credential loads from ~/.config/vault-service/env, which
 # the app reads itself; do not put the token in this unit.
