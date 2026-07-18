@@ -6,8 +6,9 @@
  */
 
 import { useRef, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type EnqueueResult } from '../api/client.ts'
+import { Icon } from './Icon.tsx'
 
 type Toast = { kind: 'ok' | 'err'; text: string } | null
 
@@ -52,12 +53,34 @@ export function Dropzone(): React.ReactElement {
     onError: (e: Error) => setToast({ kind: 'err', text: e.message }),
   })
 
+  // The server's per-file cap, for a pre-check: warning before the upload beats decoding a
+  // 413 after streaming 200 MB. The server still enforces the limit either way.
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  const maxBytes = health.data?.limits?.maxUploadBytes
+
+  const takeFiles = (files: File[]): void => {
+    if (files.length === 0) return
+    if (maxBytes !== undefined) {
+      const oversized = files.filter((f) => f.size > maxBytes)
+      if (oversized.length > 0) {
+        const mb = Math.round(maxBytes / 1024 / 1024)
+        setToast({
+          kind: 'err',
+          text: `${oversized.map((f) => f.name).join(', ')}: über dem Limit von ${mb} MB — nicht hochgeladen`,
+        })
+        files = files.filter((f) => f.size <= maxBytes)
+        if (files.length === 0) return
+      }
+    }
+    upload.mutate(files)
+  }
+
   const onDrop = (e: React.DragEvent): void => {
     e.preventDefault()
     setOver(false)
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
-      upload.mutate(files)
+      takeFiles(files)
       return
     }
     // A dragged link/text (no files) — treat as a URL/text submission.
@@ -78,10 +101,20 @@ export function Dropzone(): React.ReactElement {
         onDragLeave={() => setOver(false)}
         onDrop={onDrop}
         onClick={() => fileInput.current?.click()}
+        onKeyDown={(e) => {
+          // role="button" promises keyboard activation — deliver it (Enter/Space open the picker).
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            fileInput.current?.click()
+          }
+        }}
         role="button"
         tabIndex={0}
+        aria-label="Dateien auswählen oder hierher ziehen"
       >
-        <div className="icon">⬆️</div>
+        <div className="icon">
+          <Icon name="upload" />
+        </div>
         <h3>{busy ? 'Wird hochgeladen…' : 'Dateien hierher ziehen oder klicken'}</h3>
         <p>PDF, Office, Bilder, Text — mehrere Dateien werden als Batch verarbeitet.</p>
         <input
@@ -90,8 +123,7 @@ export function Dropzone(): React.ReactElement {
           multiple
           hidden
           onChange={(e) => {
-            const files = Array.from(e.target.files ?? [])
-            if (files.length) upload.mutate(files)
+            takeFiles(Array.from(e.target.files ?? []))
             e.target.value = ''
           }}
         />

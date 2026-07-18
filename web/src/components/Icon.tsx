@@ -11,6 +11,12 @@ export type IconName =
   | 'copy'
   | 'retry'
   | 'x'
+  | 'check'
+  | 'search'
+  | 'graph'
+  | 'back'
+  | 'upload'
+  | 'edit'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   grid: (
@@ -56,6 +62,34 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     </>
   ),
   x: <path d="M6 6l12 12M18 6L6 18" />,
+  check: <path d="M4 12.5l5 5L20 6.5" />,
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M16.5 16.5L21 21" />
+    </>
+  ),
+  graph: (
+    <>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="8" r="2.5" />
+      <circle cx="9" cy="18" r="2.5" />
+      <path d="M8.2 7l7.4 0.7M7 8.2l1.4 7.4M16.4 10l-5.8 6.3" />
+    </>
+  ),
+  back: <path d="M15 4l-8 8 8 8" />,
+  upload: (
+    <>
+      <path d="M12 16V4M7 9l5-5 5 5" />
+      <path d="M4 20h16" />
+    </>
+  ),
+  edit: (
+    <>
+      <path d="M4 20l4-1L20 7l-3-3L5 16z" />
+      <path d="M14 6l3 3" />
+    </>
+  ),
 }
 
 export function Icon({ name }: { name: IconName }): React.ReactElement {
@@ -82,7 +116,7 @@ export function Icon({ name }: { name: IconName }): React.ReactElement {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      {PATHS[name]}
+      {PATHS[name] ?? PATHS.file}
     </svg>
   )
 }

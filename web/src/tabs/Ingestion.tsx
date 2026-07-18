@@ -9,7 +9,7 @@
  * job visibly moves Aktiv → Verlauf on completion with no refresh (DoD).
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type { Job, JobStatus } from '../api/types.ts'
@@ -64,11 +64,22 @@ export function Ingestion(): React.ReactElement {
     },
   })
 
+  // Two-step confirm on the button itself (no `window.confirm` — blocked/ugly in installed
+  // PWAs). First click arms it for 4 s, second click clears. The vault stays untouched.
+  const [confirmClear, setConfirmClear] = useState(false)
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (clearTimer.current) clearTimeout(clearTimer.current)
+  }, [])
   const onClear = (): void => {
-    const scope = filter === 'all' ? 'den gesamten Verlauf' : `alle „${filter}"-Einträge`
-    if (window.confirm(`Möchtest du ${scope} (${filteredHistory.length}) löschen? Der Vault und die erzeugten Seiten bleiben unberührt.`)) {
-      clear.mutate()
+    if (!confirmClear) {
+      setConfirmClear(true)
+      clearTimer.current = setTimeout(() => setConfirmClear(false), 4000)
+      return
     }
+    if (clearTimer.current) clearTimeout(clearTimer.current)
+    setConfirmClear(false)
+    clear.mutate()
   }
 
   if (isLoading) return <div className="empty">Lade Jobs…</div>
@@ -104,8 +115,17 @@ export function Ingestion(): React.ReactElement {
         title="Verlauf"
         action={
           filteredHistory.length > 0 ? (
-            <button className="btn ghost danger" disabled={clear.isPending} onClick={onClear}>
-              {filter === 'all' ? 'Verlauf leeren' : 'Auswahl leeren'}
+            <button
+              className="btn ghost danger"
+              disabled={clear.isPending}
+              onClick={onClear}
+              title="Nur der Job-Verlauf wird gelöscht — Vault und erzeugte Seiten bleiben unberührt."
+            >
+              {confirmClear
+                ? `Wirklich ${filteredHistory.length} Einträge löschen?`
+                : filter === 'all'
+                  ? 'Verlauf leeren'
+                  : 'Auswahl leeren'}
             </button>
           ) : undefined
         }

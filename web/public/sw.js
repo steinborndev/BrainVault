@@ -18,6 +18,9 @@ self.addEventListener('activate', (event) => {
   self.clients.claim()
 })
 
+/** Old hashed bundles accumulate forever without a cap — trim beyond this many entries. */
+const MAX_ASSET_ENTRIES = 60
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
   // Never intercept the API or the SSE stream — they must hit the network live.
@@ -27,10 +30,28 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((res) => {
-        const copy = res.clone()
-        caches.open(CACHE).then((c) => c.put(event.request, copy)).catch(() => {})
+        // Only cache real successes — caching a 500/404 would replay the failure offline.
+        if (res.ok) {
+          const copy = res.clone()
+          caches
+            .open(CACHE)
+            .then(async (c) => {
+              await c.put(event.request, copy)
+              if (url.pathname.startsWith('/assets/')) await trimAssets(c)
+            })
+            .catch(() => {})
+        }
         return res
       })
       .catch(() => caches.match(event.request).then((r) => r ?? caches.match('/index.html'))),
   )
 })
+
+/** Drops the oldest hashed-asset entries once the cache grows past the cap (rough FIFO). */
+async function trimAssets(cache) {
+  const keys = await cache.keys()
+  const assets = keys.filter((req) => new URL(req.url).pathname.startsWith('/assets/'))
+  for (const req of assets.slice(0, Math.max(0, assets.length - MAX_ASSET_ENTRIES))) {
+    await cache.delete(req)
+  }
+}

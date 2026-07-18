@@ -31,5 +31,14 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
     navigator.serviceWorker.register('/sw.js').catch(() => {
       /* SW is a progressive enhancement — the app works without it */
     })
+    // The SW calls skipWaiting(), so a new deploy swaps the controller under a running tab.
+    // Reload once so the page and its (possibly already-deleted) old assets can't diverge
+    // from the new shell. The guard stops a reload loop.
+    let reloaded = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return
+      reloaded = true
+      window.location.reload()
+    })
   })
 }

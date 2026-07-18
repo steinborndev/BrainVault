@@ -501,17 +501,19 @@ export class JobStore {
   /** Appends a line to the job's log (agent stream + pipeline events, SPEC.md §8). */
   log(id: string, level: LogLevel, message: string): void {
     const ts = nowIso()
-    this.db
+    const info = this.db
       .prepare('INSERT INTO job_logs (job_id, ts, level, message) VALUES (?, ?, ?, ?)')
       .run(id, ts, level, message)
     // Stream the line live (the DoD's per-job agent log). Callers invoke log() only after
-    // the row it references exists, and never in a path that subsequently rolls back.
-    this.bus?.publish({ kind: 'log', log: { jobId: id, ts, level, message } })
+    // the row it references exists, and never in a path that subsequently rolls back. The
+    // rowid rides along so the client can dedupe live lines against its seed fetch exactly
+    // (two identical messages in the same millisecond are distinct rows).
+    this.bus?.publish({ kind: 'log', log: { jobId: id, id: Number(info.lastInsertRowid), ts, level, message } })
   }
 
-  logs(id: string): Array<{ ts: string; level: LogLevel; message: string }> {
+  logs(id: string): Array<{ id: number; ts: string; level: LogLevel; message: string }> {
     return this.db
-      .prepare('SELECT ts, level, message FROM job_logs WHERE job_id = ? ORDER BY id')
-      .all(id) as Array<{ ts: string; level: LogLevel; message: string }>
+      .prepare('SELECT id, ts, level, message FROM job_logs WHERE job_id = ? ORDER BY id')
+      .all(id) as Array<{ id: number; ts: string; level: LogLevel; message: string }>
   }
 }

@@ -15,6 +15,7 @@ import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
 
 export function Maintenance(): React.ReactElement {
@@ -119,7 +120,9 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
         ))}
       </div>
       {report.totalFindings === 0 ? (
-        <div className="empty">Keine Befunde — das Wiki ist sauber. 🎉</div>
+        <div className="empty">
+          <Icon name="check" /> Keine Befunde — das Wiki ist sauber.
+        </div>
       ) : (
         report.sections.map((s) => (
           <div key={s.title} className="lint-section">

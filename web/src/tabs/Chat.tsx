@@ -46,6 +46,11 @@ export function Chat(): React.ReactElement {
       qc.invalidateQueries({ queryKey: ['sessions'] })
       qc.invalidateQueries({ queryKey: ['session', res.sessionId] })
     },
+    onError: (_e, question) => {
+      // Give the typed question back instead of forcing a retype — but never clobber
+      // something the user already started writing while the query was in flight.
+      setDraft((current) => (current.trim() === '' ? question : current))
+    },
   })
 
   const threadRef = useRef<HTMLDivElement>(null)
@@ -105,7 +110,9 @@ export function Chat(): React.ReactElement {
       <div className="chat-thread" ref={threadRef}>
         {messages.length === 0 && !ask.isPending && (
           <div className="chat-empty">
-            <div className="icon">💬</div>
+            <div className="icon">
+              <Icon name="chat" />
+            </div>
             <p>Frag den Vault etwas — die Antwort zitiert die zugrunde liegenden Wiki-Seiten als klickbare Chips.</p>
           </div>
         )}
@@ -183,20 +190,6 @@ function SessionBar({
   saving: boolean
   onSave: () => void
 }): React.ReactElement {
-  const rename = async (s: Session): Promise<void> => {
-    const title = window.prompt('Session umbenennen:', s.title ?? '')
-    if (title && title.trim()) {
-      await api.renameSession(s.id, title.trim())
-      onRenamed()
-    }
-  }
-  const del = async (s: Session): Promise<void> => {
-    if (window.confirm(`Session „${s.title ?? 'ohne Titel'}" löschen?`)) {
-      await api.deleteSession(s.id)
-      onDeleted(s.id)
-    }
-  }
-
   return (
     <div className="session-bar">
       <button className="btn" onClick={onNew}>
@@ -204,17 +197,14 @@ function SessionBar({
       </button>
       <div className="session-chips">
         {sessions.map((s) => (
-          <div key={s.id} className={`session-chip${s.id === activeId ? ' active' : ''}`}>
-            <button className="session-name" onClick={() => onSelect(s.id)} title={s.title ?? 'ohne Titel'}>
-              {s.title ?? 'Neue Session'}
-            </button>
-            <button className="session-act" onClick={() => void rename(s)} title="Umbenennen">
-              ✎
-            </button>
-            <button className="session-act" onClick={() => void del(s)} title="Löschen">
-              <Icon name="x" />
-            </button>
-          </div>
+          <SessionChip
+            key={s.id}
+            session={s}
+            active={s.id === activeId}
+            onSelect={() => onSelect(s.id)}
+            onRenamed={onRenamed}
+            onDeleted={() => onDeleted(s.id)}
+          />
         ))}
       </div>
       <button
@@ -228,6 +218,98 @@ function SessionBar({
         }
       >
         {saving ? 'Sichere…' : 'In Vault sichern'}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * One session chip. Rename is an inline input (no `window.prompt` — native dialogs are blocked
+ * or ugly in installed-PWA mode); delete is a two-step confirm on the chip itself.
+ */
+function SessionChip({
+  session,
+  active,
+  onSelect,
+  onRenamed,
+  onDeleted,
+}: {
+  session: Session
+  active: boolean
+  onSelect: () => void
+  onRenamed: () => void
+  onDeleted: () => void
+}): React.ReactElement {
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (confirmTimer.current) clearTimeout(confirmTimer.current)
+  }, [])
+
+  const commitRename = async (): Promise<void> => {
+    setEditing(false)
+    const trimmed = title.trim()
+    if (trimmed !== '' && trimmed !== (session.title ?? '')) {
+      await api.renameSession(session.id, trimmed)
+      onRenamed()
+    }
+  }
+
+  const del = async (): Promise<void> => {
+    if (!confirming) {
+      setConfirming(true)
+      confirmTimer.current = setTimeout(() => setConfirming(false), 3000)
+      return
+    }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current)
+    await api.deleteSession(session.id)
+    onDeleted()
+  }
+
+  if (editing) {
+    return (
+      <div className={`session-chip${active ? ' active' : ''}`}>
+        <input
+          className="session-rename"
+          value={title}
+          autoFocus
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => void commitRename()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void commitRename()
+            if (e.key === 'Escape') setEditing(false)
+          }}
+          aria-label="Session umbenennen"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className={`session-chip${active ? ' active' : ''}`}>
+      <button className="session-name" onClick={onSelect} title={session.title ?? 'ohne Titel'}>
+        {session.title ?? 'Neue Session'}
+      </button>
+      <button
+        className="session-act"
+        onClick={() => {
+          setTitle(session.title ?? '')
+          setEditing(true)
+        }}
+        title="Umbenennen"
+        aria-label="Session umbenennen"
+      >
+        <Icon name="edit" />
+      </button>
+      <button
+        className={`session-act${confirming ? ' danger' : ''}`}
+        onClick={() => void del()}
+        title={confirming ? 'Wirklich löschen?' : 'Löschen'}
+        aria-label={confirming ? 'Löschen bestätigen' : 'Session löschen'}
+      >
+        {confirming ? 'Wirklich?' : <Icon name="x" />}
       </button>
     </div>
   )

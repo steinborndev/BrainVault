@@ -43,6 +43,8 @@ export interface Job {
 }
 
 export interface JobLogLine {
+  /** `job_logs` rowid — present on seed fetches and job-log SSE lines; exact dedup key. */
+  id?: number
   ts: string
   level: LogLevel
   message: string
@@ -133,6 +135,8 @@ export interface Health {
   vaultRoot: string
   queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
+  /** Server-side caps the client pre-checks against (dropzone size warning). */
+  limits?: { maxUploadBytes: number }
 }
 
 /** A resolved page citation for a chat answer (server/src/pipeline/citations.ts). */

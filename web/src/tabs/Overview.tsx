@@ -26,11 +26,20 @@ const DIR_LABELS: Record<string, string> = {
 }
 
 export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement {
-  const { data, isLoading, isError, error } = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['stats'], queryFn: api.stats })
 
   if (isLoading) return <LoadingSkeleton />
   if (isError || !data) {
-    return <div className="empty">Statistik konnte nicht geladen werden: {(error as Error)?.message ?? 'unbekannt'}</div>
+    // refetchOnWindowFocus is off (SSE drives invalidation), so without this button a
+    // transient failure would blank the dashboard until something else invalidates stats.
+    return (
+      <div className="empty">
+        Statistik konnte nicht geladen werden: {(error as Error)?.message ?? 'unbekannt'}{' '}
+        <button className="btn" onClick={() => void refetch()}>
+          Erneut versuchen
+        </button>
+      </div>
+    )
   }
 
   return (

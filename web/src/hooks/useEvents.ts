@@ -25,8 +25,30 @@ export function useEvents(): { connected: boolean } {
   useEffect(() => {
     const es = new EventSource('/api/v1/events')
 
-    es.onopen = () => setConnected(true)
-    es.onerror = () => setConnected(false) // EventSource will retry automatically
+    // Events emitted while the stream was down are gone for good (no server-side replay), so a
+    // reconnect — laptop sleep, Wi-Fi blip, server restart — must resync by refetch or the UI
+    // silently diverges until the user reloads. Same for a mobile PWA resumed from background.
+    const resync = (): void => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] })
+      void qc.invalidateQueries({ queryKey: ['stats'] })
+      void qc.invalidateQueries({ queryKey: ['sessions'] })
+    }
+    let hadGap = false
+    es.onopen = () => {
+      setConnected(true)
+      if (hadGap) {
+        hadGap = false
+        resync()
+      }
+    }
+    es.onerror = () => {
+      hadGap = true
+      setConnected(false) // EventSource will retry automatically
+    }
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') resync()
+    }
+    document.addEventListener('visibilitychange', onVisible)
 
     const onJob = (ev: MessageEvent): void => {
       const { job } = JSON.parse(ev.data) as Extract<BusEvent, { kind: 'job' }>
@@ -49,6 +71,7 @@ export function useEvents(): { connected: boolean } {
     es.addEventListener('stats', onStats)
 
     return () => {
+      document.removeEventListener('visibilitychange', onVisible)
       es.removeEventListener('job', onJob)
       es.removeEventListener('log', onLog)
       es.removeEventListener('stats', onStats)

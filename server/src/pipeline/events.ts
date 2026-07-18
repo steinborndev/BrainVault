@@ -15,6 +15,8 @@ import type { JobRow, LogLevel } from '../db/jobs.js'
 /** One line appended to a job's log — mirrors a `job_logs` row. */
 export interface LogEventPayload {
   readonly jobId: string
+  /** The `job_logs` rowid — lets the client dedupe a live line against the seed fetch exactly. */
+  readonly id?: number
   readonly ts: string
   readonly level: LogLevel
   readonly message: string
