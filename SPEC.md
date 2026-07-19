@@ -320,6 +320,20 @@ Bestehendes. Nach einem Löschen zeigt das Dashboard ein Banner mit der Zahl der
 verwaisten Backlinks und führt den Nutzer zum Lint-Lauf (dem vault-eigenen Aufräummechanismus
 für hängende Verweise).
 
+**Live-Graph (Erweiterung 2026-07-19, User-Entscheidung):** Der Graph aktualisiert sich live,
+während ein Ingest läuft — man sieht neue Seiten und Verbindungen entstehen, wie früher in der
+Obsidian-Graph-View. Serverseitig beobachtet ein zweiter chokidar-Watcher `VAULT_ROOT/wiki`
+(reine Notification, liest und schreibt keine Seiteninhalte; Hard Rule 1 unberührt) und
+publiziert entprellt (1 s) ein payload-loses SSE-Event `vault`, worauf das Frontend den Graphen
+refetcht. Damit das die flüssige Darstellung nicht gefährdet: Knotenpositionen sind pfad- statt
+indexbasiert (die Knotenliste ist pfadsortiert — ein einziger Neuzugang verschiebt alle
+nachfolgenden Indizes), der Layout-Worker ist langlebig und unterbrechbar (Generationen-Protokoll,
+Timer- statt Blockierschleife) und wird bei kleinen Diffs mit niedrigem Alpha nachgeheizt statt
+neu gestartet; erst ab >20 % neuen Knoten wird kalt neu gelayoutet. Neue Seiten erscheinen am
+Schwerpunkt ihrer bereits platzierten Nachbarn und blinken kurz auf; die Kamera bewegt sich bei
+Live-Updates nie (Auto-Fit nur beim allerersten Layout). Nebeneffekt: auch Filter- und
+Fokuswechsel erhalten jetzt die Positionen, statt die Simulation neu zu würfeln.
+
 ### 12.5 Reihenfolge
 
 Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits. ~~(6) In-Dashboard Vault-Viewer~~ — **vorgezogen und am 2026-07-18 umgesetzt** (12.4); die Obsidian-App ist damit im Alltag optional.

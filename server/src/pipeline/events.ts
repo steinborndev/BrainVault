@@ -27,11 +27,15 @@ export interface LogEventPayload {
  *  - `job`   — a job row changed status (full row, so the UI can update without a refetch)
  *  - `log`   — a log line was appended (the DoD's live agent stream)
  *  - `stats` — vault-visible numbers changed (page counts / git history); a refresh hint
+ *  - `vault` — wiki pages changed on disk (debounced); the graph view's live-update hint.
+ *              Fires DURING an agent run as pages are written, not just at commit time —
+ *              that mid-run stream is what lets the graph grow live while an ingest runs.
  */
 export type BusEvent =
   | { readonly kind: 'job'; readonly job: JobRow }
   | { readonly kind: 'log'; readonly log: LogEventPayload }
   | { readonly kind: 'stats' }
+  | { readonly kind: 'vault' }
 
 export type BusListener = (event: BusEvent) => void
 

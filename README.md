@@ -151,7 +151,10 @@ Five tabs, all live over SSE:
   time, and the settings editor.
 
 The graph renders on a canvas with the force layout in a web worker, so it stays smooth as the
-vault grows — deliberately, since the WSLg Obsidian graph does not. The vault itself is never
+vault grows — deliberately, since the WSLg Obsidian graph does not. It also updates **live**:
+while an ingest writes pages, a debounced `vault` SSE event refreshes the graph, new nodes
+surface at their neighbors' centroid with a brief flash, existing nodes keep their positions,
+and the camera never jumps. The vault itself is never
 written from here; only agent runs write (see the security model).
 
 ## Configuration
@@ -318,7 +321,7 @@ POST   /jobs                     upload / URL / pasted text (multi → batch)
 GET    /jobs, /jobs/:id          list + detail
 POST   /jobs/:id/retry           retry a failed or deferred job
 DELETE /jobs/:id, /jobs          cancel; clear history
-GET    /events                   SSE: job updates, log streams, stats invalidation
+GET    /events                   SSE: job updates, log streams, stats + vault invalidation
 GET    /stats                    dashboard numbers, usage totals, budget
 POST   /query                    read-only question against the vault (+ citations)
 GET/POST/PATCH/DELETE /sessions  chat sessions

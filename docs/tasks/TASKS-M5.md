@@ -328,3 +328,42 @@ The viewer is no longer read-only, and the dashboard no longer depends on `obsid
   in-app links, edit→commit, 409 conflict path with reload, delete→commit, banner counter (2),
   guidance navigation, clean git history (`seed`, `edit:` ×2, `delete:`), clean tree.
   Server suite: 270 tests green (`pages-write.test.ts` added).
+
+
+### §8 addendum — live graph during ingest (2026-07-19, user-requested)
+
+The graph view now updates live while an agent writes pages — the Obsidian graph behaviour
+("bubbles reorient, new links appear") the dashboard viewer had lost by being fetch-once.
+
+- **Server signal:** `pipeline/vault-watcher.ts` — a second chokidar watcher on
+  `VAULT_ROOT/wiki` (notification only; never reads or writes page content, hard rule 1
+  untouched). Bursts of writes coalesce into ONE debounced (1 s) payload-less `vault` bus/SSE
+  event; the commit-time `stats` event was never a substitute because it fires once at the END
+  of a run, after all pages are already written. Wired in `main.ts`, closed on shutdown.
+  Tests: `vault-watcher.test.ts` (ignoreInitial, burst→one event, change/unlink fire,
+  non-markdown ignored, close stops publishing) + a `vault` SSE serialization case in
+  `api.test.ts`.
+- **Frontend plumbing:** `useEvents` invalidates `['graph']` on `vault` and on SSE reconnect
+  resync. Deliberately NOT `['page-full']`: refetching an open page would refresh `baseMtime`
+  under the user's editor and defeat the optimistic 409 lock.
+- **The actual work — position identity.** Node positions were index-addressed, but the server
+  sorts nodes by path, so ONE new page shifts every index after it — any live update would have
+  scrambled the layout. Positions now live in a `Map<path, {x,y}>`; indices are translated only
+  at the worker boundary.
+- **Worker session protocol** (`graphLayout.worker.ts`): long-lived worker instead of
+  spawn-per-layout; requests carry a generation number (stale frames are dropped), a seed
+  position array, and an alpha. Ticking is timer-sliced instead of a blocking while-loop, so a
+  new request interrupts a cooling layout immediately. Small diffs reheat at alpha 0.3 (gentle
+  reorientation); >20 % never-placed nodes restart cold at alpha 1. New nodes are seeded at
+  their placed neighbors' centroid (golden-angle offset against stacking) and flash for ~1.6 s.
+- **Camera discipline:** auto-fit happens ONLY on the very first finished layout. This also
+  fixes a pre-existing annoyance: every page save/delete used to relayout from scratch and yank
+  a panned/zoomed user back to fit. Side effect of path-keyed positions: filter chips and
+  local-mode toggles now keep the layout instead of re-dealing it.
+- Structural-identity skip (paths + edges unchanged → no repost) keeps mtime-only refetches and
+  StrictMode's second effect pass from re-settling; the last layout is replayed into a
+  recreated worker (StrictMode terminates the first one in dev).
+- Also corrected here: a stale comment claiming positions "carry over by index" — they never did.
+- **Verified:** server suite 292 tests green; web typecheck + build clean; live probe against
+  the running systemd service — an mtime touch on a wiki page produced exactly one
+  `event: vault` / `data: {}` on the SSE wire (debounce confirmed live).

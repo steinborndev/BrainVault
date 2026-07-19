@@ -3,13 +3,20 @@
  * entirely off the UI thread — the page stays responsive while the layout "warms up", which
  * is exactly the failure mode of Obsidian's graph under WSLg that this view replaces.
  *
- * Protocol:
- *   in : { nodes: Array<{ degree: number }>, edges: Array<[number, number]> }
- *   out: { type: 'tick' | 'done', positions: Float32Array }  // [x0, y0, x1, y1, …]
+ * Protocol (one long-lived worker per canvas mount, layouts are replaceable in flight):
+ *   in : { gen, nodes: Array<{ degree: number }>, edges: Array<[number, number]>,
+ *          seed: Float32Array,   // [x0, y0, …]; NaN pairs = unplaced, d3 places them
+ *          alpha: number }       // 1 = cold start, ~0.3 = gentle reheat of a live layout
+ *   out: { gen, type: 'tick' | 'done', positions: Float32Array }
  *
- * The simulation cools and STOPS (alphaMin) — no perpetual ticking, no idle CPU burn.
- * Positions are posted as transferable buffers every few ticks, so even a large layout
- * animates smoothly without flooding the main thread.
+ * `gen` (generation) ties every outgoing frame to the request that produced it — the main
+ * thread bumps it per layout and drops stale frames, so a superseded layout can never
+ * scribble over a newer one.
+ *
+ * Ticking is timer-sliced, NOT a blocking while-loop: between batches the worker yields to
+ * its message queue, so a new layout request (live vault update mid-ingest, filter toggle)
+ * interrupts the current one immediately. The simulation still cools and STOPS (alphaMin)
+ * — no perpetual ticking, no idle CPU burn.
  */
 
 import {
@@ -24,8 +31,11 @@ import {
 } from 'd3-force'
 
 interface LayoutRequest {
+  gen: number
   nodes: Array<{ degree: number }>
   edges: Array<[number, number]>
+  seed: Float32Array
+  alpha: number
 }
 
 interface SimNode extends SimulationNodeDatum {
@@ -33,10 +43,28 @@ interface SimNode extends SimulationNodeDatum {
   degree: number
 }
 
-self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
-  const { nodes, edges } = ev.data
+let timer: ReturnType<typeof setTimeout> | undefined
 
-  const simNodes: SimNode[] = nodes.map((n, i) => ({ index: i, degree: n.degree }))
+self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
+  const { gen, nodes, edges, seed, alpha } = ev.data
+
+  // A new request supersedes whatever is still cooling.
+  if (timer !== undefined) clearTimeout(timer)
+
+  const simNodes: SimNode[] = nodes.map((n, i) => {
+    const node: SimNode = { index: i, degree: n.degree }
+    const x = seed[i * 2]
+    const y = seed[i * 2 + 1]
+    // Seeded nodes keep their place (live update / filter toggle); unseeded ones are left
+    // undefined so d3's phyllotaxis initialization spreads them — except that the main
+    // thread pre-seeds new nodes at their neighbors' centroid, so mid-ingest arrivals
+    // surface where they belong instead of flying in from the origin.
+    if (x !== undefined && y !== undefined && !Number.isNaN(x) && !Number.isNaN(y)) {
+      node.x = x
+      node.y = y
+    }
+    return node
+  })
   const simLinks = edges.map(([source, target]) => ({ source, target }))
 
   const sim = forceSimulation(simNodes)
@@ -50,6 +78,7 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
     // the cluster — which then blows up the bounding box and makes fit-to-view useless.
     .force('x', forceX<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
     .force('y', forceY<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
+    .alpha(alpha)
     .stop()
 
   const positions = (): Float32Array => {
@@ -61,13 +90,19 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
     return out
   }
 
-  // Tick synchronously in batches; post intermediate frames so the warm-up is visible.
+  // Tick in batches; post intermediate frames so the warm-up (or the live re-settle) is
+  // visible, then yield so an interrupting request gets through.
   const BATCH = 5
-  while (sim.alpha() > sim.alphaMin()) {
+  const step = (): void => {
     for (let i = 0; i < BATCH && sim.alpha() > sim.alphaMin(); i++) sim.tick()
     const buf = positions()
-    self.postMessage({ type: 'tick', positions: buf }, { transfer: [buf.buffer] })
+    if (sim.alpha() > sim.alphaMin()) {
+      self.postMessage({ gen, type: 'tick', positions: buf }, { transfer: [buf.buffer] })
+      timer = setTimeout(step, 0)
+    } else {
+      timer = undefined
+      self.postMessage({ gen, type: 'done', positions: buf }, { transfer: [buf.buffer] })
+    }
   }
-  const finalBuf = positions()
-  self.postMessage({ type: 'done', positions: finalBuf }, { transfer: [finalBuf.buffer] })
+  step()
 }

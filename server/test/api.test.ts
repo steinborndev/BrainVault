@@ -339,6 +339,26 @@ describe('GET /api/v1/events (SSE)', () => {
     controller.abort()
     expect(seen).toContain('event: job')
   })
+
+  it('streams a payload-less vault event (the live-graph hint)', async () => {
+    const controller = new AbortController()
+    const res = await fetch(`${baseUrl}/api/v1/events`, {
+      headers: { accept: 'text/event-stream' },
+      signal: controller.signal,
+    })
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    events.publish({ kind: 'vault' })
+
+    let seen = ''
+    for (let i = 0; i < 5 && !seen.includes('event: vault'); i++) {
+      const { value, done } = await reader.read()
+      if (done) break
+      seen += decoder.decode(value, { stream: true })
+    }
+    controller.abort()
+    expect(seen).toContain('event: vault\ndata: {}')
+  })
 })
 
 describe('POST /api/v1/query + sessions', () => {

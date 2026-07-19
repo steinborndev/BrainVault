@@ -323,3 +323,4 @@ export type BusEvent =
   | { kind: 'job'; job: Job }
   | { kind: 'log'; log: { jobId: string; ts: string; level: LogLevel; message: string } }
   | { kind: 'stats' }
+  | { kind: 'vault' }

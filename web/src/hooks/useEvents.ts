@@ -6,6 +6,8 @@
  *              refreshes stats (counts changed).
  *  - `log`   → merge the line into the live log store (the DoD's streaming agent log).
  *  - `stats` → invalidate stats (a commit landed; page counts/history changed).
+ *  - `vault` → invalidate the graph (wiki pages changed on disk, possibly mid-ingest —
+ *              this is what makes the graph view grow live while an agent writes pages).
  *
  * EventSource reconnects on its own (the server sends `retry:`), so there's no manual
  * backoff here. `connected` is surfaced so the shell can show a live/offline indicator.
@@ -32,6 +34,7 @@ export function useEvents(): { connected: boolean } {
       void qc.invalidateQueries({ queryKey: ['jobs'] })
       void qc.invalidateQueries({ queryKey: ['stats'] })
       void qc.invalidateQueries({ queryKey: ['sessions'] })
+      void qc.invalidateQueries({ queryKey: ['graph'] })
     }
     let hadGap = false
     es.onopen = () => {
@@ -66,15 +69,24 @@ export function useEvents(): { connected: boolean } {
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
 
+    // Deliberately NOT invalidating ['page-full'] here: refetching an open page while the
+    // user edits it would silently refresh `baseMtime` and defeat the optimistic lock —
+    // a concurrent change must surface as a 409 on save, not vanish.
+    const onVault = (): void => {
+      qc.invalidateQueries({ queryKey: ['graph'] })
+    }
+
     es.addEventListener('job', onJob)
     es.addEventListener('log', onLog)
     es.addEventListener('stats', onStats)
+    es.addEventListener('vault', onVault)
 
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       es.removeEventListener('job', onJob)
       es.removeEventListener('log', onLog)
       es.removeEventListener('stats', onStats)
+      es.removeEventListener('vault', onVault)
       es.close()
     }
   }, [qc])

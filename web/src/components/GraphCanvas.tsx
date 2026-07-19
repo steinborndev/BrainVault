@@ -9,6 +9,13 @@
  *   - viewport culling: off-screen nodes/labels are skipped
  *   - the simulation cools and stops; re-layout only when the node set actually changes
  *   - hover/click hit-testing is O(n) over a typed array — fine far beyond 10k nodes
+ *
+ * Live updates (SPEC.md §12.4): positions are keyed by page PATH, not by array index — the
+ * server sorts nodes by path, so one new page shifts every index after it. When the node set
+ * changes (vault SSE event mid-ingest, filter toggle, local mode), known pages keep their
+ * place and the simulation re-heats gently instead of being thrown away; brand-new pages
+ * appear at their neighbors' centroid and flash briefly. The camera NEVER moves on a live
+ * update — auto-fit happens only on the very first layout.
  */
 
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
@@ -35,15 +42,31 @@ const TYPE_VARS: Record<string, string> = {
   questions: '--err',
 }
 
+/** A layout with at least this share of never-placed nodes restarts cold instead of reheating. */
+const COLD_RESTART_SHARE = 0.2
+/** How long a newly appeared node flashes, ms. */
+const FLASH_MS = 1600
+
 interface Transform {
   x: number
   y: number
   k: number
 }
 
+interface WorkerFrame {
+  gen: number
+  type: 'tick' | 'done'
+  positions: Float32Array
+}
+
 export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  /** Positions aligned with the CURRENT `nodes` prop, [x0, y0, x1, y1, …]; NaN = unplaced. */
   const positionsRef = useRef<Float32Array>(new Float32Array(0))
+  /** The persistent position memory, keyed by page path — index-stable across updates. */
+  const posByPathRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  /** Paths recently added to the view → timestamp, for the arrival flash. */
+  const flashRef = useRef<Map<string, number>>(new Map())
   const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 })
   const [hover, setHover] = useState<number | null>(null)
   const hoverRef = useRef<number | null>(null)
@@ -108,13 +131,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
     const maxY = (h / 2 - t.y) / t.k + margin
     const visible = (x: number, y: number): boolean => x >= minX && x <= maxX && y >= minY && y <= maxY
 
-    // Edges first, faint; highlighted edges stronger.
+    // Edges first, faint; highlighted edges stronger. NaN endpoints (a node the worker
+    // hasn't placed yet, mid live-update) simply don't draw this frame.
     ctx.lineWidth = 1 / t.k
     for (const [a, b] of edges) {
       const x1 = pos[a * 2]!
       const y1 = pos[a * 2 + 1]!
       const x2 = pos[b * 2]!
       const y2 = pos[b * 2 + 1]!
+      if (Number.isNaN(x1) || Number.isNaN(x2)) continue
       if (!visible(x1, y1) && !visible(x2, y2)) continue
       const lit = highlight !== null && highlight.has(a) && highlight.has(b)
       ctx.strokeStyle = edgeColor
@@ -126,9 +151,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
     }
 
     // Nodes.
+    const now = performance.now()
+    let flashActive = false
     for (let i = 0; i < nodes.length; i++) {
       const x = pos[i * 2]!
       const y = pos[i * 2 + 1]!
+      if (Number.isNaN(x)) continue
       if (!visible(x, y)) continue
       const r = radius(i)
       const dimmed = highlight !== null && !highlight.has(i)
@@ -144,6 +172,23 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
         ctx.beginPath()
         ctx.arc(x, y, r + 2.5 / t.k, 0, Math.PI * 2)
         ctx.stroke()
+      }
+      // Arrival flash: an expanding, fading ring on nodes that just appeared (live ingest).
+      const born = flashRef.current.get(nodes[i]!.path)
+      if (born !== undefined) {
+        const age = now - born
+        if (age < FLASH_MS) {
+          flashActive = true
+          const p = age / FLASH_MS
+          ctx.globalAlpha = (1 - p) * 0.9
+          ctx.strokeStyle = colorFor(nodes[i]!.type)
+          ctx.lineWidth = 2 / t.k
+          ctx.beginPath()
+          ctx.arc(x, y, r + (3 + p * 14) / t.k, 0, Math.PI * 2)
+          ctx.stroke()
+        } else {
+          flashRef.current.delete(nodes[i]!.path)
+        }
       }
     }
 
@@ -161,6 +206,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       if (!wanted) continue
       const x = pos[i * 2]!
       const y = pos[i * 2 + 1]!
+      if (Number.isNaN(x)) continue
       if (!visible(x, y)) continue
       const dimmed = highlight !== null && !highlight.has(i)
       ctx.globalAlpha = dimmed ? 0.15 : 0.95
@@ -168,9 +214,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       ctx.fillText(n.title, x, y + radius(i) + 3 / t.k)
     }
     ctx.globalAlpha = 1
+
+    // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
+    if (flashActive) scheduleDrawRef.current?.()
   }, [nodes, edges, focusIndex, matches, neighbors, radius])
 
   const scheduleDraw = useRafDraw(draw)
+  const scheduleDrawRef = useRef<(() => void) | null>(null)
+  scheduleDrawRef.current = scheduleDraw
   const fittedRef = useRef(false)
   /** Set once the user pans/zooms, so an automatic re-fit never yanks the view away. */
   const userMovedRef = useRef(false)
@@ -189,9 +240,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
     const xs: number[] = []
     const ys: number[] = []
     for (let i = 0; i < pos.length; i += 2) {
+      if (Number.isNaN(pos[i]!)) continue // unplaced mid-update nodes have no extent yet
       xs.push(pos[i]!)
       ys.push(pos[i + 1]!)
     }
+    if (xs.length === 0) return
     xs.sort((a, b) => a - b)
     ys.sort((a, b) => a - b)
     const lo = (arr: number[]): number => arr[Math.floor(arr.length * 0.05)]!
@@ -212,39 +265,164 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
     scheduleDraw()
   }, [scheduleDraw])
 
-  // Layout worker: restart when the node/edge set changes. Positions carry over by index
-  // where the count matches (smooth filter transitions are not worth index-mapping).
+  // ---------------------------------------------------------------- layout worker session
+  //
+  // ONE worker for the whole mount; each node/edge change posts a new layout generation.
+  // The worker interrupts whatever it was cooling and frames tagged with an old generation
+  // are dropped here — so a burst of live updates can never interleave stale positions.
+
+  const workerRef = useRef<Worker | null>(null)
+  /** The generation counter and the path list the in-flight layout was posted with. */
+  const layoutRef = useRef<{ gen: number; paths: string[] }>({ gen: 0, paths: [] })
+  /** The last posted layout, kept re-postable (StrictMode re-creates the worker in dev). */
+  const lastMsgRef = useRef<{
+    paths: string[]
+    degrees: Array<{ degree: number }>
+    edges: Array<[number, number]>
+    seed: Float32Array
+    alpha: number
+  } | null>(null)
+  const fitPendingRef = useRef(false)
+
+  const postLayout = useCallback((): void => {
+    const msg = lastMsgRef.current
+    const worker = workerRef.current
+    if (!msg || !worker) return
+    // The seed buffer is transferred, so every post ships a fresh copy.
+    const seed = msg.seed.slice()
+    worker.postMessage(
+      { gen: layoutRef.current.gen, nodes: msg.degrees, edges: msg.edges, seed, alpha: msg.alpha },
+      { transfer: [seed.buffer] },
+    )
+  }, [])
+
   useEffect(() => {
-    if (nodes.length === 0) {
-      positionsRef.current = new Float32Array(0)
-      scheduleDraw()
-      return
-    }
-    setLayouting(true)
-    fittedRef.current = false
     const worker = new Worker(new URL('../lib/graphLayout.worker.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = (ev: MessageEvent<{ type: 'tick' | 'done'; positions: Float32Array }>) => {
-      positionsRef.current = ev.data.positions
-      if (ev.data.type === 'done') {
+    workerRef.current = worker
+    worker.onmessage = (ev: MessageEvent<WorkerFrame>) => {
+      const { gen, type, positions } = ev.data
+      if (gen !== layoutRef.current.gen) return // superseded layout — drop the frame
+      positionsRef.current = positions
+      const byPath = posByPathRef.current
+      const paths = layoutRef.current.paths
+      for (let i = 0; i < paths.length; i++) {
+        byPath.set(paths[i]!, { x: positions[i * 2]!, y: positions[i * 2 + 1]! })
+      }
+      if (type === 'done') {
         setLayouting(false)
-        // Frame the finished layout once, so a graph of any size lands filling the
-        // viewport instead of as a speck (or spilling past the edges).
-        if (!fittedRef.current) {
+        // Frame the FIRST finished layout once, so a graph of any size lands filling the
+        // viewport instead of as a speck. Later layouts (live updates, filter toggles)
+        // leave the camera alone — nothing yanks the user away mid-look.
+        if (fitPendingRef.current) {
+          fitPendingRef.current = false
           fittedRef.current = true
           fitToView()
         }
       }
-      scheduleDraw()
+      scheduleDrawRef.current?.()
     }
-    worker.postMessage({
-      nodes: nodes.map((n) => ({ degree: n.in + n.out })),
-      edges,
-    })
+    // A recreated worker (dev StrictMode double-mount) starts empty — replay the layout.
+    postLayout()
     return () => {
       worker.terminate()
-      setLayouting(false)
+      workerRef.current = null
     }
-  }, [nodes, edges, scheduleDraw, fitToView])
+  }, [fitToView, postLayout])
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      layoutRef.current = { gen: layoutRef.current.gen + 1, paths: [] } // orphan in-flight frames
+      lastMsgRef.current = null
+      positionsRef.current = new Float32Array(0)
+      setLayouting(false)
+      scheduleDraw()
+      return
+    }
+
+    // Structurally identical to the last posted layout (a refetch where only mtimes moved,
+    // or StrictMode's second effect pass)? Then there is nothing to re-settle — skip.
+    const prev = lastMsgRef.current
+    if (
+      prev !== null &&
+      prev.paths.length === nodes.length &&
+      prev.edges.length === edges.length &&
+      nodes.every((n, i) => n.path === prev.paths[i]) &&
+      edges.every((e, i) => e[0] === prev.edges[i]![0] && e[1] === prev.edges[i]![1])
+    ) {
+      return
+    }
+
+    const byPath = posByPathRef.current
+    const firstLayout = byPath.size === 0
+    const newPaths: number[] = []
+    const seed = new Float32Array(nodes.length * 2)
+    for (let i = 0; i < nodes.length; i++) {
+      const known = byPath.get(nodes[i]!.path)
+      if (known) {
+        seed[i * 2] = known.x
+        seed[i * 2 + 1] = known.y
+      } else {
+        seed[i * 2] = NaN
+        seed[i * 2 + 1] = NaN
+        newPaths.push(i)
+      }
+    }
+
+    // New nodes start at their placed neighbors' centroid (plus a small golden-angle offset
+    // so siblings don't stack) — a page appearing mid-ingest surfaces where it belongs
+    // instead of flying across the view from d3's default spiral.
+    if (!firstLayout && newPaths.length > 0) {
+      const adj = new Map<number, number[]>()
+      for (const [a, b] of edges) {
+        if (!adj.has(a)) adj.set(a, [])
+        if (!adj.has(b)) adj.set(b, [])
+        adj.get(a)!.push(b)
+        adj.get(b)!.push(a)
+      }
+      for (const i of newPaths) {
+        let sx = 0
+        let sy = 0
+        let count = 0
+        for (const nb of adj.get(i) ?? []) {
+          const x = seed[nb * 2]!
+          if (Number.isNaN(x)) continue
+          sx += x
+          sy += seed[nb * 2 + 1]!
+          count++
+        }
+        if (count > 0) {
+          const angle = i * 2.399963 // golden angle: deterministic spread for co-arriving pages
+          seed[i * 2] = sx / count + Math.cos(angle) * 12
+          seed[i * 2 + 1] = sy / count + Math.sin(angle) * 12
+        }
+        flashRef.current.set(nodes[i]!.path, performance.now())
+      }
+    }
+
+    // Cold start when nothing is placed yet or the view changed shape substantially
+    // (unhiding a whole bucket); gentle reheat for everything else — that is what keeps a
+    // live update a "reorientation" instead of a re-deal.
+    const cold = firstLayout || newPaths.length > nodes.length * COLD_RESTART_SHARE
+    if (firstLayout) fitPendingRef.current = true
+    if (cold) setLayouting(true)
+
+    // Align the drawn positions with the new node order IMMEDIATELY (indices shift when the
+    // sorted node list changes) — known nodes render in place this very frame, before the
+    // worker's first tick arrives; unplaced ones are NaN and skip drawing.
+    positionsRef.current = seed.slice()
+    scheduleDraw()
+
+    const paths = nodes.map((n) => n.path)
+    layoutRef.current = { gen: layoutRef.current.gen + 1, paths }
+    lastMsgRef.current = {
+      paths,
+      degrees: nodes.map((n) => ({ degree: n.in + n.out })),
+      edges,
+      seed,
+      alpha: cold ? 1 : 0.3,
+    }
+    postLayout()
+  }, [nodes, edges, scheduleDraw, postLayout])
 
   // Canvas sizing (device-pixel aware) + redraw on resize and theme change.
   useEffect(() => {
@@ -296,7 +474,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       for (let i = 0; i < nodes.length; i++) {
         const dx = pos[i * 2]! - x
         const dy = pos[i * 2 + 1]! - y
-        const d = dx * dx + dy * dy
+        const d = dx * dx + dy * dy // NaN for unplaced nodes → both comparisons false
         const r = radius(i) + slop
         if (d < r * r && d < bestD) {
           best = i

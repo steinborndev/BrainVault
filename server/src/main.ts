@@ -19,6 +19,7 @@ import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
+import { startVaultWatcher, type VaultWatcher } from './pipeline/vault-watcher.js'
 import type { FastifyInstance } from 'fastify'
 
 export interface RunningService {
@@ -26,6 +27,7 @@ export interface RunningService {
   readonly queue: IngestQueue
   readonly store: JobStore
   readonly watcher: Watcher
+  readonly vaultWatcher: VaultWatcher
   readonly url: string
   stop(): Promise<void>
 }
@@ -95,6 +97,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
   })
 
+  // Live-graph signal (SPEC.md §12.4): wiki file changes → debounced `vault` SSE event.
+  const vaultWatcher = startVaultWatcher({ vaultRoot: config.vaultRoot, events })
+
   const app = await buildServer({
     config: effectiveConfig,
     store,
@@ -116,12 +121,13 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
 
   const stop = async (): Promise<void> => {
     await watcher.close()
+    await vaultWatcher.close()
     queue.stop()
     await app.close()
     db.close()
   }
 
-  return { app, queue, store, watcher, url, stop }
+  return { app, queue, store, watcher, vaultWatcher, url, stop }
 }
 
 const isDirectRun =
