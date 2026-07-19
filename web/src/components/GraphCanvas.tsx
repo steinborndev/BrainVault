@@ -547,14 +547,63 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     [nodes, radius, toWorld],
   )
 
-  // Pointer events cover mouse AND touch: drag to pan, wheel/pinch to zoom, click to select.
+  /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
+  const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const t = transformRef.current
+    const rect = canvas.getBoundingClientRect()
+    const cx = sx - rect.left - rect.width / 2
+    const cy = sy - rect.top - rect.height / 2
+    t.x = cx - ((cx - t.x) / t.k) * next
+    t.y = cy - ((cy - t.y) / t.k) * next
+    t.k = next
+    userMovedRef.current = true
+  }, [transformRef, userMovedRef])
+
+  const clampK = (k: number): number => Math.min(8, Math.max(0.15, k))
+
+  /** Button zoom: around the canvas center. */
+  const zoomBy = (factor: number): void => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, clampK(transformRef.current.k * factor))
+    scheduleDraw()
+  }
+
+  // Pointer events cover mouse AND touch: drag to pan, wheel or two-finger pinch to zoom,
+  // click/tap to select. All active pointers are tracked so a second touch turns the pan
+  // into a pinch.
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const pinch = useRef<{ dist: number; k: number } | null>(null)
+  /** True from pinch start until the last finger lifts — suppresses the tap-select. */
+  const pinchedRef = useRef(false)
 
   const onPointerDown = (e: React.PointerEvent): void => {
     ;(e.target as Element).setPointerCapture(e.pointerId)
-    drag.current = { x: e.clientX, y: e.clientY, moved: false }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()] as [{ x: number; y: number }, { x: number; y: number }]
+      pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), k: transformRef.current.k }
+      pinchedRef.current = true
+      drag.current = null
+    } else {
+      drag.current = { x: e.clientX, y: e.clientY, moved: false }
+    }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pinch.current && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()] as [{ x: number; y: number }, { x: number; y: number }]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y)
+      if (dist > 0 && pinch.current.dist > 0) {
+        zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, clampK((pinch.current.k * dist) / pinch.current.dist))
+        scheduleDraw()
+      }
+      return
+    }
     if (drag.current) {
       const dx = e.clientX - drag.current.x
       const dy = e.clientY - drag.current.y
@@ -574,13 +623,26 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     }
   }
   const onPointerUp = (e: React.PointerEvent): void => {
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) pinch.current = null
     const wasDrag = drag.current?.moved ?? false
     drag.current = null
-    if (!wasDrag) {
-      const hit = hitTest(e.clientX, e.clientY)
-      if (hit !== null) onSelect(nodes[hit]!)
+    if (pointers.current.size === 0) {
+      const wasPinch = pinchedRef.current
+      pinchedRef.current = false
+      if (!wasDrag && !wasPinch) {
+        const hit = hitTest(e.clientX, e.clientY)
+        if (hit !== null) onSelect(nodes[hit]!)
+      }
     }
   }
+  const onPointerCancel = (e: React.PointerEvent): void => {
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) pinch.current = null
+    if (pointers.current.size === 0) pinchedRef.current = false
+    drag.current = null
+  }
+
   // Wheel zoom is a NATIVE non-passive listener: React's synthetic wheel event can't
   // preventDefault (browsers register it passive), so the page would scroll along with
   // every zoom. And because zooming moves the world under a stationary pointer, the hover
@@ -589,18 +651,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
   const onWheelRef = useRef<(e: WheelEvent) => void>(() => {})
   onWheelRef.current = (e: WheelEvent): void => {
     e.preventDefault()
-    const t = transformRef.current
-    const factor = Math.exp(-e.deltaY * 0.0015)
-    const next = Math.min(8, Math.max(0.15, t.k * factor))
-    // Zoom around the cursor: keep the world point under the pointer fixed.
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    const cx = e.clientX - rect.left - rect.width / 2
-    const cy = e.clientY - rect.top - rect.height / 2
-    t.x = cx - ((cx - t.x) / t.k) * next
-    t.y = cy - ((cy - t.y) / t.k) * next
-    t.k = next
-    userMovedRef.current = true
+    zoomAt(e.clientX, e.clientY, clampK(transformRef.current.k * Math.exp(-e.deltaY * 0.0015)))
     const hit = hitTest(e.clientX, e.clientY)
     if (hit !== hoverRef.current) setHover(hit)
     scheduleDraw()
@@ -622,6 +673,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={() => {
           if (hoverRef.current !== null) {
             setHover(null)
@@ -643,9 +695,24 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         >
           Fit
         </button>
+        <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
+          +
+        </button>
+        <button className="btn ghost" onClick={() => zoomBy(1 / 1.4)} title="Zoom out" aria-label="Zoom out">
+          −
+        </button>
       </div>
       {layouting && <div className="graph-status">Laying out…</div>}
-      {hover !== null && nodes[hover] && <div className="graph-tooltip">{nodes[hover]!.title}</div>}
+      {hover !== null && nodes[hover] && (
+        <div className="graph-tooltip">
+          <strong>{nodes[hover]!.title}</strong>
+          <span>
+            {nodes[hover]!.path}
+            {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
+            {nodes[hover]!.out} out
+          </span>
+        </div>
+      )}
     </div>
   )
 }

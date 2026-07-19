@@ -214,6 +214,17 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return new Set(nodes.map((n, i) => (hit(n) ? i : -1)).filter((i) => i >= 0))
   }, [nodes, query])
 
+  // The clickable result list under the search box — the rings in the graph show WHERE the
+  // matches are, this shows WHAT they are. Title matches first (they read as more direct
+  // than tag-only hits), capped so the dropdown stays a shortcut rather than a browser.
+  const RESULT_CAP = 8
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const list = [...matches].map((i) => nodes[i]!)
+    if (q !== '') list.sort((a, b) => Number(b.title.toLowerCase().includes(q)) - Number(a.title.toLowerCase().includes(q)))
+    return list.slice(0, RESULT_CAP)
+  }, [matches, nodes, query])
+
   const toggleType = (t: string): void => {
     const next = new Set(hiddenTypes)
     if (next.has(t)) next.delete(t)
@@ -251,6 +262,26 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             aria-label="Search the graph for a page or tag"
           />
           {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
+          {query.trim() !== '' && results.length > 0 && (
+            <ul className="graph-search-results">
+              {results.map((n) => (
+                <li key={n.path}>
+                  <button
+                    onClick={() => {
+                      setQuery('')
+                      navigate(pageRoute(n.path))
+                    }}
+                  >
+                    <span className="bucket">{TYPE_LABELS[n.type] ?? n.type}</span>
+                    {n.title}
+                  </button>
+                </li>
+              ))}
+              {matches.size > results.length && (
+                <li className="more">…{matches.size - results.length} more highlighted in the graph</li>
+              )}
+            </ul>
+          )}
         </div>
         <div className="filters">
           {types.map(([t, count]) => (

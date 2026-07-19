@@ -73,6 +73,27 @@ export function Chat(): React.ReactElement {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
   }, [messages.length, ask.isPending, research.running])
 
+  // The composer grows with its content (capped), and gets focus whenever the chat tab
+  // becomes visible — tabs stay mounted, so plain autoFocus would only ever fire once
+  // at app start, usually while this tab is hidden.
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const ta = composerRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${Math.min(200, ta.scrollHeight)}px`
+  }, [draft])
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) composerRef.current?.focus()
+    })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+
   const send = (): void => {
     const text = draft.trim()
     if (text === '') return
@@ -107,7 +128,7 @@ export function Chat(): React.ReactElement {
   const busy = mode === 'ask' ? ask.isPending : research.running
 
   return (
-    <div className="chat">
+    <div className="chat" ref={rootRef}>
       <SessionBar
         sessions={sessions}
         activeId={activeId}
@@ -228,6 +249,7 @@ export function Chat(): React.ReactElement {
         </div>
         <div className="composer-row">
           <textarea
+            ref={composerRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {

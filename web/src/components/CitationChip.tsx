@@ -31,8 +31,10 @@ export function CitationChip({
     staleTime: 60_000,
   })
 
+  // A <div>, not a <span>: the expanded preview is block content (divs), which must not
+  // nest inside inline elements.
   return (
-    <span className="cite-chip">
+    <div className="cite-chip">
       <span className="cite-chip-row">
         <PageLink vaultName={vaultName} path={path} />
         <button
@@ -57,6 +59,6 @@ export function CitationChip({
           )}
         </div>
       )}
-    </span>
+    </div>
   )
 }

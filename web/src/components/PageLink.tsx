@@ -45,34 +45,34 @@ function copyTextLegacy(text: string): boolean {
 export function PageLink({ vaultName, path }: { vaultName: string; path: string }): React.ReactElement {
   const [copied, setCopied] = useState<'ok' | 'failed' | null>(null)
 
-  const copy = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
+  const copy = (): void => {
     void copyText(path).then((ok) => {
       setCopied(ok ? 'ok' : 'failed')
       setTimeout(() => setCopied(null), 1600)
     })
   }
 
-  const openObsidian = (e: React.MouseEvent): void => {
-    e.preventDefault()
-    e.stopPropagation()
+  const openObsidian = (): void => {
     // Assigning the protocol URI triggers the handler without leaving the page.
     window.location.href = obsidianUri(vaultName, path)
   }
 
+  // The chip is a <span> holding an <a> plus sibling <button>s — interactive elements must
+  // not nest inside the anchor (invalid HTML; breaks keyboard/screen-reader activation).
   return (
-    <a
-      className="pagelink"
-      href={pageRoute(path)}
-      onClick={(e) => {
-        e.preventDefault()
-        navigate(pageRoute(path))
-      }}
-      title={`Open in the vault viewer: ${path}`}
-    >
-      <span className="bucket">{pageBucket(path)}</span>
-      {pageLabel(path)}
+    <span className="pagelink">
+      <a
+        className="pagelink-main"
+        href={pageRoute(path)}
+        onClick={(e) => {
+          e.preventDefault()
+          navigate(pageRoute(path))
+        }}
+        title={`Open in the vault viewer: ${path}`}
+      >
+        <span className="bucket">{pageBucket(path)}</span>
+        {pageLabel(path)}
+      </a>
       <button className="copy" onClick={openObsidian} title="Open in Obsidian" aria-label="Open in Obsidian">
         <Icon name="link" />
       </button>
@@ -84,7 +84,7 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
       >
         {copied === 'ok' ? <Icon name="check" /> : copied === 'failed' ? <Icon name="x" /> : <Icon name="copy" />}
       </button>
-    </a>
+    </span>
   )
 }
 
