@@ -37,10 +37,12 @@ VAULT_ROOT="$(cd "$VAULT_ROOT_ARG" 2>/dev/null && pwd || true)"
 [ -d "$VAULT_ROOT/wiki" ] && [ -d "$VAULT_ROOT/skills" ] || \
   die "VAULT_ROOT does not look like a claude-obsidian vault (no wiki/ + skills/): $VAULT_ROOT"
 
-# The app loads its Anthropic credential from this file; warn (do not fail) if it is missing.
+# The app loads its Anthropic credential from this file. A missing file is fine now: the
+# service starts in SETUP MODE and the dashboard collects the credential (Maintenance →
+# Settings) — mention it so nobody hunts for a startup failure that no longer happens.
 if [ ! -f "$ENV_FILE" ]; then
-  echo "warning: credential file $ENV_FILE not found — the service will refuse to start until"
-  echo "         it holds CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token')." >&2
+  echo "note: no credential file at $ENV_FILE yet — the service will start in setup mode;"
+  echo "      open the dashboard and add the credential under Maintenance → Settings."
 fi
 
 # yt-dlp (YouTube URL ingestion) is often installed under pyenv shims or ~/.local/bin,
