@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- BrainVault mark. Two facing brackets - the [[wikilink]] syntax, read as the two
+       hemispheres - enclosing the knowledge graph the service builds from your documents. -->
+  <rect width="64" height="64" rx="14" fill="#5b8def"/>
+  <g fill="none" stroke="#fff" stroke-width="3.8" stroke-linecap="round">
+    <path d="M28 18A14 14 0 0 0 28 46"/>
+    <path d="M36 18A14 14 0 0 1 36 46"/>
+  </g>
+  <g fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round">
+    <path d="M32 32.5 27.5 27M32 32.5 37 26.8M32 32.5 27 38M32 32.5 37 37.6"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="32" cy="32.5" r="3.9"/>
+    <circle cx="27.5" cy="27" r="2.8"/>
+    <circle cx="37" cy="26.8" r="2.8"/>
+    <circle cx="27" cy="38" r="2.8"/>
+    <circle cx="37" cy="37.6" r="2.8"/>
+  </g>
+</svg>
