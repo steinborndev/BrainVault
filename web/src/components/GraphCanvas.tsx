@@ -376,6 +376,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
           fitToView()
         }
       }
+      // Nodes just moved under a possibly stationary cursor — re-resolve the hover, or a
+      // node that drifted away from the pointer keeps its neighborhood highlight stuck.
+      refreshHoverRef.current()
       scheduleDrawRef.current?.()
     }
     // A recreated worker (remount, dev StrictMode double-mount) starts empty. Replay only
@@ -569,6 +572,29 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     [nodes, radius, toWorld],
   )
 
+  // ---- hover refresh: the hover is only correct at the moment of a pointer event, but the
+  // world also moves WITHOUT one — layout ticks drift nodes under a stationary cursor, a pan
+  // ends with the world shifted, and a node-set change (filter/SSE) reuses the stale INDEX
+  // for a different page. One mechanism covers all three: remember where the pointer is and
+  // re-hit-test there whenever the world changed.
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const refreshHover = useCallback((): void => {
+    const at = lastPointerRef.current
+    const next = at === null ? null : hitTest(at.x, at.y)
+    if (next !== hoverRef.current) {
+      setHover(next)
+      scheduleDraw()
+    }
+  }, [hitTest, scheduleDraw])
+  const refreshHoverRef = useRef(refreshHover)
+  refreshHoverRef.current = refreshHover
+
+  // A changed node set means the old hover index labels a DIFFERENT page now — re-resolve
+  // it from the cursor position (or clear it when the pointer is off-canvas).
+  useEffect(() => {
+    refreshHover()
+  }, [nodes, refreshHover])
+
   /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
   const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
     const canvas = canvasRef.current
@@ -616,6 +642,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
+    lastPointerRef.current = { x: e.clientX, y: e.clientY }
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (pinch.current && pointers.current.size >= 2) {
       const [a, b] = [...pointers.current.values()] as [{ x: number; y: number }, { x: number; y: number }]
@@ -656,6 +683,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         const hit = hitTest(e.clientX, e.clientY)
         if (hit !== null) onSelect(nodes[hit]!)
       }
+      // A pan/pinch moved the world under the cursor while hover updates were suppressed —
+      // re-resolve now instead of leaving whatever was highlighted when the drag began.
+      if (wasDrag || wasPinch) refreshHover()
     }
   }
   const onPointerCancel = (e: React.PointerEvent): void => {
@@ -673,9 +703,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
   const onWheelRef = useRef<(e: WheelEvent) => void>(() => {})
   onWheelRef.current = (e: WheelEvent): void => {
     e.preventDefault()
+    lastPointerRef.current = { x: e.clientX, y: e.clientY }
     zoomAt(e.clientX, e.clientY, clampK(transformRef.current.k * Math.exp(-e.deltaY * 0.0015)))
-    const hit = hitTest(e.clientX, e.clientY)
-    if (hit !== hoverRef.current) setHover(hit)
+    refreshHover()
     scheduleDraw()
   }
 
@@ -697,6 +727,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
         onPointerLeave={() => {
+          // Off-canvas: no position to re-resolve against — later refreshes must clear, not stick.
+          lastPointerRef.current = null
           if (hoverRef.current !== null) {
             setHover(null)
             scheduleDraw()
