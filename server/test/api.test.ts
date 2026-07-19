@@ -154,6 +154,54 @@ describe('GET /api/v1/health', () => {
   })
 })
 
+describe('cross-origin guard', () => {
+  it('rejects a state-changing request with a foreign Origin (drive-by CSRF)', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ url: 'https://example.com/a' }),
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('treats Origin: null as foreign', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'null' },
+      body: JSON.stringify({ url: 'https://example.com/a' }),
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it('allows the same-origin SPA and non-browser clients', async () => {
+    const sameOrigin = await fetch(`${baseUrl}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: baseUrl },
+      body: JSON.stringify({ url: 'https://example.com/same-origin' }),
+    })
+    expect(sameOrigin.status).toBe(202)
+    // No Origin header at all (curl, systemd, scripts) — must keep working.
+    const noOrigin = await fetch(`${baseUrl}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com/no-origin' }),
+    })
+    expect(noOrigin.status).toBe(202)
+    // The Vite dev proxy forwards the browser's localhost:5173 origin with a rewritten Host.
+    const devProxy = await fetch(`${baseUrl}/api/v1/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://localhost:5173' },
+      body: JSON.stringify({ url: 'https://example.com/dev-proxy' }),
+    })
+    expect(devProxy.status).toBe(202)
+  })
+
+  it('leaves GET requests alone regardless of Origin', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/health`, { headers: { origin: 'https://evil.example' } })
+    expect(res.status).toBe(200)
+  })
+})
+
 describe('POST /api/v1/jobs', () => {
   it('accepts a URL job', async () => {
     const res = await fetch(`${baseUrl}/api/v1/jobs`, {

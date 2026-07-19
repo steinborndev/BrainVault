@@ -20,6 +20,33 @@ declare module 'fastify' {
 /** Paths reachable without auth — the health check must answer the systemd probe (M5). */
 const PUBLIC_PATHS = new Set(['/api/v1/health'])
 
+/** Methods that mutate state and therefore need the cross-origin check. */
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+/**
+ * CSRF guard for the localhost threat model: `local-single-user` mode has no credential, so
+ * the only thing keeping a malicious website from firing state-changing requests at
+ * 127.0.0.1 is the browser — and multipart POSTs are CORS-"simple", i.e. sent without a
+ * preflight. Browsers attach `Origin` to every cross-origin state-changing request; the SPA
+ * itself is same-origin, so its Origin equals the Host header. Non-browser clients (curl,
+ * systemd probes) send no Origin and pass. `Origin: null` (sandboxed iframes, some
+ * redirects) is treated as foreign. Loopback origins on any port are allowed too: the Vite
+ * dev proxy forwards the browser's `Origin: http://localhost:5173` while rewriting Host,
+ * and a hostile *website* can never present a loopback origin.
+ */
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+function originAllowed(req: FastifyRequest): boolean {
+  const origin = req.headers.origin
+  if (typeof origin !== 'string') return true
+  try {
+    const url = new URL(origin)
+    return url.host === req.headers.host || LOOPBACK_HOSTNAMES.has(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Constant-time token comparison. In `token` mode this check is the sole barrier justifying a
  * non-loopback bind (config.assertBindAllowed), so a timing side-channel matters. Hashing both
@@ -41,6 +68,10 @@ function bearerToken(req: FastifyRequest): string | undefined {
 export function registerAuth(app: FastifyInstance, server: ServerConfig): void {
   app.decorateRequest('userId', '')
   app.addHook('onRequest', async (req, reply) => {
+    if (STATE_CHANGING.has(req.method) && !originAllowed(req)) {
+      await reply.code(403).send({ error: 'cross-origin request rejected' })
+      return reply
+    }
     if (server.authMode === 'token' && !PUBLIC_PATHS.has(req.url.split('?')[0] ?? req.url)) {
       const provided = bearerToken(req)
       if (provided === undefined || !tokenMatches(provided, server.authToken ?? '')) {
