@@ -258,6 +258,7 @@ export interface LintReport {
 /** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
 export type MaintenanceKind =
   | 'lint'
+  | 'lint-fix'
   | 'research'
   | 'hot-cache'
   | 'save'

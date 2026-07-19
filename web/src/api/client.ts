@@ -166,6 +166,10 @@ export const api = {
   lint: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/lint`, { method: 'POST' }).then(json<MaintenanceRun>),
 
+  /** Fixes the newest lint report's SAFE findings (409 when no report exists). */
+  lintFix: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/lint-fix`, { method: 'POST' }).then(json<MaintenanceRun>),
+
   hotCache: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceRun>),
 

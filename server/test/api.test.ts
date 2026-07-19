@@ -697,6 +697,35 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(run.result?.reportPath).toBe('wiki/meta/lint-report-2026-07-17.md')
   })
 
+  it('lint-fix refuses without a report (409), else runs bounded by the newest report', async () => {
+    // No wiki/meta/lint-report-*.md yet → nothing bounds the run → 409.
+    const refused = await fetch(`${baseUrl}/api/v1/maintenance/lint-fix`, { method: 'POST' })
+    expect(refused.status).toBe(409)
+
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
+    fs.writeFileSync(
+      path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-07-18.md'),
+      '# Lint Report: 2026-07-18\n## Frontmatter Gaps\n- [[Some Page]]: missing `status`.',
+    )
+    let prompt = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      return okResult('fixed 1 finding')
+    }
+
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/lint-fix`, { method: 'POST' })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:lint-fix')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    expect(run.result?.ok).toBe(true)
+    // The prompt is BOUND to the newest report and pins the safe/needs-review split.
+    expect(prompt).toContain('wiki/meta/lint-report-2026-07-18.md')
+    expect(prompt).toContain('do NOT')
+  })
+
   it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',

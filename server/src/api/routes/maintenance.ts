@@ -12,7 +12,7 @@ import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
-import { DomainRegistryMissingError } from '../../pipeline/maintenance.js'
+import { DomainRegistryMissingError, LintReportMissingError } from '../../pipeline/maintenance.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
 
@@ -26,6 +26,19 @@ export function registerMaintenanceRoute(
 
   app.post('/api/v1/maintenance/lint', async (_req, reply) => {
     return reply.code(202).send(maintenance.startLint())
+  })
+
+  // Fix the newest lint report's SAFE findings (the skill's own safe/needs-review split).
+  // 409 without a report — the report is what bounds the run.
+  app.post('/api/v1/maintenance/lint-fix', async (_req, reply) => {
+    try {
+      return reply.code(202).send(maintenance.startLintFix())
+    } catch (err) {
+      if (err instanceof LintReportMissingError) {
+        return reply.code(409).send({ error: err.message })
+      }
+      throw err
+    }
   })
 
   app.post('/api/v1/maintenance/hot-cache', async (_req, reply) => {

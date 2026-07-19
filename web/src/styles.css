@@ -438,6 +438,12 @@ button {
 .section-head .section-title {
   margin-bottom: 10px;
 }
+.section-head .right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 
 .grid {
   display: grid;

@@ -40,6 +40,7 @@ import { Mutex } from '../util/mutex.js'
  */
 export type MaintenanceKind =
   | 'lint'
+  | 'lint-fix'
   | 'research'
   | 'hot-cache'
   | 'save'
@@ -49,6 +50,11 @@ export type MaintenanceKind =
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
   override readonly name = 'DomainRegistryMissingError'
+}
+
+/** Thrown by `startLintFix` when the vault has no lint report to fix against → HTTP 409. */
+export class LintReportMissingError extends Error {
+  override readonly name = 'LintReportMissingError'
 }
 
 /** Stable SSE channel id per kind, so the UI can subscribe to a run's live log. */
@@ -163,6 +169,46 @@ export class MaintenanceRunner {
         'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass — ' +
         'use only the read-based checks (Read/Grep/Glob).',
       'ingest',
+    )
+  }
+
+  /**
+   * Fixes the SAFE findings of the newest lint report — the wiki-lint skill's own
+   * safe/needs-review split (skills/wiki-lint/SKILL.md "Before Auto-Fixing"): mechanical
+   * bookkeeping is automated, everything judgment-shaped stays a human decision. The lint run
+   * itself remains report-only; this is the separate, explicit fix step, one revertable commit.
+   *
+   * Throws when no report exists: the report is what BOUNDS the run. An unbounded "clean up
+   * the wiki" prompt is exactly the silent-rewrite risk report-only lint exists to prevent.
+   */
+  startLintFix(): MaintenanceRun {
+    const report = this.readLatestLintReport()
+    if (!report) {
+      throw new LintReportMissingError('no lint report in the vault — run a lint first, then fix its findings')
+    }
+    return this.start(
+      'lint-fix',
+      `Read the lint report at ${report.path} and fix ONLY the safe, mechanical findings it lists.\n\n` +
+        'You may do exactly these things:\n' +
+        '- Frontmatter gaps: add missing required frontmatter fields (type, status, created, ' +
+        'updated, tags) with sensible values — type from the page directory, dates from today, ' +
+        'status: developing. Never overwrite a field that already has a value.\n' +
+        '- Missing pages: create stub pages for concepts/entities the report says are mentioned ' +
+        'in multiple pages but have no page — proper frontmatter, a one-paragraph description ' +
+        'from how the existing pages use the term, and wikilinks back to those pages.\n' +
+        '- Missing cross-references: where the report lists unlinked mentions, wrap the EXISTING ' +
+        'mention text in a [[wikilink]]. Do not add new sentences.\n' +
+        '- Stale index entries: update wiki/index.md entries that point at renamed or deleted pages.\n\n' +
+        'Explicitly OUT of scope — do NOT do any of these, they need human judgment:\n' +
+        '- Do not delete, rename, or merge any page (orphans stay; duplicates stay).\n' +
+        '- Do not resolve stale claims or contradictions; do not rewrite prose.\n' +
+        '- Do not remove dead links; only fix a dead link when the target is one of the stub ' +
+        'pages you created for a "missing page" finding.\n' +
+        '- Do not touch findings outside the report.\n\n' +
+        `When done, append a short "## Auto-fix run" section to ${report.path} listing what was ` +
+        'fixed and what was left for review, and report the same summary as your final answer.',
+      'ingest',
+      { commitMessage: 'maintenance: lint-fix (safe findings)' },
     )
   }
 

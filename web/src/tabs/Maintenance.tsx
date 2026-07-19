@@ -36,6 +36,7 @@ export function Maintenance(): React.ReactElement {
   const vaultName = stats.data?.vaultName ?? 'vault'
 
   const lint = useMaintenanceRun(() => api.lint())
+  const lintFix = useMaintenanceRun(() => api.lintFix())
   const hot = useMaintenanceRun(() => api.hotCache())
   const backfill = useMaintenanceRun(() => api.domainBackfill())
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
@@ -53,11 +54,25 @@ export function Maintenance(): React.ReactElement {
           <div className="section-head">
             <h3 className="section-title">
               Lint — wiki health
-              <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit)." />
+              <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit). 'Fix safe findings' fixes only the mechanical categories from the newest report (frontmatter gaps, stub pages, missing wikilinks, stale index entries) — deletions, merges and contradictions stay yours." />
             </h3>
-            <button className="btn primary" disabled={lint.running} onClick={lint.start}>
-              {lint.running ? 'Running…' : 'Start lint'}
-            </button>
+            <span className="right">
+              <button
+                className="btn"
+                disabled={lint.running || lintFix.running || lastReport === null}
+                onClick={lintFix.start}
+                title={
+                  lastReport === null
+                    ? 'Run a lint first — the report is what bounds the fix run'
+                    : 'Fix the mechanical findings of the newest report (one git commit — revertable)'
+                }
+              >
+                {lintFix.running ? 'Fixing…' : 'Fix safe findings'}
+              </button>
+              <button className="btn primary" disabled={lint.running || lintFix.running} onClick={lint.start}>
+                {lint.running ? 'Running…' : 'Start lint'}
+              </button>
+            </span>
           </div>
           <div className="tool-meta">
             {lastReport ? (
@@ -79,6 +94,9 @@ export function Maintenance(): React.ReactElement {
           </div>
           {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
           {lint.error && <div className="toast err">{lint.error}</div>}
+          {lintFix.running && <JobLog jobId="maintenance:lint-fix" seed={false} />}
+          {lintFix.error && <div className="toast err">{lintFix.error}</div>}
+          {lintFix.result && <RunResult result={lintFix.result} vaultName={vaultName} label="Fixed" />}
           {lint.result?.ok && lint.result.lint && (
             <LintView report={lint.result.lint} reportPath={lint.result.reportPath} vaultName={vaultName} />
           )}
