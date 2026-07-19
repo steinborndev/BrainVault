@@ -1,17 +1,57 @@
 # BrainVault (`vault-service`)
 
-A local ingestion service and web dashboard on top of a [claude-obsidian](https://github.com/) vault.
+Drop a PDF into a folder — a few minutes later it is a set of linked, cited wiki pages in your
+personal knowledge vault, written by an AI agent running entirely on your machine.
+
+BrainVault is a local ingestion service and web dashboard on top of a
+[claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) vault (v1.9.2, Generic mode).
 It watches a folder and accepts drag-and-drop uploads, preprocesses the material (PDF, Office, web,
 images, text), and runs headless Claude Agent SDK sessions that execute the vault's `ingest` skill
-fully automatically. A React dashboard exposes status, the job queue, chat with citations, and
-maintenance actions.
+fully automatically. A React dashboard exposes status, the job queue, research chat with citations,
+an interactive vault viewer, and maintenance actions.
+
+![Overview tab](docs/img/overview.png)
+
+![Vault graph, colored by domain](docs/img/vault-graph.png)
 
 Everything runs on your machine: the service binds `127.0.0.1` by default, the vault stays a plain
 git repository on disk, and the only thing that leaves the box is the agent's traffic to Anthropic.
 
 > **`SPEC.md` (German) is the authoritative specification.** When code and spec disagree, the spec
-> wins. `CLAUDE.md` holds the hard rules that constrain any change. Per-milestone task lists and
-> engineering findings live in `docs/tasks/`.
+> wins. The UI, code, and everything else are English. `CLAUDE.md` holds the hard rules that
+> constrain any change. Per-milestone task lists and engineering findings live in `docs/tasks/`.
+
+---
+
+## Quick start (TL;DR)
+
+On Linux or Windows + WSL2 (Ubuntu), with Node ≥ 20 and the
+[Claude Code CLI](https://claude.com/claude-code) installed:
+
+```bash
+# 1. The vault this service writes into (lives OUTSIDE this repo)
+git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
+(cd ~/vault && bash bin/setup-vault.sh)
+
+# 2. Sandbox + preprocessing toolchain
+sudo apt-get install -y bubblewrap socat
+./scripts/install-preprocessing-tools.sh
+
+# 3. Credential — subscription path; see "Credential" below for the API-key alternative
+claude setup-token
+mkdir -p ~/.config/vault-service
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<token>" > ~/.config/vault-service/env
+chmod 600 ~/.config/vault-service/env
+
+# 4. Build
+npm ci && npm run build
+
+# 5. Run — then open http://127.0.0.1:8420
+VAULT_ROOT=~/vault npm start
+```
+
+Each step is explained below; for an always-on setup see
+[Autostart with systemd](#autostart-with-systemd-survives-a-wsl-restart).
 
 ---
 
@@ -23,15 +63,16 @@ git repository on disk, and the only thing that leaves the box is the agent's tr
 | Node | ≥ 20 LTS — via [nvm](https://github.com/nvm-sh/nvm): `. ~/.nvm/nvm.sh` |
 | Vault | a claude-obsidian clone (v1.9.2, Generic mode), by default at `~/vault` |
 | Credential | a Claude subscription token **or** an Anthropic API key (exactly one) |
+| Claude Code CLI | needed once, for `claude setup-token` (the subscription credential path) |
 | Sandbox | `bubblewrap` + `socat` — **required**, agent runs fail without them |
-| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube-URLs: Metadaten + Untertitel) |
+| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube URLs: metadata + subtitles) |
 
 ### 1. The vault
 
 The vault lives **outside this repo** and its path is a configuration value — nothing hardcodes it.
 
 ```bash
-git clone <your claude-obsidian fork> ~/vault
+git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
 cd ~/vault && bash bin/setup-vault.sh
 ```
 
@@ -126,13 +167,14 @@ vault, and silently replaying a mid-commit write risks vault integrity.
 
 Five tabs, all live over SSE:
 
-- **Übersicht** — page counts by type, wiki growth, recent pages as `obsidian://` deep links, the
+- **Overview** — page counts by type, wiki growth, recent pages as `obsidian://` deep links, the
   hot cache, 7-day KPIs, token/cost totals and the daily budget.
 - **Ingestion** — dropzone (files + URLs), active jobs with a live agent log, the queue, and a
   filterable history with created pages, duration, tokens and cost per job.
-- **Query/Chat** — chat against the read-only query runner; answers cite vault pages as clickable
+- **Research** — chat against the read-only query runner; answers cite vault pages as clickable
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
-  sessions, each savable into the vault as a page ("In Vault sichern").
+  sessions, each savable into the vault as a page ("Save to vault"). Autoresearch runs live here
+  too.
 - **Vault** — the viewer that makes the Obsidian app optional for everyday use: an
   interactive graph of the wikilink structure (search over titles **and** frontmatter tags,
   per-bucket **and per-domain** filters — nodes can be colored by wiki type or by their
@@ -149,8 +191,8 @@ Five tabs, all live over SSE:
   the secondary action on each chip. That makes the dashboard fully usable from a **Windows**
   browser — Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only
   work from a WSLg browser.
-- **Wartung** — lint (structured report), autoresearch, hot-cache refresh with its last-refresh
-  time, the domain registry with its backfill action, and the settings editor.
+- **Maintenance** — lint (structured report), hot-cache refresh with its last-refresh time, the
+  domain registry with its backfill action, and the settings editor.
 
 **Domains** are the vault's meta-categories (`biomedicine`, `finance`, `cooking`, …), the axis
 the graph filters and colors by. The allowed list lives in the vault itself, as the editable
@@ -158,10 +200,10 @@ page `wiki/meta/domains.md` — install the seed with `scripts/install-domain-re
 vault-writing agent run gets that list as a **closed** set: it files each page under one key, or
 under `unassigned` when nothing fits, and may never coin a new key. New domains are created by a
 human editing that page; the rule of thumb is that five or more coherent `unassigned` pages are
-what justifies one. `Wartung → Domänen → Backfill` files existing pages retroactively (frontmatter
-only — it never touches page bodies).
+what justifies one. `Maintenance → Domains → Backfill` files existing pages retroactively
+(frontmatter only — it never touches page bodies).
 
-The Wartung tab also runs the **governance loop**: it continuously (and for free) looks for
+The Maintenance tab also runs the **governance loop**: it continuously (and for free) looks for
 themes among the `unassigned` pages that are big enough to deserve a domain, and shows them as
 candidates with their page list and a link-cohesion score. Accepting one appends it to the
 registry as a single commit; rejecting one is remembered so it stops being proposed. A toggle
@@ -182,11 +224,11 @@ Two layers, with one deliberate precedence rule:
 
 ```
 env / ~/.config/vault-service/env   →  start-time BASELINE
-settings table (Wartung tab)        →  runtime OVERRIDES
+settings table (Maintenance tab)    →  runtime OVERRIDES
 effective value                     =  override ?? baseline
 ```
 
-Clearing an override (the "Zurücksetzen" button) falls back to the baseline. Overrides live in
+Clearing an override (the "Reset" button) falls back to the baseline. Overrides live in
 SQLite and survive a restart.
 
 | Variable | Default | Notes |
@@ -194,7 +236,7 @@ SQLite and survive a restart.
 | `VAULT_ROOT` | — | **required**; validated at startup |
 | `HOST` | `127.0.0.1` | see the bind rule below |
 | `PORT` | `8420` | |
-| `WATCH_FOLDER` | `/mnt/c/inbox` | also settable at runtime (restart required) |
+| `WATCH_FOLDER` | `/mnt/c/inbox` | the default targets a Windows mount — on plain Linux, point it at a real folder; also settable at runtime (restart required) |
 | `MAX_UPLOAD_BYTES` | 200 MB | also settable at runtime (restart required) |
 | `HTTP_AUTH_MODE` | `local-single-user` | `token` enables bearer auth |
 | `HTTP_AUTH_TOKEN` | — | required for a non-loopback bind |
@@ -202,9 +244,9 @@ SQLite and survive a restart.
 | `OBSIDIAN_VAULT_NAME` | vault dir name | for `obsidian://` deep links |
 | `DB_PATH` | `~/.local/share/vault-service/jobs.db` | kept **outside** the vault |
 
-Runtime-settable in the Wartung tab: watch folder, concurrency, upload limit, git auto-commit, and
-the daily budget. Concurrency and auto-commit apply live; the watch folder and upload limit are
-bound at startup and are flagged "Neustart nötig" rather than pretending they took effect.
+Runtime-settable in the Maintenance tab: watch folder, concurrency, upload limit, git auto-commit,
+and the daily budget. Concurrency and auto-commit apply live; the watch folder and upload limit are
+bound at startup and are flagged "Restart required" rather than pretending they took effect.
 
 The bind address and the credentials are **not** settable through the UI, by design.
 
@@ -218,18 +260,22 @@ Optional. The unit follows the auth mode, because the two modes constrain differ
 
 When the budget is reached the queue stops claiming new work (in-flight runs always finish) and
 resumes at the next local midnight. In subscription mode every `cost_usd` shown in the UI is
-labelled **"Schätzwert (Abo)"** — it is an API-price equivalent, not money charged.
+labelled **"estimate (subscription)"** — it is an API-price equivalent, not money charged.
 
 ---
 
 ## Security model
 
 Four constraints are load-bearing. They are documented in full in `CLAUDE.md`; do not weaken them.
+`SECURITY.md` has the full threat model — including what a malicious *document* can and cannot make
+the ingest agent do — and the vulnerability reporting channel.
 
 1. **Vault integrity.** The service writes to the vault only through agent runs and git commits.
    SQLite holds operational state only — losing the database must never damage the vault.
 2. **Localhost guard.** The server binds `127.0.0.1`. If the bind is not loopback and no auth mode
-   with a token is active, it **refuses to start**.
+   with a token is active, it **refuses to start**. State-changing requests carrying a foreign
+   browser `Origin` are rejected, so a malicious website cannot fire drive-by requests at the
+   loopback port.
 3. **Credentials** live only in the service environment — never in the repo, logs, frontend or
    database. Both credential variables set at once is a startup error.
 4. **Agent confinement is enforced by the OS sandbox**, not by application-level callbacks. Runs
@@ -404,4 +450,16 @@ while it can prove it was the sole vault writer — with a second run in flight 
 rather than risk filing the page under the wrong job. Commit it by hand; nothing is lost.
 
 **Obsidian cannot open the vault over `\\wsl$`.** It can't — Obsidian for Windows fails with
-`EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4.
+`EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4. (The Vault
+tab exists precisely so that everyday reading/editing does not need Obsidian at all.)
+
+---
+
+## Status & license
+
+A personal project (v0.1) built milestone by milestone with Claude Code; the engineering journals
+in `docs/tasks/` are left in as-is — findings, dead ends, measurements and all. The specification
+(`SPEC.md`) is German; code, UI, and vault content are English. Issues and PRs are welcome, with
+the caveat that `SPEC.md` and the hard rules in `CLAUDE.md` define what this is and is not.
+
+[MIT](LICENSE) © Benjamin Steinborn
