@@ -25,8 +25,24 @@ git repository on disk, and the only thing that leaves the box is the agent's tr
 
 ## Quick start (TL;DR)
 
-On Linux or Windows + WSL2 (Ubuntu), with Node ≥ 20 and the
-[Claude Code CLI](https://claude.com/claude-code) installed:
+**One command** (Linux, or Windows + WSL2 with Ubuntu):
+
+```bash
+git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
+bash scripts/setup-all.sh
+```
+
+That installs everything (Node via nvm, sandbox + preprocessing toolchain, the vault,
+the systemd service), starts the dashboard at <http://localhost:8420>, and leaves exactly
+one step for the browser: the dashboard opens in **setup mode** and walks you through
+connecting your Anthropic account (Claude subscription or API key) under
+Maintenance → Settings.
+
+**Windows without WSL yet:** download the repo and run `scripts\install.ps1` in
+PowerShell — it installs WSL2 + Ubuntu, runs the setup above inside it, and puts a
+BrainVault shortcut on your desktop.
+
+**Manually instead:**
 
 ```bash
 # 1. The vault this service writes into (lives OUTSIDE this repo)
@@ -37,16 +53,8 @@ git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
 sudo apt-get install -y bubblewrap socat
 ./scripts/install-preprocessing-tools.sh
 
-# 3. Credential — subscription path; see "Credential" below for the API-key alternative
-claude setup-token
-mkdir -p ~/.config/vault-service
-printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<token>" > ~/.config/vault-service/env
-chmod 600 ~/.config/vault-service/env
-
-# 4. Build
+# 3. Build + run — then open http://127.0.0.1:8420 and add the credential in the UI
 npm ci && npm run build
-
-# 5. Run — then open http://127.0.0.1:8420
 VAULT_ROOT=~/vault npm start
 ```
 
@@ -87,6 +95,11 @@ sudo apt-get install -y bubblewrap socat        # sandbox — not optional, see 
 ```
 
 ### 3. Credential
+
+**The easy path: none needed up front.** Without a credential the service starts in **setup
+mode** — the dashboard shows a "Set up now" banner and collects the key under Maintenance →
+Settings (choose Claude subscription or Anthropic API key), writes it into the service env
+file, and restarts itself (under systemd). Everything below is the manual equivalent.
 
 Exactly one credential may be configured — if both are set the service refuses to start, because
 `ANTHROPIC_API_KEY` silently overrides the OAuth token and you would not know which one was billed.
@@ -248,7 +261,10 @@ Runtime-settable in the Maintenance tab: watch folder, concurrency, upload limit
 and the daily budget. Concurrency and auto-commit apply live; the watch folder and upload limit are
 bound at startup and are flagged "Restart required" rather than pretending they took effect.
 
-The bind address and the credentials are **not** settable through the UI, by design.
+The bind address is **not** settable through the UI, by design. The credential is settable —
+but only through the dedicated guarded endpoint that writes the env file (setup mode /
+"Replace credential"), never through the settings table, and it is never displayed or stored
+anywhere else.
 
 ### Daily budget
 
