@@ -18,8 +18,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { logStore } from '../lib/logStore.ts'
 import type { BusEvent } from '../api/types.ts'
 
-const TERMINAL = new Set(['done', 'failed', 'deferred', 'duplicate', 'cancelled'])
-
 export function useEvents(): { connected: boolean } {
   const qc = useQueryClient()
   const [connected, setConnected] = useState(false)
@@ -57,7 +55,10 @@ export function useEvents(): { connected: boolean } {
       const { job } = JSON.parse(ev.data) as Extract<BusEvent, { kind: 'job' }>
       qc.invalidateQueries({ queryKey: ['jobs'] })
       qc.invalidateQueries({ queryKey: ['job', job.id] })
-      if (TERMINAL.has(job.status)) qc.invalidateQueries({ queryKey: ['stats'] })
+      // Every status TRANSITION refreshes stats (a handful per job, not per log line): the
+      // topbar's activity badge is fed by stats.queue, so it must move when a job starts,
+      // not only when it ends.
+      qc.invalidateQueries({ queryKey: ['stats'] })
     }
 
     const onLog = (ev: MessageEvent): void => {

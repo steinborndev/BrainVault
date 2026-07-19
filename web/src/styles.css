@@ -136,6 +136,9 @@ button {
   padding: 8px 14px;
   border-radius: var(--radius-sm);
   font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   transition: background 0.12s, color 0.12s;
 }
 .tab:hover {
@@ -151,22 +154,179 @@ button {
   flex: 1;
 }
 
-.conn {
+/* Activity badge on the Ingestion tab — outstanding jobs, visible from every tab. */
+.tab-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-dim);
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--busy);
+  color: #fff;
+  border-radius: 999px;
+  padding: 3px 7px;
 }
-.conn .dot {
+.tab-badge .pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+  animation: badge-pulse 1.6s ease infinite;
+}
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab-badge .pulse { animation: none; }
+}
+
+/* ---- Topbar status pill + popover ---- */
+.statuswrap {
+  position: relative;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 13px;
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+.status-pill:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.status-pill .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--muted);
 }
-.conn.live .dot {
+.status-pill.live .dot {
   background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+}
+.status-pill .chev {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.status-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 50;
+  width: 300px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px 14px;
+}
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.status-row:last-child {
+  border-bottom: none;
+}
+.status-row .k {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.status-row .v {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  min-width: 0;
+}
+.status-row .v.ok { color: var(--ok); }
+.status-row .v.warn { color: var(--warn); }
+.status-row .v code {
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 180px;
+}
+.minibar {
+  width: 70px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.minibar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+.minibar i.over {
+  background: var(--warn);
+}
+
+/* ---- Info tooltip (ⓘ) — hover, focus AND tap; replaces native title=… ---- */
+.tip {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.tip-i {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.tip-i:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tip-body {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 250px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 8px 11px;
+  z-index: 30;
+  display: none;
+}
+.tip:hover .tip-body,
+.tip:focus-within .tip-body,
+.tip.open .tip-body {
+  display: block;
 }
 
 .content {
@@ -221,6 +381,22 @@ button {
   .bottomnav button svg {
     width: 22px;
     height: 22px;
+  }
+  .bottomnav .nav-icon {
+    position: relative;
+    display: inline-flex;
+  }
+  .bottomnav .nav-badge {
+    position: absolute;
+    top: -4px;
+    right: -10px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    background: var(--busy);
+    color: #fff;
+    border-radius: 999px;
+    padding: 2px 5px;
   }
   .chat {
     height: calc(100vh - 160px);

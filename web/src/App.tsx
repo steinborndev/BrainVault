@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from './api/client.ts'
 import { useEvents } from './hooks/useEvents.ts'
+import { StatusPopover } from './components/StatusPopover.tsx'
 import { Overview } from './tabs/Overview.tsx'
 import { Ingestion } from './tabs/Ingestion.tsx'
 import { Chat } from './tabs/Chat.tsx'
@@ -44,6 +47,12 @@ export function App(): React.ReactElement {
   // One SSE connection for the whole app; drives live invalidation + the connection dot.
   const { connected } = useEvents()
 
+  // Outstanding work for the Ingestion tab badge — running ingests are otherwise invisible
+  // from every other tab. Rides the shared ['stats'] query (SSE keeps it fresh).
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const outstanding = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
+  const running = (stats.data?.queue.active ?? 0) > 0
+
   // Tabs stay MOUNTED and are hidden via [hidden] — unmounting threw away the graph
   // camera, the active chat session, filters and scroll positions on every switch.
   // The vault tab keeps its last inner route while other tabs own the URL; null until
@@ -75,14 +84,17 @@ export function App(): React.ReactElement {
               onClick={() => navigate(t.route)}
             >
               {t.label}
+              {t.id === 'ingestion' && outstanding > 0 && (
+                <span className="tab-badge" aria-label={`${outstanding} jobs outstanding`}>
+                  {running && <span className="pulse" aria-hidden />}
+                  {outstanding}
+                </span>
+              )}
             </button>
           ))}
         </nav>
         <span className="spacer" />
-        <span className={`conn${connected ? ' live' : ''}`} title={connected ? 'Live (SSE connected)' : 'Disconnected'}>
-          <span className="dot" />
-          {connected ? 'Live' : 'Offline'}
-        </span>
+        <StatusPopover connected={connected} />
       </header>
 
       <main className="content">
@@ -110,7 +122,14 @@ export function App(): React.ReactElement {
       <nav className="bottomnav">
         {TABS.map((t) => (
           <button key={t.id} className={tab === t.id ? 'active' : ''} onClick={() => navigate(t.route)}>
-            <Icon name={t.icon} />
+            <span className="nav-icon">
+              <Icon name={t.icon} />
+              {t.id === 'ingestion' && outstanding > 0 && (
+                <span className="nav-badge" aria-label={`${outstanding} jobs outstanding`}>
+                  {outstanding}
+                </span>
+              )}
+            </span>
             {t.label}
           </button>
         ))}
