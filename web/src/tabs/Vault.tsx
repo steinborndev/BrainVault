@@ -300,6 +300,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   return (
     <div className="vault-graph">
       <StaleLinksBanner />
+      {/* Toolbar with clear zones: domain legend/filter left, view controls + stats right.
+          The chips ARE the legend — each wears its domain's node color. */}
       <div className="graph-toolbar">
         {hasDomains && (
           <div className="filters">
@@ -317,7 +319,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                     style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
                     aria-hidden
                   />
-                  {d === NO_DOMAIN ? 'no domain' : d} ({count})
+                  {d === NO_DOMAIN ? 'no domain' : d} <span className="chip-n">{count}</span>
                 </button>
               )
             })}
@@ -336,28 +338,37 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
             title="Toggle node coloring between domain and page type"
           >
-            <Icon name="palette" /> {colorBy === 'domain' ? 'colored by domain' : 'colored by type'}
+            <Icon name="palette" /> {colorBy === 'domain' ? 'by domain' : 'by type'}
           </button>
         )}
-        {focusNode && (
-          <div className="graph-focus">
-            <span>
-              Focus: <strong>{focusNode.title}</strong>
-            </span>
+        <span className="vtool-stats">
+          {nodes.length} of {graph.nodes.length} pages · {edges.length} links
+          {graph.unresolved > 0 ? ` · ${graph.unresolved} unresolved` : ''}
+        </span>
+      </div>
+
+      {/* Focus mode as its own row: the neighborhood depth is ONE state, so it reads as one
+          segmented control (1 · 2 · whole graph), not four loose chips. */}
+      {focusNode && (
+        <div className="focusbar">
+          <span>
+            Focus: <strong>{focusNode.title}</strong>
+          </span>
+          <span className="seg" role="group" aria-label="Neighborhood depth">
             {([1, 2] as const).map((d) => (
-              <button key={d} className={`chip${localDepth === d ? ' active' : ''}`} onClick={() => setLocalDepth(d)}>
+              <button key={d} className={localDepth === d ? 'active' : ''} onClick={() => setLocalDepth(d)}>
                 Depth {d}
               </button>
             ))}
-            <button className={`chip${localDepth === 0 ? ' active' : ''}`} onClick={() => setLocalDepth(0)}>
+            <button className={localDepth === 0 ? 'active' : ''} onClick={() => setLocalDepth(0)}>
               Whole graph
             </button>
-            <button className="chip" onClick={() => navigate('/vault')} title="Clear focus">
-              <Icon name="x" />
-            </button>
-          </div>
-        )}
-      </div>
+          </span>
+          <button className="btn ghost" onClick={() => navigate('/vault')} title="Clear focus">
+            <Icon name="x" /> Clear
+          </button>
+        </div>
+      )}
 
       <GraphCanvas
         nodes={nodes}
@@ -368,11 +379,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         onSelect={(n) => navigate(pageRoute(n.path))}
         overlay={searchOverlay}
       />
-
-      <div className="graph-footer">
-        {nodes.length} of {graph.nodes.length} pages · {edges.length} links
-        {graph.unresolved > 0 ? ` · ${graph.unresolved} unresolved links` : ''}
-      </div>
     </div>
   )
 }
@@ -480,8 +486,23 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       return
     }
     if (deleteTimer.current) clearTimeout(deleteTimer.current)
+    setMenuOpen(false)
     del.mutate()
   }
+
+  // The ⋯ overflow menu: destructive/rare actions live here, not as bare icons in the
+  // head row (the old delete-✕ sat directly beside Edit).
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDown = (e: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuOpen])
+  const [copiedPath, setCopiedPath] = useState(false)
 
   // Title → path map for resolving clicked wikilinks — same first-wins, case-insensitive
   // rule as the server, so the viewer and the graph can never disagree.
@@ -558,19 +579,48 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
             <Icon name="edit" /> Edit
           </button>
         )}
-        {!editing && pageQ.data && (
-          <button
-            className={`btn${confirmDelete ? ' danger' : ''}`}
-            onClick={requestDelete}
-            disabled={del.isPending}
-            title={confirmDelete ? 'Really delete? (as a git commit — recoverable)' : 'Delete page'}
-          >
-            {del.isPending ? 'Deleting…' : confirmDelete ? 'Really delete?' : <Icon name="x" />}
-          </button>
-        )}
         <a className="btn" href={obsidianUri(vaultName, path)} title="Open in Obsidian">
           <Icon name="link" /> Obsidian
         </a>
+        {!editing && pageQ.data && (
+          <span className="overflow-wrap" ref={menuRef}>
+            <button
+              className="btn"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="More actions"
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              ⋯
+            </button>
+            {menuOpen && (
+              <div className="omenu" role="menu">
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(path).then(() => {
+                      setCopiedPath(true)
+                      setTimeout(() => setCopiedPath(false), 1500)
+                    })
+                  }}
+                >
+                  <Icon name="copy" /> {copiedPath ? 'Copied' : 'Copy vault path'}
+                </button>
+                <div className="omenu-sep" />
+                <button
+                  role="menuitem"
+                  className="danger"
+                  disabled={del.isPending}
+                  onClick={requestDelete}
+                  title="Deleted as a git commit — recoverable"
+                >
+                  <Icon name="x" />{' '}
+                  {del.isPending ? 'Deleting…' : confirmDelete ? 'Really delete?' : 'Delete page…'}
+                </button>
+              </div>
+            )}
+          </span>
+        )}
       </div>
 
       <StaleLinksBanner />
@@ -578,12 +628,17 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
 
       {editing ? (
         <div className="page-editor">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            aria-label="Page content (markdown)"
-          />
+          {/* Markdown left, live rendering right — wikilinks and frontmatter are visible
+              while typing instead of only after saving. Stacks on small screens. */}
+          <div className="editor-split">
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              spellCheck={false}
+              aria-label="Page content (markdown)"
+            />
+            <EditorPreview draft={draft} linkTo={linkTo} />
+          </div>
           <div className="editor-actions">
             <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save (commit)'}
@@ -680,6 +735,32 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
         </aside>
       </div>
       )}
+    </div>
+  )
+}
+
+/** Live rendering of the editor draft — frontmatter as properties, wikilinks clickable. */
+function EditorPreview({
+  draft,
+  linkTo,
+}: {
+  draft: string
+  linkTo: (target: string, label: string, key: string) => React.ReactNode
+}): React.ReactElement {
+  const parsed = useMemo(() => frontmatter(draft), [draft])
+  return (
+    <div className="editor-preview">
+      {parsed.fields.length > 0 && (
+        <dl className="page-meta">
+          {parsed.fields.map(([k, v]) => (
+            <div key={k}>
+              <dt>{k}</dt>
+              <dd>{renderMetaValue(v, linkTo)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <Markdown source={parsed.body} renderWikilink={linkTo} />
     </div>
   )
 }

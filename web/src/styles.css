@@ -2003,12 +2003,90 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
   white-space: nowrap;
 }
-.graph-focus {
+/* Graph stats live in the toolbar row, not a lost mini-footer under the canvas. */
+.vtool-stats {
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Focus mode: one row, one segmented control for the neighborhood depth. */
+.focusbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   font-size: 13px;
   color: var(--text-dim);
+  flex-wrap: wrap;
+}
+.focusbar strong {
+  color: var(--text);
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.seg button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 4px 12px;
+}
+.seg button + button {
+  border-left: 1px solid var(--border);
+}
+.seg button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ⋯ overflow menu (page head) — rare/destructive actions, not bare icons in the row. */
+.overflow-wrap {
+  position: relative;
+}
+.omenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  min-width: 190px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+.omenu button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.omenu button:hover {
+  background: var(--bg-elev-2);
+}
+.omenu button.danger {
+  color: var(--err);
+}
+.omenu button:disabled {
+  opacity: 0.5;
+}
+.omenu-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
 }
 .graph-canvas-wrap {
   position: relative;
@@ -2063,11 +2141,6 @@ details.hot-cache[open] .hc-summary::before {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.graph-footer {
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
 .vault-page .page-head {
   display: flex;
   align-items: center;
@@ -2239,6 +2312,18 @@ details.hot-cache[open] .hc-summary::before {
 
 /* --- Vault editor + stale-links banner (SPEC §12.4 editing) --- */
 
+/* Markdown left, live preview right; stacks on small screens. */
+.editor-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  .editor-split {
+    grid-template-columns: 1fr;
+  }
+}
 .page-editor textarea {
   width: 100%;
   min-height: 60vh;
@@ -2251,6 +2336,16 @@ details.hot-cache[open] .hc-summary::before {
   font-family: var(--mono);
   font-size: 13px;
   line-height: 1.55;
+}
+.editor-preview {
+  min-height: 60vh;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
 }
 .page-editor textarea:focus {
   outline: none;
