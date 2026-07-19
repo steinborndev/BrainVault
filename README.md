@@ -14,6 +14,9 @@ an interactive vault viewer, and maintenance actions.
 
 ![Vault graph, colored by domain](docs/img/vault-graph.png)
 
+<sub>Screenshots from a demo vault (mRNA/lipid-nanoparticle literature plus this project's own
+tooling notes); the ingest history behind the numbers is representative, not a benchmark.</sub>
+
 Everything runs on your machine: the service binds `127.0.0.1` by default, the vault stays a plain
 git repository on disk, and the only thing that leaves the box is the agent's traffic to Anthropic.
 
@@ -70,8 +73,8 @@ Each step is explained below; for an always-on setup see
 | OS | Linux, or Windows + WSL2 (Ubuntu 24.04 is what this was built on) |
 | Node | ≥ 20 LTS — via [nvm](https://github.com/nvm-sh/nvm): `. ~/.nvm/nvm.sh` |
 | Vault | a claude-obsidian clone (v1.9.2, Generic mode), by default at `~/vault` |
-| Credential | a Claude subscription token **or** an Anthropic API key (exactly one) |
-| Claude Code CLI | needed once, for `claude setup-token` (the subscription credential path) |
+| Credential | a Claude subscription token **or** an Anthropic API key (exactly one) — entered in the dashboard on first run, not needed to start |
+| Claude Code CLI | only for the subscription path, to run `claude setup-token` once |
 | Sandbox | `bubblewrap` + `socat` — **required**, agent runs fail without them |
 | Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube URLs: metadata + subtitles) |
 
@@ -180,8 +183,8 @@ vault, and silently replaying a mid-commit write risks vault integrity.
 
 Five tabs, all live over SSE:
 
-- **Overview** — page counts by type, wiki growth, recent pages as `obsidian://` deep links, the
-  hot cache, 7-day KPIs, token/cost totals and the daily budget.
+- **Overview** — page counts by type, wiki growth, recently changed pages and recent commits, the
+  hot cache, 7-day KPIs with week-over-week trends, token/cost totals and the daily budget.
 - **Ingestion** — dropzone (files + URLs), active jobs with a live agent log, the queue, and a
   filterable history with created pages, duration, tokens and cost per job.
 - **Research** — chat against the read-only query runner; answers cite vault pages as clickable
@@ -207,13 +210,13 @@ Five tabs, all live over SSE:
 - **Maintenance** — lint (structured report), hot-cache refresh with its last-refresh time, the
   domain registry with its backfill action, and the settings editor.
 
-**Domains** are the vault's meta-categories (`biomedicine`, `finance`, `cooking`, …), the axis
-the graph filters and colors by. The allowed list lives in the vault itself, as the editable
+**Domains** are the vault's meta-categories (`biomedicine`, `ai-tooling`, `knowledge-management`,
+…), the axis the graph filters and colors by. The allowed list lives in the vault itself, as the editable
 page `wiki/meta/domains.md` — install the seed with `scripts/install-domain-registry.sh`. Every
 vault-writing agent run gets that list as a **closed** set: it files each page under one key, or
 under `unassigned` when nothing fits, and may never coin a new key. New domains are created by a
-human editing that page; the rule of thumb is that five or more coherent `unassigned` pages are
-what justifies one. `Maintenance → Domains → Backfill` files existing pages retroactively
+human editing that page (or accepting a candidate in the Maintenance tab); the rule of thumb is
+that five or more coherent `unassigned` pages are what justifies one. `Maintenance → Domains → Backfill` files existing pages retroactively
 (frontmatter only — it never touches page bodies).
 
 The Maintenance tab also runs the **governance loop**: it continuously (and for free) looks for
@@ -342,12 +345,15 @@ Verified on Docker Desktop 4.52 / Engine 29.0.1 (linux/amd64): the image builds,
 + socat and the full preprocessing toolchain, `better-sqlite3` loads across the build/runtime
 stage boundary, and the service starts as PID 1 and serves both the API and the SPA.
 
-Three things to know:
+Four things to know:
 
 - **Publishing the port requires a token.** The localhost guard is not relaxed inside a container:
   to reach the service from outside you must set `HOST=0.0.0.0` **and** `HTTP_AUTH_MODE=token` +
   `HTTP_AUTH_TOKEN`, otherwise the service refuses to start (verified — it exits with a
   configuration error). Without them the container serves only on its own loopback.
+- **Pass the credential as an environment variable here.** The dashboard's first-run setup flow
+  needs browser access, which token mode (below) denies — so in a container the credential comes
+  from `-e CLAUDE_CODE_OAUTH_TOKEN=…` (or `-e ANTHROPIC_API_KEY=…`), as in the example above.
 - **In token mode the browser UI is not reachable, only the API.** The auth middleware protects
   everything except `/api/v1/health`, including the SPA itself, so a browser gets a `401` before it
   can load the page that would ask for a token. `curl -H "Authorization: Bearer <token>"` works
@@ -395,7 +401,10 @@ a milestone is called done.
 ## API
 
 All endpoints are under `/api/v1` and behind the auth middleware (v1 mode `local-single-user` is
-pass-through). `GET /api/v1/health` is public so a supervisor can probe it.
+pass-through). `GET /api/v1/health` is public so a supervisor can probe it. State-changing requests
+carrying a foreign browser `Origin` are rejected with a `403` — a website you visit cannot drive
+the service behind your back. In **setup mode** (no credential yet) everything that would start an
+agent run answers `503` until the credential is entered.
 
 ```
 POST   /jobs                     upload / URL / pasted text (multi → batch)
@@ -424,6 +433,10 @@ POST   /maintenance/{lint,research,hot-cache,domain-backfill,domain-review}
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration
+POST   /settings/credential      first-run onboarding: {kind: oauth|api-key, value} → writes
+                                 the service env file (0600) and restarts; never echoes the
+                                 value, 409 if the credential comes from the process env or
+                                 runs are in flight
 ```
 
 Every vault-mutating agent run — lint, autoresearch, hot-cache, and saving a chat session — is
@@ -455,6 +468,10 @@ the packages rather than disabling the sandbox.
 
 **Runs fail with "zero tokens" / "Not logged in".** The credential did not reach the subprocess.
 Check `~/.config/vault-service/env` and that only one credential variable is set.
+
+**Everything answers 503 and a "Set up now" banner is showing.** That is setup mode: no credential
+is configured, so nothing that would spawn an agent is allowed to run. Add it under
+Maintenance → Settings; the service restarts itself and picks up any queued work.
 
 **The watch folder never fires.** Windows mounts (`/mnt/*`) deliver no inotify events; the watcher
 switches to polling automatically. Force it with `WATCH_POLLING=true`.
