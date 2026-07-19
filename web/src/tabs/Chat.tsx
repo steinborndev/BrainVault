@@ -127,8 +127,13 @@ export function Chat(): React.ReactElement {
   const sendLabel = mode === 'ask' ? (ask.isPending ? 'Asking…' : 'Send') : research.running ? 'Researching…' : 'Research'
   const busy = mode === 'ask' ? ask.isPending : research.running
 
+  // With nothing in the thread, the composer centers in the viewport (with the hint above
+  // it) instead of hugging the bottom of an empty column; it docks down once content exists.
+  const threadEmpty =
+    messages.length === 0 && !ask.isPending && !ask.isError && !research.running && !research.result && !research.error
+
   return (
-    <div className="chat" ref={rootRef}>
+    <div className={`chat${threadEmpty ? ' empty-thread' : ''}`} ref={rootRef}>
       <SessionBar
         sessions={sessions}
         activeId={activeId}
@@ -158,7 +163,7 @@ export function Chat(): React.ReactElement {
       )}
 
       <div className="chat-thread" ref={threadRef}>
-        {messages.length === 0 && !ask.isPending && !research.running && !research.result && !research.error && (
+        {threadEmpty && (
           <div className="chat-empty">
             <div className="icon">
               <Icon name="chat" />
@@ -247,28 +252,26 @@ export function Chat(): React.ReactElement {
             Research
           </button>
         </div>
-        <div className="composer-row">
-          <textarea
-            ref={composerRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
-            }}
-            placeholder={
-              mode === 'ask'
-                ? 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
-                : 'Topic to research on the web — creates new vault pages…'
+        <textarea
+          ref={composerRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              send()
             }
-            rows={2}
-          />
-          <button className="btn primary" disabled={draft.trim() === '' || busy} onClick={send}>
-            {sendLabel}
-          </button>
-        </div>
+          }}
+          placeholder={
+            mode === 'ask'
+              ? 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
+              : 'Topic to research on the web — creates new vault pages…'
+          }
+          rows={1}
+        />
+        <button className="btn primary" disabled={draft.trim() === '' || busy} onClick={send}>
+          {sendLabel}
+        </button>
       </div>
     </div>
   )

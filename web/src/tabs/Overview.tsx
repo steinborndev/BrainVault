@@ -42,21 +42,24 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
     )
   }
 
+  // Compact by design: everything above the fold on a laptop viewport. The three-column
+  // grid keeps the cards shallow, lists are capped (the full history lives in git / the
+  // vault anyway), and the hot cache — the one arbitrarily long block — is collapsed.
   return (
     <div>
       <Kpis stats={data} />
       <BudgetBar stats={data} />
 
-      <div className="grid two section">
+      <div className="grid three section">
         <div className="card card-pad">
           <h3 className="section-title">Pages by type</h3>
-          <div className="grid kpis">
+          <div className="rows">
             {Object.entries(data.pages.byDir)
               .filter(([, n]) => n > 0)
               .map(([dir, n]) => (
-                <div key={dir} className="stat card">
-                  <div className="value">{n}</div>
-                  <div className="sub">{DIR_LABELS[dir] ?? dir}</div>
+                <div key={dir} className="row slim">
+                  <span>{DIR_LABELS[dir] ?? dir}</span>
+                  <span className="when">{n}</span>
                 </div>
               ))}
           </div>
@@ -66,9 +69,7 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
           <h3 className="section-title">Growth (30 days)</h3>
           <GrowthChart points={data.growth} />
         </div>
-      </div>
 
-      <div className="grid two section">
         <div className="card card-pad">
           <h3 className="section-title">Recently changed</h3>
           {data.recentPages.length === 0 ? (
@@ -77,7 +78,7 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
             </div>
           ) : (
             <div className="pages">
-              {data.recentPages.map((p) => (
+              {data.recentPages.slice(0, 10).map((p) => (
                 <PageLink key={p.path} vaultName={data.vaultName} path={p.path} />
               ))}
             </div>
@@ -90,8 +91,8 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
             {data.commits.length === 0 ? (
               <div className="empty">No commits.</div>
             ) : (
-              data.commits.map((c) => (
-                <div key={c.hash} className="row">
+              data.commits.slice(0, 6).map((c) => (
+                <div key={c.hash} className="row slim">
                   <span className="hash">{c.hash}</span>
                   <span title={c.subject} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.subject}
@@ -107,10 +108,10 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
       <ServiceStatus stats={data} />
 
       {data.hotCache && (
-        <div className="card card-pad section hot-cache">
-          <h3 className="section-title">Hot Cache</h3>
+        <details className="card card-pad section hot-cache">
+          <summary className="section-title">Hot cache</summary>
           <Markdown source={data.hotCache} />
-        </div>
+        </details>
       )}
     </div>
   )

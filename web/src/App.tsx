@@ -16,7 +16,7 @@ type TabId = 'overview' | 'ingestion' | 'chat' | 'vault' | 'maintenance'
 const TABS: Array<{ id: TabId; label: string; icon: IconName; route: string }> = [
   { id: 'overview', label: 'Overview', icon: 'grid', route: '/' },
   { id: 'ingestion', label: 'Ingestion', icon: 'inbox', route: '/ingestion' },
-  { id: 'chat', label: 'Query/Chat', icon: 'chat', route: '/chat' },
+  { id: 'chat', label: 'Research', icon: 'chat', route: '/research' },
   { id: 'vault', label: 'Vault', icon: 'graph', route: '/vault' },
   { id: 'maintenance', label: 'Maintenance', icon: 'wrench', route: '/maintenance' },
 ]
@@ -26,11 +26,17 @@ function tabForPath(path: string): TabId {
   const pathname = path.split('?')[0]!
   if (pathname.startsWith('/vault')) return 'vault'
   if (pathname.startsWith('/ingestion')) return 'ingestion'
-  if (pathname.startsWith('/chat')) return 'chat'
-  // `/wartung` is the pre-English-sweep route — old bookmarks/PWA shortcuts still carry it.
+  // `/chat` and `/wartung` are pre-rename routes — old bookmarks/PWA shortcuts carry them.
+  if (pathname.startsWith('/research') || pathname.startsWith('/chat')) return 'chat'
   if (pathname.startsWith('/maintenance') || pathname.startsWith('/wartung')) return 'maintenance'
   return 'overview'
 }
+
+/** Old route → its current name; normalized via replaceState so history stays clean. */
+const LEGACY_ROUTES: Array<[string, string]> = [
+  ['/wartung', '/maintenance'],
+  ['/chat', '/research'],
+]
 
 export function App(): React.ReactElement {
   const path = usePath()
@@ -47,9 +53,11 @@ export function App(): React.ReactElement {
     if (tab === 'vault') setVaultPath(path)
   }, [tab, path])
 
-  // Normalize the legacy German route so the address bar and history show the real one.
+  // Normalize legacy routes so the address bar and history show the current ones.
   useEffect(() => {
-    if (path.split('?')[0]!.startsWith('/wartung')) navigate('/maintenance', { replace: true })
+    const pathname = path.split('?')[0]!
+    const legacy = LEGACY_ROUTES.find(([old]) => pathname.startsWith(old))
+    if (legacy) navigate(legacy[1], { replace: true })
   }, [path])
 
   return (

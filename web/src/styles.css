@@ -269,10 +269,13 @@ button {
 .grid.two {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
+.grid.three {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
 
 /* ---- Stat tiles ---- */
 .stat {
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 .stat .label {
   font-size: 12px;
@@ -281,7 +284,7 @@ button {
   letter-spacing: 0.05em;
 }
 .stat .value {
-  font-size: 30px;
+  font-size: 25px;
   font-weight: 700;
   line-height: 1.1;
   margin-top: 4px;
@@ -599,6 +602,10 @@ button {
 .row:last-child {
   border-bottom: none;
 }
+.row.slim {
+  padding: 4px 0;
+  font-size: 12.5px;
+}
 .row .hash {
   font-family: var(--mono);
   color: var(--text-faint);
@@ -655,6 +662,19 @@ button {
   max-height: 420px;
   overflow-y: auto;
 }
+/* Collapsed by default — the hot cache is the one arbitrarily long block on the overview. */
+details.hot-cache summary {
+  cursor: pointer;
+  margin-bottom: 0;
+  user-select: none;
+}
+details.hot-cache summary::marker {
+  color: var(--text-faint);
+}
+details.hot-cache[open] summary {
+  margin-bottom: 10px;
+}
+
 .md h1, .md h2, .md h3 { margin: 14px 0 6px; line-height: 1.25; }
 .md h1 { font-size: 20px; }
 .md h2 { font-size: 17px; }
@@ -814,35 +834,49 @@ button {
   color: var(--text-faint);
 }
 
+/* One bordered card: [Ask|Research] · borderless textarea · send. The mode toggle is part
+   of the input, not a floating row of chips above it. */
 .composer {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+.composer:focus-within {
+  border-color: var(--accent);
 }
 .composer-modes {
   display: flex;
-  gap: 6px;
-}
-.composer-row {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
+  gap: 4px;
+  padding-bottom: 5px;
 }
 .composer textarea {
   flex: 1;
   resize: none; /* grows with content via JS, capped at 200px */
-  min-height: 44px;
+  min-height: 36px;
   max-height: 200px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
   color: var(--text);
-  padding: 10px 12px;
+  padding: 8px 4px;
   font: inherit;
 }
 .composer textarea:focus {
   outline: none;
-  border-color: var(--accent);
+}
+
+/* Empty thread: the hint + composer center in the viewport instead of a vast gap with the
+   input pinned to the bottom; auto margins on both sides of the group do the centering. */
+.chat.empty-thread .chat-thread {
+  flex: 0 1 auto;
+  overflow: visible;
+  margin-top: auto;
+}
+.chat.empty-thread .composer {
+  margin-bottom: auto;
 }
 
 /* ---- Maintenance ---- */
