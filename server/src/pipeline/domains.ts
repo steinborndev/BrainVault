@@ -121,6 +121,30 @@ export function readDomainRegistry(vaultRoot: string): DomainRegistry | null {
   return registry.domains.length > 0 ? registry : null
 }
 
+/** A registry key: lowercase, hyphenated, no spaces — same shape the parser accepts. */
+export const isValidDomainKey = (key: string): boolean => /^[a-z0-9][a-z0-9-]*$/.test(key)
+
+/**
+ * Appends a new domain section to the registry markdown, in the same shape the seed uses so a
+ * grown registry stays indistinguishable from a hand-written one.
+ *
+ * Returns null when the key already exists (the caller turns that into a 409) — adding a
+ * duplicate would silently shadow, since the parser lets the first definition win.
+ */
+export function appendDomainSection(
+  markdown: string,
+  entry: { key: string; description: string; tags: readonly string[] },
+): string | null {
+  const existing = parseDomainRegistry(markdown)
+  if (existing.domains.some((d) => d.key === entry.key)) return null
+
+  const tagLine =
+    entry.tags.length > 0 ? `\n\n**Tags:** ${entry.tags.map((t) => `\`${t}\``).join(', ')}` : ''
+  const section = `\n## ${entry.key}\n\n${entry.description.trim()}${tagLine}\n`
+  // Exactly one blank line between sections, whatever trailing whitespace the file had.
+  return `${markdown.replace(/\s*$/, '')}\n${section}`
+}
+
 /**
  * The system-prompt extension handed to vault-writing runs, or '' when no registry exists.
  *

@@ -10,10 +10,18 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
+import type { GraphBuilder } from '../../pipeline/graph.js'
+import type { DismissalStore } from '../../db/domain-dismissals.js'
 import { DomainRegistryMissingError } from '../../pipeline/maintenance.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
+import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
 
-export function registerMaintenanceRoute(app: FastifyInstance, ctx: AppContext): void {
+export function registerMaintenanceRoute(
+  app: FastifyInstance,
+  ctx: AppContext,
+  graph?: GraphBuilder,
+  dismissals?: DismissalStore,
+): void {
   const { maintenance } = ctx
 
   app.post('/api/v1/maintenance/lint', async (_req, reply) => {
@@ -37,15 +45,22 @@ export function registerMaintenanceRoute(app: FastifyInstance, ctx: AppContext):
     }
   })
 
-  // Read-only view of the registry, so the UI can say whether one is installed and what it
-  // holds without the user having to open the vault page.
-  app.get('/api/v1/domains', async (_req, reply) => {
-    const registry = readDomainRegistry(ctx.config.vaultRoot)
-    return reply.send({
-      installed: registry !== null,
-      path: DOMAIN_REGISTRY_PATH,
-      domains: registry?.domains ?? [],
+  /**
+   * The OPTIONAL agent pass over the deterministic candidates (SPEC.md §12.4 Stufe 3). The
+   * candidates are recomputed here rather than taken from the client, so a stale browser tab
+   * cannot make the agent judge themes that no longer exist. 409 when there is nothing to judge.
+   */
+  app.post('/api/v1/maintenance/domain-review', async (_req, reply) => {
+    if (graph === undefined) return reply.code(409).send({ error: 'graph unavailable' })
+    const { candidates } = findDomainCandidates({
+      graph: graph.build(),
+      registry: readDomainRegistry(ctx.config.vaultRoot),
+      dismissed: dismissals?.keys() ?? new Set<string>(),
     })
+    if (candidates.length === 0) {
+      return reply.code(409).send({ error: 'no domain candidates to review' })
+    }
+    return reply.code(202).send(maintenance.startDomainReview(candidates))
   })
 
   app.post('/api/v1/maintenance/research', async (req, reply) => {

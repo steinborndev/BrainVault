@@ -7,9 +7,15 @@
  */
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
-import type { LintReport, MaintenanceResult } from '../api/types.ts'
+import type {
+  LintReport,
+  MaintenanceResult,
+  DomainCandidate,
+  DomainReviewEntry,
+  CandidatesResponse,
+} from '../api/types.ts'
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
@@ -149,12 +155,240 @@ export function Maintenance(): React.ReactElement {
         {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
         {backfill.error && <div className="toast err">{backfill.error}</div>}
         {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Einsortiert" />}
+        {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
       </div>
 
       <div className="card card-pad section">
         <h3 className="section-title">Einstellungen</h3>
         <SettingsEditor />
       </div>
+    </div>
+  )
+}
+
+/**
+ * The governance loop's UI (SPEC §12.4 Stufe 3). The candidate list itself is deterministic and
+ * free, so it simply renders — no "start analysis" needed. The agent pass is opt-in via the
+ * toggle: it only JUDGES what the finder already surfaced, and costs a real agent run.
+ *
+ * Creating a domain is deliberately a user action here; agents may never coin a key.
+ */
+function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElement | null {
+  const qc = useQueryClient()
+  const candidates = useQuery({ queryKey: ['domain-candidates'], queryFn: api.domainCandidates })
+  const [withAgent, setWithAgent] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const review = useMaintenanceRun(() => api.domainReview())
+
+  const refresh = (): void => {
+    void qc.invalidateQueries({ queryKey: ['domain-candidates'] })
+    void qc.invalidateQueries({ queryKey: ['domains'] })
+    void qc.invalidateQueries({ queryKey: ['graph'] })
+  }
+
+  const data: CandidatesResponse | undefined = candidates.data
+  if (!data) return null
+
+  // Verdicts from the optional agent pass, keyed by candidate.
+  const verdicts = new Map<string, DomainReviewEntry>(
+    (review.result?.domainReview?.entries ?? []).map((e) => [e.candidate, e]),
+  )
+
+  const start = (): void => {
+    if (withAgent) review.start()
+    else refresh()
+  }
+
+  return (
+    <div className="domain-candidates">
+      <div className="section-head">
+        <h4 className="section-title">Kandidaten für neue Domänen</h4>
+        <div className="candidate-actions">
+          <label className="toggle" title="Kandidaten zusätzlich von einem Agenten bewerten lassen (kostet einen Lauf)">
+            <input type="checkbox" checked={withAgent} onChange={(e) => setWithAgent(e.target.checked)} />
+            Mit Agent-Bewertung
+          </label>
+          <button className="btn" disabled={review.running || (withAgent && data.candidates.length === 0)} onClick={start}>
+            {review.running ? 'Läuft…' : 'Kandidaten prüfen'}
+          </button>
+        </div>
+      </div>
+
+      <p className="tab-hint">
+        Themen unter den <code>unassigned</code>-Seiten, die groß genug für eine eigene Domäne wären (ab{' '}
+        {data.threshold} Seiten). {data.unassignedCount} Seite{data.unassignedCount === 1 ? '' : 'n'} ohne
+        passende Domäne.
+        {data.undomainedCount > 0 && (
+          <>
+            {' '}
+            <strong>{data.undomainedCount}</strong> Seite{data.undomainedCount === 1 ? '' : 'n'} tragen noch gar
+            kein Domänen-Feld — dafür ist der Backfill zuständig, bis dahin ist die Analyse unvollständig.
+          </>
+        )}
+      </p>
+
+      {review.running && <JobLog jobId="maintenance:domain-review" seed={false} />}
+      {review.error && <div className="toast err">{review.error}</div>}
+      {review.result && !review.result.domainReview && review.result.answer && (
+        <div className="md-fallback">
+          <Markdown source={review.result.answer} />
+        </div>
+      )}
+
+      {data.candidates.length === 0 ? (
+        <p className="empty-inline">
+          Keine Kandidaten. Neue Domänen entstehen, sobald sich genug thematisch verwandte Seiten sammeln, für
+          die keine bestehende Domäne passt.
+        </p>
+      ) : (
+        <div className="candidate-list">
+          {data.candidates.map((c) => (
+            <CandidateCard
+              key={c.key}
+              candidate={c}
+              verdict={verdicts.get(c.key)}
+              vaultName={vaultName}
+              editing={editing === c.key}
+              onEdit={() => setEditing(editing === c.key ? null : c.key)}
+              onDone={() => {
+                setEditing(null)
+                refresh()
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {data.dismissed.length > 0 && (
+        <p className="tab-hint">
+          Verworfen:{' '}
+          {data.dismissed.map((d, i) => (
+            <span key={d.key}>
+              {i > 0 && ', '}
+              <button
+                className="linkish"
+                title="Wieder vorschlagen"
+                onClick={() => void api.restoreCandidate(d.key).then(refresh)}
+              >
+                {d.key}
+              </button>
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const VERDICT_LABEL: Record<string, string> = {
+  'new-domain': 'Agent: eigene Domäne',
+  existing: 'Agent: gehört zu einer bestehenden Domäne',
+  'not-a-domain': 'Agent: keine Domäne',
+}
+
+function CandidateCard({
+  candidate,
+  verdict,
+  vaultName,
+  editing,
+  onEdit,
+  onDone,
+}: {
+  candidate: DomainCandidate
+  verdict: DomainReviewEntry | undefined
+  vaultName: string
+  editing: boolean
+  onEdit: () => void
+  onDone: () => void
+}): React.ReactElement {
+  // The agent's proposal pre-fills the form when it has one; otherwise the candidate tag does.
+  const [key, setKey] = useState(verdict?.key ?? candidate.key)
+  const [description, setDescription] = useState(verdict?.description ?? '')
+  const [tags, setTags] = useState((verdict?.tags ?? candidate.tags).join(', '))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const create = (): void => {
+    setBusy(true)
+    setError(null)
+    void api
+      .createDomain({
+        key: key.trim().toLowerCase(),
+        description: description.trim(),
+        tags: tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean),
+        dismissCandidate: candidate.key,
+      })
+      .then(onDone)
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="candidate card card-pad">
+      <div className="candidate-head">
+        <strong>{candidate.key}</strong>
+        <span className="candidate-meta">
+          {candidate.pageCount} Seiten · {Math.round(candidate.cohesion * 100)}% verlinkt
+        </span>
+        {verdict && <span className={`chip verdict-${verdict.verdict}`}>{VERDICT_LABEL[verdict.verdict]}</span>}
+      </div>
+
+      {candidate.tags.length > 1 && <p className="tab-hint">Tags: {candidate.tags.join(', ')}</p>}
+      {verdict?.reason && <p className="tab-hint">{verdict.reason}</p>}
+      {verdict?.verdict === 'existing' && verdict.existing && (
+        <p className="tab-hint">
+          Vorschlag: diese Seiten unter <code>{verdict.existing}</code> einsortieren — dafür die Seiten
+          bearbeiten oder einen Backfill laufen lassen.
+        </p>
+      )}
+
+      <PageLinks paths={candidate.pages.map((p) => p.path)} vaultName={vaultName} />
+
+      {editing ? (
+        <div className="candidate-form">
+          <label>
+            Schlüssel
+            <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="z. B. history" />
+          </label>
+          <label>
+            Beschreibung
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Was deckt diese Domäne ab?"
+            />
+          </label>
+          <label>
+            Tags (kommagetrennt)
+            <input value={tags} onChange={(e) => setTags(e.target.value)} />
+          </label>
+          {error && <div className="toast err">{error}</div>}
+          <div className="candidate-actions">
+            <button className="btn primary" disabled={busy || !key.trim() || !description.trim()} onClick={create}>
+              {busy ? 'Wird angelegt…' : 'Domäne anlegen'}
+            </button>
+            <button className="btn ghost" onClick={onEdit}>
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="candidate-actions">
+          <button className="btn" onClick={onEdit}>
+            Als Domäne anlegen
+          </button>
+          <button
+            className="btn ghost"
+            title="Nicht mehr vorschlagen"
+            onClick={() => void api.dismissCandidate(candidate.key).then(onDone)}
+          >
+            Verwerfen
+          </button>
+        </div>
+      )}
     </div>
   )
 }

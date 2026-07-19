@@ -10,6 +10,7 @@ import { openDb, defaultDbPath } from './db/index.js'
 import { JobStore } from './db/jobs.js'
 import { ChatStore } from './db/chat.js'
 import { SettingsStore } from './db/settings.js'
+import { DomainDismissalStore } from './db/domain-dismissals.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
@@ -112,6 +113,8 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // honour the live gitAutoCommit setting exactly like the queue does.
     commitMutex,
     autoCommit: () => settings.effective(config).gitAutoCommit,
+    // Persistent, so a rejected domain candidate stays rejected across restarts.
+    domainDismissals: new DomainDismissalStore(db),
   })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`

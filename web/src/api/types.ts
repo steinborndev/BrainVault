@@ -248,7 +248,13 @@ export interface LintReport {
 }
 
 /** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save' | 'domain-backfill'
+export type MaintenanceKind =
+  | 'lint'
+  | 'research'
+  | 'hot-cache'
+  | 'save'
+  | 'domain-backfill'
+  | 'domain-review'
 
 /** One meta-category from the vault's domain registry (GET /api/v1/domains, SPEC §12.4). */
 export interface DomainEntry {
@@ -264,6 +270,42 @@ export interface DomainsResponse {
   domains: DomainEntry[]
 }
 
+/** A theme among `unassigned` pages big enough to justify a new domain (SPEC §12.4 Stufe 3). */
+export interface DomainCandidate {
+  key: string
+  tags: string[]
+  pages: Array<{ path: string; title: string }>
+  pageCount: number
+  /** 0–1: share of the candidate's pages linked to another page in the same candidate. */
+  cohesion: number
+}
+
+export interface CandidatesResponse {
+  candidates: DomainCandidate[]
+  unassignedCount: number
+  /** Pages with no `domain:` field at all — non-zero means a backfill is due. */
+  undomainedCount: number
+  threshold: number
+  dismissed: Array<{ key: string; dismissedAt: string }>
+}
+
+export type DomainVerdict = 'new-domain' | 'existing' | 'not-a-domain'
+
+/** The optional agent judgement on one candidate. */
+export interface DomainReviewEntry {
+  candidate: string
+  verdict: DomainVerdict
+  key?: string
+  description?: string
+  tags?: string[]
+  existing?: string
+  reason?: string
+}
+
+export interface DomainReview {
+  entries: DomainReviewEntry[]
+}
+
 export interface MaintenanceResult {
   ok: boolean
   kind: MaintenanceKind
@@ -273,6 +315,8 @@ export interface MaintenanceResult {
   /** The agent's final text (summary / fallback when no structured report). */
   answer?: string
   lint?: LintReport
+  /** Present for a domain-review run: the agent's verdict per candidate. */
+  domainReview?: DomainReview
   reportPath?: string
 }
 

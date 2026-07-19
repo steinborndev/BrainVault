@@ -135,9 +135,27 @@ const V4 = `
 CREATE INDEX idx_jobs_finished ON jobs(finished_at);
 `
 
+/**
+ * v5 — dismissed domain candidates (SPEC.md §12.4 Stufe 3). The governance loop re-derives its
+ * candidates from the vault on every request, so without remembering rejections it would
+ * propose the same theme forever and become noise. Keyed by the candidate key (the dominant
+ * tag), which the finder keeps stable across rebuilds precisely so this table stays valid.
+ *
+ * Operational state only: losing it costs nothing but a re-proposal (hard rule 1, SPEC.md §8).
+ */
+const V5 = `
+CREATE TABLE domain_dismissals (
+  user_id      TEXT NOT NULL DEFAULT 'local',
+  key          TEXT NOT NULL,
+  dismissed_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
   { version: 3, up: V3 },
   { version: 4, up: V4 },
+  { version: 5, up: V5 },
 ]

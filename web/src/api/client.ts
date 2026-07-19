@@ -16,6 +16,7 @@ import type {
   Citation,
   MaintenanceRun,
   DomainsResponse,
+  CandidatesResponse,
   SettingsResponse,
   SettingsPatch,
   PagePreview,
@@ -182,6 +183,36 @@ export const api = {
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
 
   domains: (): Promise<DomainsResponse> => fetch(`${BASE}/domains`).then(json<DomainsResponse>),
+
+  // ---- Domain governance (SPEC §12.4 Stufe 3) ----
+
+  domainCandidates: (): Promise<CandidatesResponse> =>
+    fetch(`${BASE}/domains/candidates`).then(json<CandidatesResponse>),
+
+  domainReview: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/domain-review`, { method: 'POST' }).then(json<MaintenanceRun>),
+
+  createDomain: (body: {
+    key: string
+    description: string
+    tags: string[]
+    dismissCandidate?: string
+  }): Promise<{ ok: boolean; key: string; committed: boolean }> =>
+    fetch(`${BASE}/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(json<{ ok: boolean; key: string; committed: boolean }>),
+
+  dismissCandidate: (key: string): Promise<{ ok: boolean }> =>
+    fetch(`${BASE}/domains/candidates/${encodeURIComponent(key)}/dismiss`, { method: 'POST' }).then(
+      json<{ ok: boolean }>,
+    ),
+
+  restoreCandidate: (key: string): Promise<{ ok: boolean }> =>
+    fetch(`${BASE}/domains/candidates/${encodeURIComponent(key)}/dismiss`, { method: 'DELETE' }).then(
+      json<{ ok: boolean }>,
+    ),
 
   // ---- Settings ----
 

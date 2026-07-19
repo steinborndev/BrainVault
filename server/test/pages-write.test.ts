@@ -164,3 +164,51 @@ describe('DELETE /api/v1/pages', () => {
     expect((await app.inject({ method: 'DELETE', url: '/api/v1/pages?path=../.git/config' })).statusCode).toBe(400)
   })
 })
+
+describe('POST /api/v1/domains (SPEC §12.4 Stufe 3)', () => {
+  const registry = 'wiki/meta/domains.md'
+
+  beforeEach(() => {
+    page(registry, '## Domains\n\n## biomedicine\n\nBio.\n\n**Tags:** `biomedical`\n')
+    git('add', '-A')
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'registry')
+  })
+
+  it('appends the domain and commits ONLY the registry as "domains: add <key>"', async () => {
+    // A dirty, unrelated page proves the commit is pathspec-scoped: a concurrent agent's
+    // half-written work must not be swept into the user's registry commit.
+    page('wiki/concepts/Gamma.md', '# half-written by someone else\n')
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/domains',
+      payload: { key: 'history', description: 'The past.', tags: ['history', 'war'] },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json<{ committed: boolean }>().committed).toBe(true)
+
+    expect(git('log', '-1', '--pretty=%s').trim()).toBe('domains: add history')
+    expect(git('show', '--name-only', '--pretty=format:', 'HEAD').trim()).toBe(registry)
+    // The unrelated page is still uncommitted — it was never staged.
+    expect(git('status', '--porcelain')).toContain('wiki/concepts/Gamma.md')
+
+    const listed = (await app.inject({ method: 'GET', url: '/api/v1/domains' })).json<{
+      domains: Array<{ key: string; tags: string[] }>
+    }>()
+    expect(listed.domains.map((d) => d.key)).toEqual(['biomedicine', 'history'])
+    expect(listed.domains[1]!.tags).toEqual(['history', 'war'])
+  })
+
+  it('writes without committing when gitAutoCommit is off', async () => {
+    autoCommitEnabled = false
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/domains',
+      payload: { key: 'history', description: 'The past.' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json<{ committed: boolean }>().committed).toBe(false)
+    expect(fs.readFileSync(path.join(vaultRoot, registry), 'utf8')).toContain('## history')
+    expect(git('status', '--porcelain')).toContain(registry)
+  })
+})

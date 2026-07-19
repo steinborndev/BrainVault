@@ -127,6 +127,9 @@ beforeEach(async () => {
     maintenance,
     settings: new SettingsStore(db),
     runQuery: (input) => queryImpl(input),
+    // These tests exercise route behaviour, not git; the temp vault is not a repo. The commit
+    // path for vault-mutating routes is covered against a real repo in pages-write.test.ts.
+    autoCommit: () => false,
     logger: false,
   })
   await app.listen({ host: '127.0.0.1', port: 0 })
@@ -740,5 +743,121 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     const started = await fetch(`${baseUrl}/api/v1/maintenance/domain-backfill`, { method: 'POST' })
     expect(started.status).toBe(202)
     expect(((await started.json()) as StartedRun).status).toBe('running')
+  })
+})
+
+describe('domain governance (SPEC §12.4 Stufe 3)', () => {
+  type StartedRun = { id: string; channel: string; status: string; kind: string }
+  const registryPath = (): string => path.join(vaultRoot, 'wiki', 'meta', 'domains.md')
+
+  function seedRegistry(): void {
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
+    fs.writeFileSync(registryPath(), '## Domains\n\n## biomedicine\n\nBio.\n\n**Tags:** `biomedical`\n')
+  }
+
+  /** N unassigned pages sharing a tag — the shape the finder is meant to surface. */
+  function seedUnassigned(count: number, tag: string): void {
+    const dir = path.join(vaultRoot, 'wiki', 'concepts')
+    fs.mkdirSync(dir, { recursive: true })
+    for (let i = 0; i < count; i++) {
+      fs.writeFileSync(
+        path.join(dir, `Cand${i}.md`),
+        `---\ntags:\n  - ${tag}\ndomain: unassigned\n---\n\n# Cand${i}\n`,
+      )
+    }
+  }
+
+  it('surfaces a candidate, then stops after it is dismissed, and returns on restore', async () => {
+    seedRegistry()
+    seedUnassigned(6, 'design')
+
+    const first = (await (await fetch(`${baseUrl}/api/v1/domains/candidates`)).json()) as {
+      candidates: Array<{ key: string; pageCount: number }>
+      unassignedCount: number
+    }
+    expect(first.candidates.map((c) => c.key)).toEqual(['design'])
+    expect(first.candidates[0]!.pageCount).toBe(6)
+    expect(first.unassignedCount).toBe(6)
+
+    await fetch(`${baseUrl}/api/v1/domains/candidates/design/dismiss`, { method: 'POST' })
+    const after = (await (await fetch(`${baseUrl}/api/v1/domains/candidates`)).json()) as {
+      candidates: unknown[]
+      dismissed: Array<{ key: string }>
+    }
+    expect(after.candidates).toEqual([])
+    expect(after.dismissed.map((d) => d.key)).toEqual(['design'])
+
+    await fetch(`${baseUrl}/api/v1/domains/candidates/design/dismiss`, { method: 'DELETE' })
+    const restored = (await (await fetch(`${baseUrl}/api/v1/domains/candidates`)).json()) as {
+      candidates: Array<{ key: string }>
+    }
+    expect(restored.candidates.map((c) => c.key)).toEqual(['design'])
+  })
+
+  it('creates a domain by appending to the registry page, and rejects duplicates and bad keys', async () => {
+    seedRegistry()
+
+    const bad = await fetch(`${baseUrl}/api/v1/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'Not A Key', description: 'x' }),
+    })
+    expect(bad.status).toBe(400)
+
+    const created = await fetch(`${baseUrl}/api/v1/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'history', description: 'The past.', tags: ['history'] }),
+    })
+    expect(created.status).toBe(200)
+
+    // The registry page itself must now parse with the new domain in it.
+    const listed = (await (await fetch(`${baseUrl}/api/v1/domains`)).json()) as {
+      domains: Array<{ key: string; description: string; tags: string[] }>
+    }
+    expect(listed.domains.map((d) => d.key)).toEqual(['biomedicine', 'history'])
+    expect(listed.domains[1]).toMatchObject({ description: 'The past.', tags: ['history'] })
+
+    const dup = await fetch(`${baseUrl}/api/v1/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'history', description: 'again' }),
+    })
+    expect(dup.status).toBe(409)
+  })
+
+  it('accepting a candidate dismisses it, so it does not reappear before the backfill runs', async () => {
+    seedRegistry()
+    seedUnassigned(6, 'design')
+
+    await fetch(`${baseUrl}/api/v1/domains`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        key: 'design',
+        description: 'Visual design.',
+        tags: ['design'],
+        dismissCandidate: 'design',
+      }),
+    })
+
+    const after = (await (await fetch(`${baseUrl}/api/v1/domains/candidates`)).json()) as {
+      candidates: unknown[]
+    }
+    expect(after.candidates).toEqual([])
+  })
+
+  it('the agent review refuses to start when there is nothing to judge', async () => {
+    seedRegistry()
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/domain-review`, { method: 'POST' })
+    expect(res.status).toBe(409)
+  })
+
+  it('the agent review starts once candidates exist', async () => {
+    seedRegistry()
+    seedUnassigned(6, 'design')
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/domain-review`, { method: 'POST' })
+    expect(res.status).toBe(202)
+    expect(((await res.json()) as StartedRun).kind).toBe('domain-review')
   })
 })

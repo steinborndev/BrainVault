@@ -430,5 +430,50 @@ Turns `domain:` from a free-text field the agent filled at will into a closed, g
   real vault and committed there (`12fa1cb`); `/api/v1/domains` returns all six domains with full
   tag counts (12/6/5/6/12/5); the built `domainSystemPrompt` renders 2652 chars containing the
   closed list, the `unassigned` escape hatch, and the "never invent a key" rule.
-- **Not built (stage 3):** the governance loop that proposes new domains from `unassigned`
-  clusters. The registry page documents the ≥5-page rule of thumb for humans in the meantime.
+- **Not built at the time (stage 3):** the governance loop — shipped later the same day, below.
+
+
+### §8 addendum — meta-categories, stage 3 (2026-07-19, user-requested)
+
+The governance loop: new domains are proposed from evidence and decided by the user.
+
+- **First, the backfill was run** on the real vault (`1aa170d`), which is what makes stage 3
+  meaningful — before it, "no domain" meant "never classified", not "nothing fits". Result: all
+  114 pages filed, **0 `unassigned`**. Distribution: biomedicine 30, meta 22, ai-tooling 18,
+  cooking 18, finance 14, knowledge-management 12. Borderline pages landed plausibly (SVG style
+  guide → ai-tooling, Karpathy → knowledge-management, folds/tiling report → meta).
+- **Candidate finder** `pipeline/domain-candidates.ts` — deterministic, free, no state of its
+  own, so the dashboard can render candidates on every load. Tag-centric by design (the result
+  must become a `key + description + tags` registry entry). Threshold ≥5 pages; tags already
+  claimed by a domain are excluded (misfiling, not a missing category); structural tags
+  (`person`, `organization`, …) are excluded; overlapping tag sets merge via union-find on
+  Jaccard ≥0.6; the wikilink graph supplies a cohesion score, not the clustering. Only explicit
+  `unassigned` counts — pages with no `domain:` field are reported separately as
+  `undomainedCount` so a skipped backfill is visible instead of poisoning the analysis.
+- **Optional agent pass** `domain-review` (UI toggle, per the user's request to have both):
+  judges each candidate `new-domain` / `existing` / `not-a-domain`. Read-only despite the write
+  profile — it returns an opinion and touches nothing, because coining keys is a human act.
+  Its answer IS the deliverable, parsed by `pipeline/domain-review.ts`; deliberately no report
+  file in the vault (a rejected proposal would leave litter). Candidates are recomputed
+  server-side at start, so a stale tab can't order a run on themes that no longer exist. 409
+  when there is nothing to judge.
+- **Decision + persistence:** `POST /api/v1/domains` appends a section to the registry page as
+  ONE commit (`domains: add <key>`), read-modify-write inside the commit mutex, exact pathspec
+  via `commitPaths`. Dismissals live in SQLite (`domain_dismissals`, **migration v5**) — without
+  remembering a "no" the loop would re-propose forever. Restorable individually. The routes moved
+  into their own `api/routes/domains.ts`; `DismissalStore` is an interface with a memory fallback
+  so the API still builds without a DB handle (tests).
+- **Verified end-to-end against an ISOLATED throwaway instance** (own `VAULT_ROOT`/`PORT`/
+  `DB_PATH` — the real vault was never touched): 6 unassigned pages sharing `design`+`svg` →
+  one merged candidate, cohesion 1.0, `undomainedCount` correctly counting the registry page
+  itself; create → registry re-parses with the new domain, commit is `domains: add design`
+  touching **only** `wiki/meta/domains.md`; candidate disappears; dismissal row persisted in
+  SQLite; review 409s with no candidates. Migration v5 confirmed applied to the live DB
+  (`user_version: 5`). 334 server tests green (25 new); web typecheck + build clean.
+- **A nice emergent property:** after a domain is created the candidate vanishes on its own,
+  because its tags are now *claimed* by the registry. The dismissal is only the belt to that
+  pair of braces, covering the window until the next backfill.
+- **Honest gap:** the agent pass is covered structurally (start guard, 202, parser across all
+  three verdicts) but has **not** been exercised with a real agent run — the live vault currently
+  has zero candidates, and a run against synthetic pages would prove nothing. First real
+  candidate is the moment to try it.

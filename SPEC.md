@@ -372,9 +372,38 @@ geschlossene, bewachte Liste statt eines frei beschreibbaren Feldes.
   enthält; die Wartungs-Karte zeigt die Domänen und die Zahl der Seiten ohne Domäne — genau die
   Zahl, an der man sieht, ob ein Backfill fällig ist.
 
-Geplant, noch nicht gebaut (Stufe 3): die Governance-Schleife, die aus Clustern unter den
-`unassigned`-Seiten neue Domänen **vorschlägt** (Faustregel ≥5 kohärente Seiten; Entscheidung und
-Registry-Edit bleiben beim Nutzer).
+**Meta-Kategorien, Stufe 3 (2026-07-19, User-Entscheidung):** Die Governance-Schleife, die neue
+Domänen aus Evidenz **vorschlägt** — entschieden wird weiterhin vom Nutzer.
+
+- **Kandidaten-Findung, deterministisch und kostenlos** (`pipeline/domain-candidates.ts`):
+  tag-zentriert statt generischer Community-Detection, weil das Ergebnis eine Registry-Zeile
+  werden muss und die aus `key + description + tags` besteht — ein Tag auf N `unassigned`-Seiten
+  *ist* der Vorschlag, und „5 Seiten tragen `design`, keine Domäne deckt das ab" ist in einem
+  Blick prüfbar. Schwelle ≥5 Seiten. Tags, die eine bestehende Domäne bereits beansprucht,
+  scheiden aus (das ist eine Fehleinsortierung für den Backfill, kein fehlendes Fach); ebenso
+  strukturelle Tags (`person`, `organization`, …), die sagen was eine Seite *ist* statt worum es
+  geht. Tags mit stark überlappenden Seitenmengen werden zusammengefasst. Der Wikilink-Graph
+  liefert ein **Kohäsionsmaß** (hängen die Seiten auch untereinander?), ist aber ausdrücklich
+  nicht der Clustering-Motor. Gezählt wird nur explizites `unassigned`; Seiten ganz ohne
+  `domain:`-Feld werden separat gemeldet, weil sie „nie klassifiziert" heißen und nicht „nichts
+  passt" — sie würden die Analyse verwässern.
+- **Agent-Bewertung, optional und abschaltbar** (`domain-review`): ein Toggle in der UI
+  entscheidet, ob zusätzlich ein Agent-Lauf die Kandidaten beurteilt — `new-domain` (mit
+  Namensvorschlag), `existing` (gehört in eine vorhandene Domäne) oder `not-a-domain`. Der Lauf
+  ist **read-only**: er gibt eine Meinung ab und fasst keine Datei an, denn neue Schlüssel kommen
+  per Definition von Menschen. Sein Ergebnis ist die Antwort selbst, geparst
+  (`pipeline/domain-review.ts`) — bewusst ohne Report-Datei im Vault, weil ein Vorschlag flüchtig
+  ist und sonst bei jedem „Nein" Müll zurückbliebe. Kandidaten werden serverseitig neu berechnet,
+  damit ein veralteter Browser-Tab keinen Lauf auf verschwundene Themen auslösen kann.
+- **Entscheiden:** `POST /api/v1/domains` legt eine Domäne an, indem es die Registry-Seite um
+  einen Abschnitt ergänzt — als **ein** Git-Commit (`domains: add <key>`) hinter demselben
+  Commit-Mutex und mit exaktem Pathspec wie ein Nutzer-Seiten-Edit. Read-modify-write liegt im
+  Mutex, damit zwei parallele Anlagen sich nicht überschreiben. Ein verworfener Kandidat wird in
+  SQLite gemerkt (`domain_dismissals`, Migration v5) — ohne dieses Gedächtnis schlüge die
+  Schleife dasselbe Thema endlos vor. Verworfenes ist einzeln zurückholbar.
+- **Selbstheilung:** Nach dem Anlegen verschwindet ein Kandidat schon deshalb, weil seine Tags
+  nun einer Domäne gehören; der Dismissal ist nur die zusätzliche Sicherung für die Zeit bis zum
+  nächsten Backfill.
 
 ### 12.5 Reihenfolge
 

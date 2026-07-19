@@ -26,6 +26,8 @@ import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { parseLintReport, type LintReport } from './lint-report.js'
 import { readDomainRegistry, domainSystemPrompt, DOMAIN_REGISTRY_PATH, UNASSIGNED } from './domains.js'
+import { parseDomainReview, DOMAIN_REVIEW_FORMAT, type DomainReview } from './domain-review.js'
+import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -36,7 +38,13 @@ import { Mutex } from '../util/mutex.js'
  * Sharing this runner also shares its run mutex, which is what stops a save interleaving with a
  * lint; two concurrent vault writers is exactly what that mutex exists to prevent.
  */
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save' | 'domain-backfill'
+export type MaintenanceKind =
+  | 'lint'
+  | 'research'
+  | 'hot-cache'
+  | 'save'
+  | 'domain-backfill'
+  | 'domain-review'
 
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
@@ -78,6 +86,8 @@ export interface MaintenanceResult {
   readonly lint?: LintReport
   /** Where the lint report was written (vault-relative), if a file was found. */
   readonly reportPath?: string
+  /** Present for a domain-review run: the agent's verdict per candidate. */
+  readonly domainReview?: DomainReview
 }
 
 export type MaintenanceRunStatus = 'running' | 'done' | 'error'
@@ -251,6 +261,47 @@ export class MaintenanceRunner {
     })
   }
 
+  /**
+   * Judges the candidate themes the deterministic finder surfaced (SPEC.md §12.4 Stufe 3).
+   *
+   * READ-ONLY on purpose despite running under a write-capable profile: the agent returns an
+   * opinion, it does not touch the registry. Creating a domain stays a user action (the same
+   * rule the ingest guardrail enforces — new keys come from a human), so this run's whole
+   * output is its final message, parsed into verdicts. Nothing is committed.
+   */
+  startDomainReview(candidates: readonly DomainCandidate[]): MaintenanceRun {
+    const registry = readDomainRegistry(this.vaultRoot)
+    const existing = (registry?.domains ?? []).map((d) => `- ${d.key}: ${d.description}`).join('\n')
+    const blocks = candidates
+      .map(
+        (c) =>
+          `## ${c.key}\n` +
+          `shared tags: ${c.tags.join(', ')}\n` +
+          `${c.pageCount} pages, link cohesion ${(c.cohesion * 100).toFixed(0)}%\n` +
+          c.pages.map((p) => `- ${p.title} (${p.path})` ).join('\n'),
+      )
+      .join('\n\n')
+
+    return this.start(
+      'domain-review',
+      'You are judging proposed new meta-categories for a wiki. Each candidate below is a group ' +
+        'of pages that share a tag and that no existing domain covers.\n\n' +
+        `The domains that ALREADY exist:\n${existing || '(none)'}\n\n` +
+        `Candidates:\n\n${blocks}\n\n` +
+        'For each candidate decide ONE of:\n' +
+        '- `new-domain` — these pages form a real subject area worth its own domain. Propose a ' +
+        'key at the same altitude as the existing ones (broad — a domain is a shelf, not a book).\n' +
+        '- `existing` — they belong in a domain that already exists; name it.\n' +
+        '- `not-a-domain` — they merely share a label and are not one coherent subject.\n\n' +
+        'Read a few of the pages before deciding; the tag alone is not enough evidence. ' +
+        'Judge by what the pages are ABOUT.\n\n' +
+        'Do NOT edit any file. Do not modify the registry, do not change page frontmatter, do ' +
+        'not create pages. Your answer IS the deliverable.\n\n' +
+        DOMAIN_REVIEW_FORMAT,
+      'ingest',
+    )
+  }
+
   /** A tracked run by id (for the poll endpoint), or undefined once evicted. */
   getRun(id: string): MaintenanceRun | undefined {
     return this.runs.get(id)
@@ -406,6 +457,15 @@ export class MaintenanceRunner {
         const fromText = this.parseReportText(res.result)
         if (fromFile) return { ...base, lint: fromFile.report, reportPath: fromFile.path }
         if (fromText.totalFindings > 0 || fromText.sections.length > 0) return { ...base, lint: fromText }
+      }
+      if (kind === 'domain-review') {
+        // The answer IS the deliverable here (nothing is written), so parse it directly. An
+        // unparseable answer falls through to `base`, whose `answer` the UI renders as prose.
+        const review = parseDomainReview(res.result ?? '')
+        if (review.entries.length > 0) {
+          log('info', `maintenance: ${kind} judged ${review.entries.length} candidate(s)`)
+          return { ...base, domainReview: review }
+        }
       }
       log('info', `maintenance: ${kind} complete`)
       return base

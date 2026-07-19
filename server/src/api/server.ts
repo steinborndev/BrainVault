@@ -33,6 +33,8 @@ import { registerMaintenanceRoute } from './routes/maintenance.js'
 import { registerSettingsRoute } from './routes/settings.js'
 import { registerPagesRoute } from './routes/pages.js'
 import { registerGraphRoute } from './routes/graph.js'
+import { registerDomainsRoute } from './routes/domains.js'
+import { MemoryDismissalStore, type DismissalStore } from '../db/domain-dismissals.js'
 
 export interface AppContext {
   readonly config: Config
@@ -56,6 +58,8 @@ export interface AppContext {
   readonly commitMutex?: Mutex
   /** gitAutoCommit provider (SPEC.md §6.4), same live-settings pattern as the queue's. */
   readonly autoCommit?: () => boolean
+  /** Dismissed domain candidates (SPEC.md §12.4 Stufe 3); defaults to a non-persistent store. */
+  readonly domainDismissals?: DismissalStore
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
 }
@@ -84,13 +88,16 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerEventsRoute(app, ctx)
   registerStatsRoute(app, ctx)
   registerQueryRoute(app, ctx)
-  registerMaintenanceRoute(app, ctx)
   registerSettingsRoute(app, ctx)
-  // One shared graph builder: the graph endpoint serves it, and the pages DELETE consults
-  // it for the backlink count (its per-file cache makes both cheap).
+  // One shared graph builder: the graph endpoint serves it, the pages DELETE consults it for
+  // the backlink count, and the domain candidate finder reads tags/domains off it (its
+  // per-file cache makes all three cheap).
   const graphBuilder = new GraphBuilder(ctx.config.vaultRoot)
+  const dismissals = ctx.domainDismissals ?? new MemoryDismissalStore()
+  registerMaintenanceRoute(app, ctx, graphBuilder, dismissals)
   registerPagesRoute(app, ctx, graphBuilder)
   registerGraphRoute(app, ctx, graphBuilder)
+  registerDomainsRoute(app, ctx, graphBuilder, dismissals)
 
   await registerFrontend(app)
 

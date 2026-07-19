@@ -161,6 +161,14 @@ human editing that page; the rule of thumb is that five or more coherent `unassi
 what justifies one. `Wartung → Domänen → Backfill` files existing pages retroactively (frontmatter
 only — it never touches page bodies).
 
+The Wartung tab also runs the **governance loop**: it continuously (and for free) looks for
+themes among the `unassigned` pages that are big enough to deserve a domain, and shows them as
+candidates with their page list and a link-cohesion score. Accepting one appends it to the
+registry as a single commit; rejecting one is remembered so it stops being proposed. A toggle
+adds an optional agent pass that judges each candidate — new domain, belongs to an existing one,
+or not a real theme — and pre-fills the proposal. That pass is read-only: only you create
+domains.
+
 The graph renders on a canvas with the force layout in a web worker, so it stays smooth as the
 vault grows — deliberately, since the WSLg Obsidian graph does not. It also updates **live**:
 while an ingest writes pages, a debounced `vault` SSE event refreshes the graph, new nodes
@@ -345,9 +353,12 @@ DELETE /pages?path=…             user delete → unlink + git commit; returns 
                                  (backlinks that now dangle, drives the lint banner)
 GET    /graph                    the vault's wikilink graph: typed nodes + directed edges
 GET    /domains                  the vault's domain registry (installed? + parsed entries)
-POST   /maintenance/{lint,research,hot-cache,domain-backfill}
+POST   /domains                  create a domain: append to the registry page, one commit
+GET    /domains/candidates       themes among `unassigned` pages worth a domain (free)
+POST   /domains/candidates/:key/dismiss     stop proposing this theme (DELETE undoes it)
+POST   /maintenance/{lint,research,hot-cache,domain-backfill,domain-review}
                                  starts an async run → { id, channel }; backfill 409s
-                                 without an installed registry
+                                 without an installed registry, review 409s with no candidates
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration
