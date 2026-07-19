@@ -2,7 +2,7 @@
   <img src="docs/img/logo-mark.svg" width="88" height="88" alt="">
 </p>
 
-# BrainVault (`vault-service`)
+# BrainVault
 
 Drop a PDF into a folder - a few minutes later it is a set of linked, cited wiki pages in your
 personal knowledge vault, written by an AI agent running entirely on your machine.
