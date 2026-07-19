@@ -86,6 +86,19 @@ describe('finished_at stamping (F2 regression)', () => {
     expect(ALLOWED_TRANSITIONS.deferred).toContain('queued')
     expect(ALLOWED_TRANSITIONS.done).toEqual([])
   })
+
+  it('groups done/failed per UTC day for the KPI sparklines (dailyFinished)', () => {
+    run('d1', 'done')
+    run('d2', 'done')
+    run('d3', 'failed')
+    run('d4', 'deferred') // not done/failed — must not appear
+    const days = store.dailyFinished(14)
+    expect(days).toHaveLength(1) // everything finished just now → one (today) bucket
+    const today = days[0]!
+    expect(today.date).toBe(new Date().toISOString().slice(0, 10))
+    expect(today.done).toBe(2)
+    expect(today.failed).toBe(1)
+  })
 })
 
 describe('recoverInterrupted', () => {

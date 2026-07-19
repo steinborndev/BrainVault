@@ -105,6 +105,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
         deferred: finishedSince['deferred'] ?? 0,
         duplicates: finishedSince['duplicate'] ?? 0,
       },
+      /** 14 days of per-day done/failed counts (sparse) — KPI sparklines + week-over-week deltas. */
+      kpisDaily: store.dailyFinished(14),
       usage,
       budget,
       jobs: counts,

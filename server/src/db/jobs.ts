@@ -297,6 +297,28 @@ export class JobStore {
   }
 
   /**
+   * Per-day done/failed counts over the last `days` days (UTC dates, sparse — days without
+   * finished jobs are absent). Feeds the Overview's KPI sparklines and week-over-week deltas;
+   * keyed off `finished_at` for the same reason as `countsSince`.
+   */
+  dailyFinished(days: number): Array<{ date: string; done: number; failed: number }> {
+    const sinceIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+    const rows = this.db
+      .prepare(
+        `SELECT substr(finished_at, 1, 10) AS date,
+                SUM(CASE WHEN status = 'done'   THEN 1 ELSE 0 END) AS done,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed
+         FROM jobs
+         WHERE status IN ('done', 'failed')
+           AND finished_at IS NOT NULL AND finished_at >= ?
+         GROUP BY date
+         ORDER BY date`,
+      )
+      .all(sinceIso) as Array<{ date: string; done: number; failed: number }>
+    return rows
+  }
+
+  /**
    * Statuses a user may clear from the Ingestion history — everything that is at rest.
    * The three active states (`queued`, `preprocessing`, `ingesting`) are deliberately absent
    * so a clear can never drop a job that is still queued or running.

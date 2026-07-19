@@ -115,6 +115,8 @@ export interface Stats {
   /** mtime of wiki/hot.md — the Wartung tab's "letzter Refresh". null if never written. */
   hotCacheUpdatedAt: string | null
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
+  /** 14 days of per-day done/failed counts (sparse; UTC dates) — KPI sparklines + deltas. */
+  kpisDaily: Array<{ date: string; done: number; failed: number }>
   usage: { today: UsageTotals; last7d: UsageTotals }
   budget: Budget
   jobs: Record<string, number>

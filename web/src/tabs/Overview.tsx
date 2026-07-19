@@ -1,6 +1,7 @@
 /**
- * Übersicht (SPEC.md §6.1): page counts per type, wiki growth, recently changed pages as
- * obsidian:// deep-links, the hot cache, 7-day KPIs and live service status. Everything
+ * Übersicht (SPEC.md §6.1): KPIs with week-over-week trends, a status strip for the states
+ * that can go wrong (watcher, paused queue, budget), wiki growth, page-type distribution as
+ * bars, recently changed pages, commits, and the hot cache (age + refresh inline). Everything
  * refreshes live — the SSE `stats`/`job` events invalidate this query (useEvents), so a
  * finished ingest updates the counts here with no manual refresh (DoD).
  */
@@ -11,8 +12,11 @@ import type { Stats } from '../api/types.ts'
 import { GrowthChart } from '../components/GrowthChart.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink } from '../components/PageLink.tsx'
-import { timeAgo, tokens, usd } from '../lib/format.ts'
+import { Sparkline } from '../components/Sparkline.tsx'
+import { Tip } from '../components/Tip.tsx'
+import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
+import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 
 const DIR_LABELS: Record<string, string> = {
   concepts: 'Concepts',
@@ -24,6 +28,19 @@ const DIR_LABELS: Record<string, string> = {
   folds: 'Folds',
   meta: 'Meta',
 }
+
+/** The last `days` days of a sparse per-day series as a dense array (UTC dates, zero-filled). */
+function dense(daily: Stats['kpisDaily'], key: 'done' | 'failed', days: number): number[] {
+  const map = new Map(daily.map((d) => [d.date, d[key]]))
+  const out: number[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    out.push(map.get(date) ?? 0)
+  }
+  return out
+}
+
+const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0)
 
 export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement {
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['stats'], queryFn: api.stats })
@@ -42,35 +59,23 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
     )
   }
 
-  // Compact by design: everything above the fold on a laptop viewport. The three-column
-  // grid keeps the cards shallow, lists are capped (the full history lives in git / the
-  // vault anyway), and the hot cache — the one arbitrarily long block — is collapsed.
   return (
     <div>
       <Kpis stats={data} />
-      <BudgetBar stats={data} />
+      <StatusStrip stats={data} />
 
-      <div className="grid three section">
-        <div className="card card-pad">
-          <h3 className="section-title">Pages by type</h3>
-          <div className="rows">
-            {Object.entries(data.pages.byDir)
-              .filter(([, n]) => n > 0)
-              .map(([dir, n]) => (
-                <div key={dir} className="row slim">
-                  <span>{DIR_LABELS[dir] ?? dir}</span>
-                  <span className="when">{n}</span>
-                </div>
-              ))}
-          </div>
-        </div>
-
-        <div className="card card-pad">
+      <div className="ov-grid section">
+        <div className="card card-pad col-7">
           <h3 className="section-title">Growth (30 days)</h3>
           <GrowthChart points={data.growth} />
         </div>
 
-        <div className="card card-pad">
+        <div className="card card-pad col-5">
+          <h3 className="section-title">Pages by type</h3>
+          <TypeBars byDir={data.pages.byDir} />
+        </div>
+
+        <div className="card card-pad col-6">
           <h3 className="section-title">Recently changed</h3>
           {data.recentPages.length === 0 ? (
             <div className="empty">
@@ -85,7 +90,7 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
           )}
         </div>
 
-        <div className="card card-pad">
+        <div className="card card-pad col-6">
           <h3 className="section-title">Recent commits</h3>
           <div className="rows">
             {data.commits.length === 0 ? (
@@ -105,33 +110,63 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
         </div>
       </div>
 
-      <ServiceStatus stats={data} />
-
-      {data.hotCache && (
-        <details className="card card-pad section hot-cache">
-          <summary className="section-title">Hot cache</summary>
-          <Markdown source={data.hotCache} />
-        </details>
-      )}
+      {data.hotCache && <HotCache stats={data} />}
     </div>
+  )
+}
+
+/** Week-over-week delta as a small colored arrow. `invert` = a rise is bad (failures). */
+function Delta({ now, prev, invert = false }: { now: number; prev: number; invert?: boolean }): React.ReactElement | null {
+  const d = now - prev
+  if (d === 0) return null
+  const up = d > 0
+  const good = invert ? !up : up
+  return (
+    <span className={`delta ${good ? 'good' : 'bad'}`} title="vs. previous 7 days">
+      {up ? '▲' : '▼'} {Math.abs(d)}
+    </span>
   )
 }
 
 function Kpis({ stats }: { stats: Stats }): React.ReactElement {
   const queueLen = stats.queue.queued + stats.queue.active
+  const doneDaily = dense(stats.kpisDaily, 'done', 14)
+  const failedDaily = dense(stats.kpisDaily, 'failed', 14)
+  const prevIngests = sum(doneDaily.slice(0, 7))
+  const prevFailures = sum(failedDaily.slice(0, 7))
+
+  // Pages delta: growth is a daily cumulative series, so "7 days ago" is the 8th-last point.
+  const growth = stats.growth
+  const pagesNow = growth[growth.length - 1]?.total ?? stats.pages.total
+  const pagesThen = growth[growth.length - 8]?.total ?? growth[0]?.total ?? pagesNow
+
   return (
     <div className="grid kpis section">
       <div className="stat card">
         <div className="label">Total pages</div>
-        <div className="value">{stats.pages.total}</div>
+        <div className="value">
+          {stats.pages.total}
+          <Delta now={pagesNow} prev={pagesThen} />
+        </div>
+        <div className="sub">vs. last week</div>
+        <Sparkline values={growth.slice(-14).map((p) => p.total)} />
       </div>
       <div className="stat card">
         <div className="label">Ingests (7 d)</div>
-        <div className="value ok">{stats.kpis7d.ingests}</div>
+        <div className="value ok">
+          {stats.kpis7d.ingests}
+          <Delta now={stats.kpis7d.ingests} prev={prevIngests} />
+        </div>
+        <div className="sub">vs. previous 7 d</div>
+        <Sparkline values={doneDaily.slice(7)} />
       </div>
       <div className="stat card">
         <div className="label">Failures (7 d)</div>
-        <div className={`value${stats.kpis7d.failures > 0 ? ' err' : ''}`}>{stats.kpis7d.failures}</div>
+        <div className={`value${stats.kpis7d.failures > 0 ? ' err' : ''}`}>
+          {stats.kpis7d.failures}
+          <Delta now={stats.kpis7d.failures} prev={prevFailures} invert />
+        </div>
+        {stats.kpis7d.failures > 0 && <div className="sub">retry available in Ingestion</div>}
       </div>
       <div className="stat card">
         <div className="label">Queue</div>
@@ -139,7 +174,12 @@ function Kpis({ stats }: { stats: Stats }): React.ReactElement {
         <div className="sub">{stats.queue.active} active · {stats.queue.queued} waiting</div>
       </div>
       <div className="stat card">
-        <div className="label">Cost (7 d)</div>
+        <div className="label">
+          Cost (7 d)
+          {isEstimate(stats.authMode) && (
+            <Tip text="API-price equivalent computed from token counts. On a subscription nothing is charged per run — treat this as an estimate of what the usage would cost via API." />
+          )}
+        </div>
         <div className="value">
           <Cost value={stats.usage.last7d.costUsd} authMode={stats.authMode} />
         </div>
@@ -153,73 +193,108 @@ function Kpis({ stats }: { stats: Stats }): React.ReactElement {
 }
 
 /**
- * Today's usage against the configured daily budget (SPEC.md §7.1, §11.3). Hidden entirely when
- * no budget is set — an unlimited budget has nothing meaningful to show as progress.
+ * The states that can go wrong, as pills right under the KPIs (SPEC.md §6.1) — replaces the
+ * "Service status" card that hid this at the bottom, and the budget card (the popover in the
+ * topbar carries the details; this strip is the at-a-glance layer).
  */
-function BudgetBar({ stats }: { stats: Stats }): React.ReactElement | null {
-  const { budget, authMode } = stats
-  if (budget.limit === null) return null
-
-  const pct = Math.min(100, Math.round((budget.spent / budget.limit) * 100))
-  const fmt = (n: number): string => (budget.unit === 'usd' ? usd(n) : String(n))
-  const resets = new Date(budget.resetsAt)
+function StatusStrip({ stats }: { stats: Stats }): React.ReactElement {
+  const { budget, queue, watcher } = stats
+  const last = stats.commits[0]
+  const pct = budget.limit !== null ? Math.min(100, Math.round((budget.spent / budget.limit) * 100)) : 0
+  const pausedLabel =
+    queue.pauseReason === 'budget'
+      ? 'daily budget reached'
+      : queue.pauseReason === 'rate-limit'
+        ? 'usage limit'
+        : 'paused'
 
   return (
-    <div className="card card-pad section">
-      <div className="section-head">
-        <h3 className="section-title">Daily budget</h3>
-        <span className={`setting-tag${budget.exceeded ? ' warn' : ''}`}>
-          {budget.exceeded ? 'reached — queue paused' : `${pct} %`}
+    <div className="status-strip section">
+      <span className={`spill${watcher.active ? '' : ' warn'}`} title={watcher.folder}>
+        <span className={`d ${watcher.active ? 'ok' : 'warn'}`} />
+        Watcher <strong>{watcher.active ? 'active' : 'inactive'}</strong>
+      </span>
+      {queue.paused && (
+        <span className="spill warn">
+          <span className="d warn" />
+          Queue <strong>paused — {pausedLabel}</strong>
         </span>
-      </div>
-      <div className="budget-bar">
-        <div className={`budget-fill${budget.exceeded ? ' over' : ''}`} style={{ width: `${pct}%` }} />
-      </div>
-      <div className="job-meta" style={{ fontSize: 13, marginTop: 8 }}>
-        <span>
-          {fmt(budget.spent)} of {fmt(budget.limit)} {budget.unit === 'jobs' ? 'ingests' : ''} today
+      )}
+      {budget.limit !== null && (
+        <span className={`spill${budget.exceeded ? ' warn' : ''}`}>
+          <span className={`d ${budget.exceeded ? 'warn' : 'ok'}`} />
+          Budget <strong>{pct} %</strong> used today
+          <span className="minibar" aria-hidden>
+            <i className={budget.exceeded ? 'over' : ''} style={{ width: `${pct}%` }} />
+          </span>
         </span>
-        <span>
-          Resets at {resets.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+      )}
+      {last && (
+        <span className="spill">
+          <span className="d dim" />
+          Last commit <strong>{timeAgo(last.date)}</strong>
         </span>
-        {budget.unit === 'usd' && isEstimate(authMode) && <span>{ESTIMATE_LABEL}</span>}
-      </div>
+      )}
+      <span className="spill">
+        <span className="d dim" />
+        Vault <strong>{stats.vaultName}</strong>
+      </span>
     </div>
   )
 }
 
-function ServiceStatus({ stats }: { stats: Stats }): React.ReactElement {
-  const last = stats.commits[0]
+/** Page counts as horizontal bars — proportions read at a glance, direct labels right. */
+function TypeBars({ byDir }: { byDir: Record<string, number> }): React.ReactElement {
+  const entries = Object.entries(byDir)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+  const maxN = entries[0]?.[1] ?? 1
+  if (entries.length === 0) return <div className="empty">No pages yet.</div>
   return (
-    <div className="card card-pad section">
-      <h3 className="section-title">Service status</h3>
-      <div className="job-meta" style={{ fontSize: 13 }}>
-        <span>
-          Watcher{' '}
-          <strong style={{ color: stats.watcher.active ? 'var(--ok)' : 'var(--muted)' }}>
-            {stats.watcher.active ? 'active' : 'inactive'}
-          </strong>
-        </span>
-        <span title={stats.watcher.folder}>Folder: <code>{stats.watcher.folder}</code></span>
-        <span>
-          Queue: {stats.queue.queued + stats.queue.active}
-          {stats.queue.paused && (
-            <>
-              {' '}
-              <strong style={{ color: 'var(--warn)' }}>
-                {stats.queue.pauseReason === 'budget'
-                  ? '(paused — daily budget)'
-                  : stats.queue.pauseReason === 'rate-limit'
-                    ? '(paused — usage limit)'
-                    : '(paused)'}
-              </strong>
-            </>
-          )}
-        </span>
-        {last && <span>Last commit {timeAgo(last.date)}</span>}
-        <span>Vault: <code>{stats.vaultName}</code></span>
-      </div>
+    <div className="tbars">
+      {entries.map(([dir, n]) => (
+        <div key={dir} className="tbar">
+          <span className="tl">{DIR_LABELS[dir] ?? dir}</span>
+          <span className="track">
+            <span className="fill" style={{ width: `${Math.max(2, Math.round((n / maxN) * 100))}%` }} />
+          </span>
+          <span className="tv">{n}</span>
+        </div>
+      ))}
     </div>
+  )
+}
+
+/** Hot cache, collapsed — with its age and the refresh action right here in the summary. */
+function HotCache({ stats }: { stats: Stats }): React.ReactElement {
+  const hot = useMaintenanceRun(() => api.hotCache())
+  return (
+    <details className="card card-pad section hot-cache">
+      <summary className="hc-summary">
+        <h3 className="section-title">Hot cache</h3>
+        <span className="hc-meta">
+          {hot.running
+            ? 'refreshing…'
+            : stats.hotCacheUpdatedAt
+              ? `refreshed ${timeAgo(stats.hotCacheUpdatedAt)}`
+              : 'never refreshed'}
+          <button
+            className="btn"
+            disabled={hot.running}
+            onClick={(e) => {
+              // The button lives inside <summary> — don't let the click also toggle the panel.
+              e.preventDefault()
+              e.stopPropagation()
+              hot.start()
+            }}
+          >
+            {hot.running ? 'Refreshing…' : 'Refresh'}
+          </button>
+        </span>
+      </summary>
+      {hot.error && <div className="toast err">{hot.error}</div>}
+      <Markdown source={stats.hotCache ?? ''} />
+    </details>
   )
 }
 
