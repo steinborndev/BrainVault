@@ -2557,3 +2557,34 @@ details.hot-cache[open] .hc-summary::before {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* ---- First-run credential setup (setup mode) ---- */
+.setup-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 13px;
+}
+.setup-banner .btn { margin-left: auto; }
+
+.credential-setup { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+.credential-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 640px) { .credential-kinds { grid-template-columns: 1fr; } }
+.credential-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.credential-kind.selected { border-color: var(--accent); }
+.credential-kind input[type='radio'] { display: none; }
+.credential-kind-title { font-weight: 600; font-size: 13px; }

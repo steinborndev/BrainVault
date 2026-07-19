@@ -136,6 +136,8 @@ export interface Stats {
 
 export interface Health {
   status: string
+  /** False = setup mode: no Anthropic credential yet, agent-running features disabled. */
+  credentialConfigured: boolean
   queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
   /** Server-side caps the client pre-checks against (dropzone size warning). */
@@ -373,6 +375,14 @@ export interface SettingsResponse {
   restartRequiredKeys: string[]
   /** Set on a PUT response: restart-required keys this write actually changed. */
   pendingRestart?: string[]
+}
+
+/** Response of the credential submission (first-run onboarding). Never carries the value. */
+export interface CredentialResponse {
+  ok: boolean
+  envVar: string
+  /** `auto` = systemd restarts the service by itself; `manual` = the user must restart. */
+  restart: 'auto' | 'manual'
 }
 
 /** A settings write. `null` clears an override, falling back to the baseline. */

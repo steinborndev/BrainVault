@@ -19,6 +19,7 @@ import type {
   CandidatesResponse,
   SettingsResponse,
   SettingsPatch,
+  CredentialResponse,
   PagePreview,
   PageFull,
   VaultGraph,
@@ -228,6 +229,14 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch),
     }).then(json<SettingsResponse>),
+
+  /** First-run onboarding / key replacement. The value goes out once and never comes back. */
+  setCredential: (body: { kind: 'oauth' | 'api-key'; value: string }): Promise<CredentialResponse> =>
+    fetch(`${BASE}/settings/credential`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(json<CredentialResponse>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

@@ -53,6 +53,11 @@ export function App(): React.ReactElement {
   const outstanding = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
   const running = (stats.data?.queue.active ?? 0) > 0
 
+  // First-run setup mode: the server runs without a credential and every agent feature is
+  // off — surface that on every tab, with the path to fix it (Maintenance → Settings).
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  const setupMode = health.data ? !health.data.credentialConfigured : false
+
   // Tabs stay MOUNTED and are hidden via [hidden] — unmounting threw away the graph
   // camera, the active chat session, filters and scroll positions on every switch.
   // The vault tab keeps its last inner route while other tabs own the URL; null until
@@ -96,6 +101,16 @@ export function App(): React.ReactElement {
         <span className="spacer" />
         <StatusPopover connected={connected} />
       </header>
+
+      {setupMode && (
+        <div className="setup-banner" role="status">
+          <strong>Almost there:</strong>&nbsp;no Anthropic credential configured yet — ingestion,
+          research and maintenance are paused.
+          <button className="btn primary" onClick={() => navigate('/maintenance')}>
+            Set up now
+          </button>
+        </div>
+      )}
 
       <main className="content">
         <section className="tab-panel" hidden={tab !== 'overview'}>

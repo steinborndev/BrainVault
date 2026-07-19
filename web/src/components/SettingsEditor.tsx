@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { CredentialSetup } from './CredentialSetup.tsx'
 import type { EffectiveSettings, SettingsPatch, SettingsResponse } from '../api/types.ts'
 
 const MB = 1024 * 1024
@@ -201,9 +202,10 @@ export function SettingsEditor(): React.ReactElement {
         )}
       </div>
       <p className="setting-hint">
-        The API key itself is never shown or stored — only its source. Address and credential are
+        The API key itself is never shown or stored — only its source. The bind address is
         deliberately not changeable through the UI.
       </p>
+      <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
     </div>
   )
 }
