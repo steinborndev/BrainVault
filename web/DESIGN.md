@@ -33,9 +33,30 @@ are what every tab follows; new UI goes through this list before it ships.
 - **Buttons:** exactly one `.btn.primary` per view — the main action. Secondary actions
   are `.btn`, tertiary/icon actions `.btn.ghost`.
 - **Destructive actions** are a two-step confirm on the button itself (arm → 3–4 s window
-  → confirm). Never `window.confirm`.
+  → confirm). Never `window.confirm`. The armed state is unmistakable: `.btn.armed`
+  (red fill) with a visible countdown where the wait is long enough to matter. In a
+  crowded header row, destructive/rare actions move into a `⋯` overflow menu (`.omenu`)
+  instead of sitting as bare icons next to safe actions.
+- **One state, one control:** mutually exclusive values (graph focus depth) render as a
+  segmented control (`.seg`), not a row of independent chips.
 - **Composer pattern:** input areas are one bordered card (`:focus-within` accent) that
-  contains its mode switches and its submit button — no floating control rows.
+  contains its mode switches and its submit button — no floating control rows. A mode
+  with side effects (Research: web access + vault writes) wears its own accent
+  (`--research`) plus a hint line while armed — it must not look like a harmless filter.
+- **Global status lives in the topbar:** the connection pill opens the service-status
+  popover (watcher, queue, budget, vault); the Ingestion tab carries an activity badge.
+  Tabs don't re-invent their own service-status corners.
+
+## Explanations & tooltips
+
+- Explanatory text goes through the `<Tip>` component (ⓘ icon; hover, focus AND tap) at
+  the section/tool title — never a native `title=` attribute (invisible on touch,
+  unreachable by keyboard) and never a permanent `.tab-hint` paragraph when a tooltip
+  will do. `title=` remains fine for pure redundancy (an icon button that also has a
+  visible label elsewhere, absolute timestamps behind relative ones).
+- Tool cards (Maintenance) share one anatomy: `.section-head` with title + `<Tip>`,
+  action button top-right, then a `.tool-meta` line carrying durable facts (last run,
+  last report, registry link) that survive tab switches and restarts.
 
 ## Feedback & state
 
