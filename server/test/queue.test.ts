@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
-import { IngestQueue, classifyFailure, guessType, type IngestRunner } from '../src/pipeline/queue.js'
+import { IngestQueue, classifyFailure, guessType, sanitizeOriginalName, type IngestRunner } from '../src/pipeline/queue.js'
 import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
 import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
@@ -110,11 +110,39 @@ describe('pure helpers', () => {
     expect(guessType('a.zip')).toBe('other')
     expect(guessType('a.md')).toBe('text')
   })
+  it('sanitizeOriginalName strips directories and traversal segments', () => {
+    expect(sanitizeOriginalName('report.pdf')).toBe('report.pdf')
+    expect(sanitizeOriginalName('../../etc/passwd')).toBe('passwd')
+    expect(sanitizeOriginalName('..\\..\\evil.txt')).toBe('evil.txt')
+    expect(sanitizeOriginalName('dir/sub/x.md')).toBe('x.md')
+    expect(sanitizeOriginalName('..')).toMatch(/^upload-/)
+    expect(sanitizeOriginalName('')).toMatch(/^upload-/)
+  })
   it('classifyFailure distinguishes rate-limit, transient and permanent', () => {
     expect(classifyFailure(failResult('rate limit exceeded (429)'))).toBe('rate_limit')
     expect(classifyFailure(failResult('fetch failed ECONNRESET'))).toBe('transient')
     expect(classifyFailure(okResult({ ok: false, timedOut: true }))).toBe('transient')
     expect(classifyFailure(failResult('run consumed zero tokens — auth failure'))).toBe('permanent')
+  })
+})
+
+describe('upload name traversal (security regression)', () => {
+  it('a ../-carrying upload name is staged inside .raw/<job-id>/, never outside the vault', async () => {
+    const q = makeQueue()
+    // Aim the escape at srcDir (also under tmp) so a regression writes somewhere we clean up.
+    const hostile = `../../../${path.basename(srcDir)}/owned.txt`
+    const escapeTarget = path.join(srcDir, 'owned.txt')
+
+    const { job } = await q.enqueueFile({
+      sourcePath: writeSource('benign.txt'),
+      source: 'drop',
+      originalName: hostile,
+    })
+
+    expect(fs.existsSync(escapeTarget)).toBe(false)
+    expect(job.original_name).toBe('owned.txt')
+    expect(job.status).toBe('queued')
+    expect(fs.existsSync(path.join(vaultRoot, '.raw', job.id, 'owned.txt'))).toBe(true)
   })
 })
 

@@ -171,6 +171,18 @@ export function guessType(name: string): JobType {
 
 const toPosix = (p: string): string => p.split(path.sep).join(path.posix.sep)
 
+/**
+ * Reduces a client-supplied filename to a bare basename. Upload names arrive verbatim from
+ * the multipart Content-Disposition header, and `original_name` is later joined onto
+ * `.raw/<job-id>/` for staging, preprocessing, and deferral — a `../`-carrying name would
+ * escape the vault from OUTSIDE the agent sandbox (hard rule 1). Backslashes are treated as
+ * separators too so a Windows-shaped `..\..\x` cannot smuggle segments past POSIX basename.
+ */
+export function sanitizeOriginalName(name: string): string {
+  const base = path.basename(name.replaceAll('\\', '/'))
+  return base === '' || base === '.' || base === '..' ? `upload-${ulid()}` : base
+}
+
 export class IngestQueue {
   private readonly store: JobStore
   private readonly vaultRoot: string
@@ -320,7 +332,7 @@ export class IngestQueue {
     readonly originalName?: string
     readonly batchId?: string
   }): Promise<CreateJobResult> {
-    const originalName = input.originalName ?? path.basename(input.sourcePath)
+    const originalName = sanitizeOriginalName(input.originalName ?? path.basename(input.sourcePath))
     const sha256 = await sha256File(input.sourcePath)
     const created = this.store.create({
       source: input.source,
@@ -351,8 +363,13 @@ export class IngestQueue {
   /** Copies an original into its `.raw/<job-id>/` dir where preprocessing expects it. */
   private stageFile(jobId: string, sourcePath: string, originalName: string): void {
     const jobDir = path.join(this.vaultRoot, '.raw', jobId)
+    // Callers sanitize; this assert is the backstop for any future caller that forgets.
+    const dest = path.resolve(jobDir, originalName)
+    if (path.dirname(dest) !== path.resolve(jobDir)) {
+      throw new Error(`refusing to stage "${originalName}": name must resolve to a direct child of the job dir`)
+    }
     fs.mkdirSync(jobDir, { recursive: true })
-    fs.copyFileSync(sourcePath, path.join(jobDir, originalName))
+    fs.copyFileSync(sourcePath, dest)
     this.store.setRawPath(jobId, path.posix.join('.raw', jobId))
   }
 
@@ -373,7 +390,7 @@ export class IngestQueue {
         jobs.push(this.store.create({ source, type: 'web', url: item.url, batchId }))
         continue
       }
-      const originalName = item.originalName ?? path.basename(item.sourcePath)
+      const originalName = sanitizeOriginalName(item.originalName ?? path.basename(item.sourcePath))
       // One unreadable member must not strand its siblings: without the pending-batch unit
       // (pushed only after this loop) queued batch members are never claimed, so a throw here
       // used to freeze the whole batch until a restart. Fail the member visibly and carry on.
@@ -414,12 +431,13 @@ export class IngestQueue {
     readonly sizeBytes: number
     readonly limitBytes: number
   }): JobRow {
+    const originalName = sanitizeOriginalName(input.originalName)
     const created = this.store.create({
       source: input.source,
-      type: guessType(input.originalName),
-      originalName: input.originalName,
+      type: guessType(originalName),
+      originalName,
     })
-    this.stageFile(created.job.id, input.sourcePath, input.originalName)
+    this.stageFile(created.job.id, input.sourcePath, originalName)
     return this.store.transition(created.job.id, 'failed', {
       patch: {
         error: `file is ${input.sizeBytes} bytes — over the ${input.limitBytes}-byte limit (maxUploadBytes); raise the limit in settings and retry`,
