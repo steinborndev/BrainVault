@@ -5,6 +5,10 @@
  * async/job-style (TASKS-M5 §0): the POST returns a run id at once, we poll its result via
  * `GET /maintenance/runs/:id`, and the live log streams over the `maintenance:<kind>` SSE
  * channel (rendered via JobLog with seeding off).
+ *
+ * Layout: two columns on desktop — the agent-run tools left, settings right — instead of one
+ * long single-column scroll. Every tool card shares the same anatomy: title + ⓘ tooltip,
+ * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
  */
 
 import { useState } from 'react'
@@ -21,9 +25,11 @@ import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
+import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
+import { pageRoute, navigate } from '../lib/router.ts'
 
 export function Maintenance(): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
@@ -36,105 +42,156 @@ export function Maintenance(): React.ReactElement {
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   // How much of the vault is still unfiled — the number that says whether a backfill is due.
   const undomained = graph.data?.nodes.filter((n) => n.domain === null).length ?? 0
+  const totalPages = stats.data?.pages.total ?? 0
+  const lastReport = stats.data?.lintReport ?? null
 
   return (
-    <div>
-      {/* Lint */}
-      <div className="card card-pad section">
-        <div className="section-head">
-          <h3 className="section-title">Lint — wiki health</h3>
-          <button className="btn primary" disabled={lint.running} onClick={lint.start}>
-            {lint.running ? 'Running…' : 'Start lint'}
-          </button>
-        </div>
-        <p className="tab-hint">
-          Finds orphans, dead links, stale claims and missing cross-links; writes a report into the vault.
-        </p>
-        {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
-        {lint.error && <div className="toast err">{lint.error}</div>}
-        {lint.result?.ok && lint.result.lint && (
-          <LintView report={lint.result.lint} reportPath={lint.result.reportPath} vaultName={vaultName} />
-        )}
-        {lint.result?.ok && !lint.result.lint && lint.result.answer && (
-          <div className="md-fallback">
-            <Markdown source={lint.result.answer} />
+    <div className="maint">
+      <div className="mcol">
+        {/* Lint */}
+        <div className="card card-pad">
+          <div className="section-head">
+            <h3 className="section-title">
+              Lint — wiki health
+              <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit)." />
+            </h3>
+            <button className="btn primary" disabled={lint.running} onClick={lint.start}>
+              {lint.running ? 'Running…' : 'Start lint'}
+            </button>
           </div>
-        )}
-      </div>
-
-      {/* Hot cache */}
-      <div className="card card-pad section">
-        <div className="section-head">
-          <h3 className="section-title">Hot cache</h3>
-          <button className="btn" disabled={hot.running} onClick={hot.start}>
-            {hot.running ? 'Running…' : 'Refresh'}
-          </button>
-        </div>
-        <p className="tab-hint">
-          Refreshes <code>wiki/hot.md</code> (faster context for future runs).
-          {' '}
-          {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) — the file's mtime. */}
-          {stats.data?.hotCacheUpdatedAt ? (
-            <>Last refresh: <strong title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('en-US')}>{timeAgo(stats.data.hotCacheUpdatedAt)}</strong>.</>
-          ) : (
-            <>Never refreshed.</>
+          <div className="tool-meta">
+            {lastReport ? (
+              <>
+                Last report{lastReport.date ? ` ${lastReport.date}` : ''}:{' '}
+                <a
+                  href={pageRoute(lastReport.path)}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    navigate(pageRoute(lastReport.path))
+                  }}
+                >
+                  open in vault viewer
+                </a>
+              </>
+            ) : (
+              <>No lint report in the vault yet.</>
+            )}
+          </div>
+          {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
+          {lint.error && <div className="toast err">{lint.error}</div>}
+          {lint.result?.ok && lint.result.lint && (
+            <LintView report={lint.result.lint} reportPath={lint.result.reportPath} vaultName={vaultName} />
           )}
-        </p>
-        {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
-        {hot.error && <div className="toast err">{hot.error}</div>}
-        {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
-      </div>
-
-      {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
-      <div className="card card-pad section">
-        <div className="section-head">
-          <h3 className="section-title">Domains</h3>
-          <button
-            className="btn"
-            disabled={backfill.running || !domains.data?.installed}
-            onClick={backfill.start}
-            title={domains.data?.installed ? 'File existing pages into domains' : 'No registry installed'}
-          >
-            {backfill.running ? 'Running…' : 'Start backfill'}
-          </button>
-        </div>
-        {domains.data?.installed === false ? (
-          <p className="tab-hint">
-            No domain registry in the vault. Create it with{' '}
-            <code>scripts/install-domain-registry.sh</code> — afterwards it's editable as{' '}
-            <PageLink path={domains.data.path} vaultName={vaultName} />.
-          </p>
-        ) : (
-          <>
-            <p className="tab-hint">
-              The meta-categories pages are filed under — maintained in{' '}
-              {domains.data && <PageLink path={domains.data.path} vaultName={vaultName} />}. Every ingest gets
-              this list as a closed set; when nothing fits, <code>unassigned</code> is used. The backfill files
-              existing pages without touching page content.
-              {undomained > 0 && (
-                <>
-                  {' '}Currently <strong>{undomained}</strong> page{undomained === 1 ? '' : 's'} without a domain.
-                </>
-              )}
-            </p>
-            <div className="filters">
-              {domains.data?.domains.map((d) => (
-                <span key={d.key} className="chip" title={d.description}>
-                  {d.key}
-                </span>
-              ))}
+          {lint.result?.ok && !lint.result.lint && lint.result.answer && (
+            <div className="md-fallback">
+              <Markdown source={lint.result.answer} />
             </div>
-          </>
-        )}
-        {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
-        {backfill.error && <div className="toast err">{backfill.error}</div>}
-        {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Filed" />}
-        {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
+          )}
+        </div>
+
+        {/* Hot cache */}
+        <div className="card card-pad">
+          <div className="section-head">
+            <h3 className="section-title">
+              Hot cache
+              <Tip
+                text={
+                  <>
+                    Refreshes <code>wiki/hot.md</code> — the compact context every agent run reads first. A
+                    fresh cache makes ingests faster and cheaper.
+                  </>
+                }
+              />
+            </h3>
+            <button className="btn" disabled={hot.running} onClick={hot.start}>
+              {hot.running ? 'Running…' : 'Refresh'}
+            </button>
+          </div>
+          <div className="tool-meta">
+            {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) — the file's mtime. */}
+            {stats.data?.hotCacheUpdatedAt ? (
+              <span title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('en-US')}>
+                Last refresh {timeAgo(stats.data.hotCacheUpdatedAt)}
+              </span>
+            ) : (
+              <span>Never refreshed.</span>
+            )}
+          </div>
+          {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
+          {hot.error && <div className="toast err">{hot.error}</div>}
+          {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
+        </div>
+
+        {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
+        <div className="card card-pad">
+          <div className="section-head">
+            <h3 className="section-title">
+              Domains
+              <Tip text="The meta-categories pages are filed under, maintained as a vault page. Every ingest gets this list as a closed set; when nothing fits, 'unassigned' is used. New domains are only ever created by you — never by an agent." />
+            </h3>
+            <button
+              className="btn"
+              disabled={backfill.running || !domains.data?.installed}
+              onClick={backfill.start}
+              title={domains.data?.installed ? 'File existing pages into domains (page content untouched)' : 'No registry installed'}
+            >
+              {backfill.running ? 'Running…' : 'Start backfill'}
+            </button>
+          </div>
+          {domains.data?.installed === false ? (
+            <p className="tab-hint">
+              No domain registry in the vault. Create it with{' '}
+              <code>scripts/install-domain-registry.sh</code> — afterwards it's editable as{' '}
+              <PageLink path={domains.data.path} vaultName={vaultName} />.
+            </p>
+          ) : (
+            <>
+              <div className="tool-meta">
+                Registry: {domains.data && <PageLink path={domains.data.path} vaultName={vaultName} />}
+              </div>
+              <div className="filters" style={{ marginTop: 10 }}>
+                {domains.data?.domains.map((d) => (
+                  <span key={d.key} className="chip" title={d.description}>
+                    {d.key}
+                  </span>
+                ))}
+              </div>
+              {/* The backfill-is-due number as a bar, not a sentence buried in prose. */}
+              {totalPages > 0 && (
+                <div className="progress">
+                  <span>
+                    {totalPages - undomained} / {totalPages} pages filed
+                  </span>
+                  <span className="track" aria-hidden>
+                    <span
+                      className="fill"
+                      style={{ width: `${Math.round(((totalPages - undomained) / totalPages) * 100)}%` }}
+                    />
+                  </span>
+                  <span>
+                    {undomained > 0 ? `${undomained} without domain` : 'all filed'}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+          {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
+          {backfill.error && <div className="toast err">{backfill.error}</div>}
+          {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Filed" />}
+          {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
+        </div>
       </div>
 
-      <div className="card card-pad section">
-        <h3 className="section-title">Settings</h3>
-        <SettingsEditor />
+      <div className="mcol">
+        <div className="card card-pad">
+          <div className="section-head">
+            <h3 className="section-title">
+              Settings
+              <Tip text="Values from the environment are the baseline; values set here override them persistently. Reset restores the environment value." />
+            </h3>
+          </div>
+          <SettingsEditor />
+        </div>
       </div>
     </div>
   )

@@ -225,3 +225,24 @@ export function hotCacheUpdatedAt(vaultRoot: string): string | null {
     return null
   }
 }
+
+/**
+ * The newest `wiki/meta/lint-report-YYYY-MM-DD.md` in the vault, or null when none exists.
+ * The Maintenance tab links it persistently — a lint result must survive tab switches and
+ * restarts, and the report FILE in the vault is the durable artifact (the in-memory run
+ * result is not). Date-named files sort lexicographically, so max(name) is the newest.
+ */
+export function latestLintReport(vaultRoot: string): { path: string; date: string | null } | null {
+  const metaDir = path.join(vaultRoot, 'wiki', 'meta')
+  let files: string[]
+  try {
+    files = fs.readdirSync(metaDir)
+  } catch {
+    return null
+  }
+  const reports = files.filter((f) => /^lint-report-\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort()
+  const newest = reports[reports.length - 1]
+  if (newest === undefined) return null
+  const date = /^lint-report-(\d{4}-\d{2}-\d{2})\.md$/.exec(newest)?.[1] ?? null
+  return { path: toPosix(path.join('wiki', 'meta', newest)), date }
+}

@@ -95,13 +95,9 @@ export function SettingsEditor(): React.ReactElement {
     </div>
   )
 
+  // The baseline/override explanation lives in the card title's ⓘ tooltip (Maintenance tab).
   return (
     <div>
-      <p className="tab-hint">
-        Values from the environment are the baseline; values set here override them persistently.
-        “Reset” restores the environment value.
-      </p>
-
       <div className="settings-grid">
         {row(
           'watchFolder',

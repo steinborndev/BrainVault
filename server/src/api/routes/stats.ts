@@ -17,6 +17,7 @@ import {
   growth,
   readHotCache,
   hotCacheUpdatedAt,
+  latestLintReport,
   type PageCounts,
   type RecentPage,
   type Commit,
@@ -34,6 +35,7 @@ interface VaultDerived {
   readonly growth: GrowthPoint[]
   readonly hotCache: string | null
   readonly hotCacheUpdatedAt: string | null
+  readonly lintReport: { path: string; date: string | null } | null
 }
 
 export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void {
@@ -62,6 +64,7 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       growth: growthPoints,
       hotCache: readHotCache(config.vaultRoot),
       hotCacheUpdatedAt: hotCacheUpdatedAt(config.vaultRoot),
+      lintReport: latestLintReport(config.vaultRoot),
     }
     cache = { at: now, data }
     return data
@@ -99,6 +102,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       growth: derived.growth,
       hotCache: derived.hotCache,
       hotCacheUpdatedAt: derived.hotCacheUpdatedAt,
+      /** Newest lint report page in the vault — the Maintenance tab's persistent link. */
+      lintReport: derived.lintReport,
       kpis7d: {
         ingests: finishedSince['done'] ?? 0,
         failures: finishedSince['failed'] ?? 0,
