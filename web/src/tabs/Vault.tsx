@@ -376,6 +376,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         focusIndex={focusIndex}
         matches={matches}
         colorBy={hasDomains ? colorBy : 'type'}
+        // Every filter/depth change re-frames the graph; SSE live updates don't touch this key.
+        fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}`}
         onSelect={(n) => navigate(pageRoute(n.path))}
         overlay={searchOverlay}
       />

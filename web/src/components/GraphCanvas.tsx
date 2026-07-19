@@ -31,6 +31,12 @@ export interface GraphCanvasProps {
   matches: ReadonlySet<number>
   /** Node coloring axis: wiki bucket (`type`, default) or frontmatter meta-category (`domain`). */
   colorBy?: 'type' | 'domain'
+  /**
+   * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
+   * depth) — each change re-fits the view so the filtered graph fills the canvas again.
+   * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
+   */
+  fitKey?: string
   onSelect: (node: GraphNode) => void
   /** Extra UI rendered inside the canvas wrap (e.g. the search box, top-right). */
   overlay?: React.ReactNode
@@ -104,7 +110,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', onSelect, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', fitKey, onSelect, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -477,6 +483,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     persist.settled.current = false
     postLayout()
   }, [nodes, edges, scheduleDraw, postLayout])
+
+  // A changed fitKey = the user changed the visible subgraph (filter/depth toggle) — re-fit
+  // so the remaining graph fills the canvas. Runs AFTER the layout effect above, so
+  // `persist.settled` already reflects whether that change posted a re-layout: fit now on
+  // the seeded positions (survivors keep their place), and when a re-layout is cooling,
+  // fit once more when it settles. First mount keeps the first-layout fit path.
+  const prevFitKeyRef = useRef(fitKey)
+  useEffect(() => {
+    if (prevFitKeyRef.current === fitKey) return
+    prevFitKeyRef.current = fitKey
+    userMovedRef.current = false // an explicit view change wins over an old pan/zoom
+    if (!persist.settled.current) fitPendingRef.current = true
+    fitToView()
+  }, [fitKey, fitToView])
 
   // Canvas sizing (device-pixel aware) + redraw on resize and theme change.
   useEffect(() => {
