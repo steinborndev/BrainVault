@@ -1563,6 +1563,9 @@ details.hot-cache[open] .hc-summary::before {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  /* Settings rows adapt to the COLUMN's width (≈5/12 of the lane), not the viewport —
+     a media query can't see that, a container query can. */
+  container-type: inline-size;
 }
 /* The uniform tool-card meta line: last run / last report / registry link. */
 .tool-meta {
@@ -1688,11 +1691,16 @@ details.hot-cache[open] .hc-summary::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
+  /* Never let a fixed-width input push past the card edge — wrap below the label instead. */
+  flex-wrap: wrap;
 }
 .setting:last-child { border-bottom: none; }
+.setting > div:first-child {
+  min-width: 0;
+}
 .setting-label {
   display: flex;
   align-items: center;
@@ -1710,7 +1718,9 @@ details.hot-cache[open] .hc-summary::before {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin-left: auto;
 }
 .setting-control input[type="text"],
 .setting-control input[type="number"] {
@@ -1721,7 +1731,7 @@ details.hot-cache[open] .hc-summary::before {
   padding: 8px 12px;
   font-size: 14px;
 }
-.setting-control input[type="text"] { width: 260px; }
+.setting-control input[type="text"] { width: 260px; max-width: 100%; }
 .setting-control input[type="number"] { width: 92px; }
 .setting-control input:focus {
   outline: none;
@@ -1787,6 +1797,28 @@ details.hot-cache[open] .hc-summary::before {
   }
   .setting-control input[type="text"] { width: 100%; }
   .settings-ro-row { flex-direction: column; gap: 2px; }
+}
+
+/* Narrow settings COLUMN (Maintenance right column on desktop): stack label over control,
+   full-width text inputs — same treatment the small-viewport media query applies. */
+@container (max-width: 480px) {
+  .setting {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .setting-control {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+  .setting-control input[type="text"] { width: 100%; flex: 1; }
+}
+
+/* Long read-only values (paths, env names) wrap instead of pushing past the card. */
+.settings-ro-row code {
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 /* ---- Cost estimate marking + budget (SPEC.md §7.1, §11.3) ---- */
