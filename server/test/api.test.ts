@@ -211,6 +211,104 @@ describe('setup mode (no credential)', () => {
   })
 })
 
+describe('POST /api/v1/settings/credential', () => {
+  let credFile: string
+  let restarts: number
+  let credApp: FastifyInstance
+
+  const buildCredApp = async (auth: Config['auth']): Promise<FastifyInstance> =>
+    buildServer({
+      config: { ...makeConfig(), auth },
+      store,
+      chat,
+      queue,
+      events,
+      maintenance,
+      settings: new SettingsStore(db),
+      runQuery: (input) => queryImpl(input),
+      autoCommit: () => false,
+      logger: false,
+      credentialFile: credFile,
+      scheduleRestart: () => {
+        restarts++
+      },
+    })
+
+  beforeEach(async () => {
+    credFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cred-')), 'env')
+    restarts = 0
+    credApp = await buildCredApp(null)
+  })
+  afterEach(async () => {
+    await credApp.close()
+    fs.rmSync(path.dirname(credFile), { recursive: true, force: true })
+  })
+
+  const post = (payload: object) =>
+    credApp.inject({
+      method: 'POST',
+      url: '/api/v1/settings/credential',
+      headers: { 'content-type': 'application/json' },
+      payload,
+    })
+
+  it('writes the oauth token into the env file (0600), preserving other keys, dropping the rival var', async () => {
+    fs.writeFileSync(credFile, 'PORT=9999\nANTHROPIC_API_KEY=old-key-to-drop\n')
+    const token = `sk-ant-oat01-${'a'.repeat(24)}`
+    const res = await post({ kind: 'oauth', value: token })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ok: true, envVar: 'CLAUDE_CODE_OAUTH_TOKEN', restart: 'manual' })
+    expect(res.body).not.toContain(token)
+
+    const written = fs.readFileSync(credFile, 'utf8')
+    expect(written).toContain(`CLAUDE_CODE_OAUTH_TOKEN=${token}`)
+    expect(written).toContain('PORT=9999')
+    expect(written).not.toContain('ANTHROPIC_API_KEY')
+    expect(fs.statSync(credFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('rejects a kind/prefix mismatch with guidance, without echoing the value', async () => {
+    const apiKey = `sk-ant-api03-${'b'.repeat(24)}`
+    const res = await post({ kind: 'oauth', value: apiKey })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toMatch(/API key/)
+    expect(res.body).not.toContain(apiKey)
+    expect(fs.existsSync(credFile)).toBe(false)
+
+    const swapped = await post({ kind: 'api-key', value: `sk-ant-oat01-${'c'.repeat(24)}` })
+    expect(swapped.statusCode).toBe(400)
+    expect(swapped.json().error).toMatch(/subscription token/)
+  })
+
+  it('rejects junk values (whitespace, too short)', async () => {
+    expect((await post({ kind: 'oauth', value: 'short' })).statusCode).toBe(400)
+    expect((await post({ kind: 'oauth', value: `sk-ant-oat01 ${'d'.repeat(24)}` })).statusCode).toBe(400)
+  })
+
+  it('409s when the credential comes from the process environment', async () => {
+    process.env['ANTHROPIC_API_KEY'] = 'from-shell'
+    try {
+      const res = await post({ kind: 'oauth', value: `sk-ant-oat01-${'e'.repeat(24)}` })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/process environment/)
+    } finally {
+      delete process.env['ANTHROPIC_API_KEY']
+    }
+  })
+
+  it('schedules the restart under systemd and reports restart:auto', async () => {
+    process.env['INVOCATION_ID'] = 'test-invocation'
+    try {
+      const res = await post({ kind: 'api-key', value: `sk-ant-api03-${'f'.repeat(24)}` })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ restart: 'auto' })
+      expect(restarts).toBe(1)
+    } finally {
+      delete process.env['INVOCATION_ID']
+    }
+  })
+})
+
 describe('cross-origin guard', () => {
   it('rejects a state-changing request with a foreign Origin (drive-by CSRF)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/jobs`, {

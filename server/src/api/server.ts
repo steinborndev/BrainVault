@@ -62,6 +62,10 @@ export interface AppContext {
   readonly domainDismissals?: DismissalStore
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
+  /** Env-file path the credential endpoint writes. Defaults to DEFAULT_ENV_FILE; tests inject. */
+  readonly credentialFile?: string
+  /** Restart trigger after a credential write under systemd. Injectable so tests observe it. */
+  readonly scheduleRestart?: () => void
 }
 
 /** Location of the built frontend (`web/dist`), resolved relative to this source file. */
