@@ -2,6 +2,12 @@
   "name": "vault-service",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "Benjamin Steinborn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/steinborndev/BrainVault.git"
+  },
   "type": "module",
   "description": "Local ingestion service + dashboard on top of a claude-obsidian vault",
   "engines": {

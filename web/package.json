@@ -2,6 +2,8 @@
   "name": "@vault-service/web",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "description": "React dashboard: overview, ingestion, chat, vault viewer, maintenance",
   "type": "module",
   "scripts": {
     "dev": "vite",
