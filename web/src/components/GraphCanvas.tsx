@@ -73,15 +73,42 @@ interface WorkerFrame {
   positions: Float32Array
 }
 
+interface LayoutMsg {
+  paths: string[]
+  degrees: Array<{ degree: number }>
+  edges: Array<[number, number]>
+  seed: Float32Array
+  alpha: number
+}
+
+/**
+ * Camera + layout memory that OUTLIVES the component: the canvas unmounts on every
+ * graph ↔ page-view switch, and refs die with it — which used to reset the user's zoom
+ * and re-run the whole force layout each time. Module scope is safe because the app has
+ * exactly one graph view.
+ */
+const persist = {
+  /** Positions aligned with the CURRENT `nodes` prop, [x0, y0, x1, y1, …]; NaN = unplaced. */
+  positions: { current: new Float32Array(0) as Float32Array },
+  /** The persistent position memory, keyed by page path — index-stable across updates. */
+  posByPath: { current: new Map<string, { x: number; y: number }>() },
+  transform: { current: { x: 0, y: 0, k: 1 } as Transform },
+  /** Set once the user pans/zooms, so an automatic re-fit never yanks the view away. */
+  userMoved: { current: false },
+  fitted: { current: false },
+  /** The last posted layout, re-postable (remounts and StrictMode re-create the worker). */
+  lastMsg: { current: null as LayoutMsg | null },
+  /** True once the posted layout finished cooling — a remount then skips the replay. */
+  settled: { current: true },
+}
+
 export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', onSelect }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  /** Positions aligned with the CURRENT `nodes` prop, [x0, y0, x1, y1, …]; NaN = unplaced. */
-  const positionsRef = useRef<Float32Array>(new Float32Array(0))
-  /** The persistent position memory, keyed by page path — index-stable across updates. */
-  const posByPathRef = useRef<Map<string, { x: number; y: number }>>(new Map())
+  const positionsRef = persist.positions
+  const posByPathRef = persist.posByPath
   /** Paths recently added to the view → timestamp, for the arrival flash. */
   const flashRef = useRef<Map<string, number>>(new Map())
-  const transformRef = useRef<Transform>({ x: 0, y: 0, k: 1 })
+  const transformRef = persist.transform
   const [hover, setHover] = useState<number | null>(null)
   const hoverRef = useRef<number | null>(null)
   hoverRef.current = hover
@@ -241,9 +268,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
   scheduleDrawRef.current = scheduleDraw
-  const fittedRef = useRef(false)
-  /** Set once the user pans/zooms, so an automatic re-fit never yanks the view away. */
-  const userMovedRef = useRef(false)
+  const fittedRef = persist.fitted
+  const userMovedRef = persist.userMoved
 
   /** Centers and scales the transform so the whole layout fits with a small margin. */
   const fitToView = useCallback((): void => {
@@ -253,9 +279,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     const dpr = window.devicePixelRatio || 1
     const w = canvas.width / dpr
     const h = canvas.height / dpr
-    // Robust bounds: a handful of disconnected pages drift far from the core, and fitting
-    // to absolute min/max would shrink the cluster everyone actually looks at to a speck.
-    // The 5th–95th percentile frames the body of the graph; stragglers stay reachable by panning.
+    // Fit the FULL extent by default — cropping to an inner percentile leaves real nodes
+    // outside the initial frame ("the graph doesn't fit"). Only when a few stragglers blow
+    // the extent far beyond the body of the graph (full span > 3× the 5–95 core) does the
+    // fit fall back to the core; those outliers stay reachable by panning.
     const xs: number[] = []
     const ys: number[] = []
     for (let i = 0; i < pos.length; i += 2) {
@@ -266,12 +293,16 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     if (xs.length === 0) return
     xs.sort((a, b) => a - b)
     ys.sort((a, b) => a - b)
-    const lo = (arr: number[]): number => arr[Math.floor(arr.length * 0.05)]!
-    const hi = (arr: number[]): number => arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95))]!
-    const minX = lo(xs)
-    const maxX = hi(xs)
-    const minY = lo(ys)
-    const maxY = hi(ys)
+    const bounds = (arr: number[]): [number, number] => {
+      const full: [number, number] = [arr[0]!, arr[arr.length - 1]!]
+      const core: [number, number] = [
+        arr[Math.floor(arr.length * 0.05)]!,
+        arr[Math.min(arr.length - 1, Math.ceil(arr.length * 0.95))]!,
+      ]
+      return full[1] - full[0] > Math.max(1, core[1] - core[0]) * 3 ? core : full
+    }
+    const [minX, maxX] = bounds(xs)
+    const [minY, maxY] = bounds(ys)
     const spanX = Math.max(1, maxX - minX)
     const spanY = Math.max(1, maxY - minY)
     const pad = 110 // room for the labels that sit around the rim
@@ -292,15 +323,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
 
   const workerRef = useRef<Worker | null>(null)
   /** The generation counter and the path list the in-flight layout was posted with. */
-  const layoutRef = useRef<{ gen: number; paths: string[] }>({ gen: 0, paths: [] })
-  /** The last posted layout, kept re-postable (StrictMode re-creates the worker in dev). */
-  const lastMsgRef = useRef<{
-    paths: string[]
-    degrees: Array<{ degree: number }>
-    edges: Array<[number, number]>
-    seed: Float32Array
-    alpha: number
-  } | null>(null)
+  const layoutRef = useRef<{ gen: number; paths: string[] }>({
+    gen: 0,
+    // A remount picks up the persisted layout's paths so replayed worker frames land
+    // in the right posByPath slots.
+    paths: persist.lastMsg.current?.paths ?? [],
+  })
+  const lastMsgRef = persist.lastMsg
   const fitPendingRef = useRef(false)
 
   const postLayout = useCallback((): void => {
@@ -328,6 +357,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         byPath.set(paths[i]!, { x: positions[i * 2]!, y: positions[i * 2 + 1]! })
       }
       if (type === 'done') {
+        persist.settled.current = true
         setLayouting(false)
         // Frame the FIRST finished layout once, so a graph of any size lands filling the
         // viewport instead of as a speck. Later layouts (live updates, filter toggles)
@@ -340,8 +370,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       }
       scheduleDrawRef.current?.()
     }
-    // A recreated worker (dev StrictMode double-mount) starts empty — replay the layout.
-    postLayout()
+    // A recreated worker (remount, dev StrictMode double-mount) starts empty. Replay only
+    // when the last layout was still cooling — a settled layout's positions are already
+    // persisted, and re-posting would make the graph jiggle on every return to this view.
+    if (!persist.settled.current) postLayout()
     return () => {
       worker.terminate()
       workerRef.current = null
@@ -440,6 +472,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       seed,
       alpha: cold ? 1 : 0.3,
     }
+    persist.settled.current = false
     postLayout()
   }, [nodes, edges, scheduleDraw, postLayout])
 
@@ -449,6 +482,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     if (!canvas) return
     const parent = canvas.parentElement!
     const resize = (): void => {
+      // Hidden (a display:none tab panel) → 0×0; sizing the canvas to that would wipe it.
+      // Skip; the observer fires again with the real size when the panel re-shows.
+      if (parent.clientWidth === 0 || parent.clientHeight === 0) return
       const dpr = window.devicePixelRatio || 1
       canvas.width = parent.clientWidth * dpr
       canvas.height = parent.clientHeight * dpr
@@ -545,7 +581,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       if (hit !== null) onSelect(nodes[hit]!)
     }
   }
-  const onWheel = (e: React.WheelEvent): void => {
+  // Wheel zoom is a NATIVE non-passive listener: React's synthetic wheel event can't
+  // preventDefault (browsers register it passive), so the page would scroll along with
+  // every zoom. And because zooming moves the world under a stationary pointer, the hover
+  // must be re-hit-tested — otherwise a node grazed on the way out stays "hovered" and its
+  // neighborhood highlight keeps the rest of the graph dimmed.
+  const onWheelRef = useRef<(e: WheelEvent) => void>(() => {})
+  onWheelRef.current = (e: WheelEvent): void => {
+    e.preventDefault()
     const t = transformRef.current
     const factor = Math.exp(-e.deltaY * 0.0015)
     const next = Math.min(8, Math.max(0.15, t.k * factor))
@@ -558,8 +601,18 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     t.y = cy - ((cy - t.y) / t.k) * next
     t.k = next
     userMovedRef.current = true
+    const hit = hitTest(e.clientX, e.clientY)
+    if (hit !== hoverRef.current) setHover(hit)
     scheduleDraw()
   }
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const handler = (e: WheelEvent): void => onWheelRef.current(e)
+    canvas.addEventListener('wheel', handler, { passive: false })
+    return () => canvas.removeEventListener('wheel', handler)
+  }, [])
 
   return (
     <div className="graph-canvas-wrap">
@@ -575,7 +628,6 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
             scheduleDraw()
           }
         }}
-        onWheel={onWheel}
         role="img"
         aria-label={`Wikilink-Graph mit ${nodes.length} Seiten`}
         style={{ cursor: hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}

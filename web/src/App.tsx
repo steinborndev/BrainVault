@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useEvents } from './hooks/useEvents.ts'
 import { Overview } from './tabs/Overview.tsx'
 import { Ingestion } from './tabs/Ingestion.tsx'
@@ -37,6 +37,15 @@ export function App(): React.ReactElement {
   // One SSE connection for the whole app; drives live invalidation + the connection dot.
   const { connected } = useEvents()
 
+  // Tabs stay MOUNTED and are hidden via [hidden] — unmounting threw away the graph
+  // camera, the active chat session, filters and scroll positions on every switch.
+  // The vault tab keeps its last inner route while other tabs own the URL; null until
+  // first visited, so the lazy chunk still loads on demand.
+  const [vaultPath, setVaultPath] = useState<string | null>(() => (tab === 'vault' ? path : null))
+  useEffect(() => {
+    if (tab === 'vault') setVaultPath(path)
+  }, [tab, path])
+
   return (
     <div className="app">
       <header className="topbar">
@@ -63,15 +72,25 @@ export function App(): React.ReactElement {
       </header>
 
       <main className="content">
-        {tab === 'overview' && <Overview onGoto={() => navigate('/ingestion')} />}
-        {tab === 'ingestion' && <Ingestion />}
-        {tab === 'chat' && <Chat />}
-        {tab === 'vault' && (
-          <Suspense fallback={<div className="empty">Lade Vault-Ansicht…</div>}>
-            <Vault path={path} />
-          </Suspense>
-        )}
-        {tab === 'maintenance' && <Maintenance />}
+        <section className="tab-panel" hidden={tab !== 'overview'}>
+          <Overview onGoto={() => navigate('/ingestion')} />
+        </section>
+        <section className="tab-panel" hidden={tab !== 'ingestion'}>
+          <Ingestion />
+        </section>
+        <section className="tab-panel" hidden={tab !== 'chat'}>
+          <Chat />
+        </section>
+        <section className="tab-panel" hidden={tab !== 'vault'}>
+          {vaultPath !== null && (
+            <Suspense fallback={<div className="empty">Lade Vault-Ansicht…</div>}>
+              <Vault path={vaultPath} />
+            </Suspense>
+          )}
+        </section>
+        <section className="tab-panel" hidden={tab !== 'maintenance'}>
+          <Maintenance />
+        </section>
       </main>
 
       <nav className="bottomnav">

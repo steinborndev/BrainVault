@@ -1302,8 +1302,9 @@ button {
   }
 }
 
-/* The graph wants the whole width — the 1080px reading column is for text tabs. */
-.content:has(.vault-graph) {
+/* The graph wants the whole width — the 1080px reading column is for text tabs.
+   Tabs stay mounted (hidden via [hidden]), so only a VISIBLE graph may widen the column. */
+.content:has(.tab-panel:not([hidden]) .vault-graph) {
   max-width: 1600px;
 }
 
