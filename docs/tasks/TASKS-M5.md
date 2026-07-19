@@ -9,7 +9,7 @@ This is the last milestone. It also absorbs the carried-over items from M3/M4 (b
 
 ## Where M5 starts — full system state (M0–M4 are DONE, on `main`)
 
-A fresh session can rely on all of this being built, tested (195 vitest tests green), and merged to `main` (pushed to github.com/steinborndev/BrainVault, private).
+A fresh session can rely on all of this being built, tested (195 vitest tests green), and merged to `main` (pushed to github.com/steinborndev/BrainVault).
 
 **Run it:** `. ~/.nvm/nvm.sh` first (node 20 via nvm). Build the SPA once: `npm run build:web` (root) → `web/dist`. Start: `VAULT_ROOT=~/vault npm start` (from `server/`) or `npm run start` (root) → serves API + SPA on one origin `http://127.0.0.1:8420`. Dev with HMR: `npm run dev:web` + `VAULT_ROOT=~/vault npm run dev:server`. Credentials load automatically from `~/.config/vault-service/env` (`CLAUDE_CODE_OAUTH_TOKEN`); `VAULT_ROOT` is NOT in that file — pass it.
 

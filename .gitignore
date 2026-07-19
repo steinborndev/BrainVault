@@ -30,3 +30,10 @@ data/
 /*.jpg
 /*.jpeg
 /*.JPG
+
+# Build/tool caches and local editor/agent config
+*.tsbuildinfo
+.vite/
+.vscode/
+.idea/
+.claude/settings.local.json
