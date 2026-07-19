@@ -15,7 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
 import type { GraphNode, VaultGraph } from '../api/types.ts'
-import { GraphCanvas } from '../components/GraphCanvas.tsx'
+import { GraphCanvas, domainColor } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
@@ -121,9 +121,14 @@ export function Vault({ path }: { path: string }): React.ReactElement {
 
 // ---------------------------------------------------------------------------- graph view
 
+/** Key under which "page has no domain" appears in the domain filter (SPEC §12.4 Stufe 1). */
+const NO_DOMAIN = ''
+
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   const [query, setQuery] = useState('')
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
+  const [hiddenDomains, setHiddenDomains] = useState<ReadonlySet<string>>(new Set())
+  const [colorBy, setColorBy] = useState<'type' | 'domain'>('type')
   const [localDepth, setLocalDepth] = useState<1 | 2 | 0>(focusPath ? 2 : 0) // 0 = whole graph
 
   const focusIndexFull = useMemo(
@@ -137,11 +142,24 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
   }, [graph])
 
-  // Displayed subgraph: type filter first, then (optionally) the BFS neighborhood of the
-  // focused page. Indices are remapped so the canvas gets a dense, self-contained graph —
-  // that is also what keeps the force layout small in local mode on a huge vault.
+  // Meta-categories from frontmatter `domain:`. Pages without one gather under NO_DOMAIN —
+  // deliberately a visible bucket, not a blind spot: it shows how much of the vault is still
+  // uncategorized (the evidence base for the domain-registry backfill, SPEC §12.4).
+  const domains = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of graph.nodes) {
+      const d = n.domain ?? NO_DOMAIN
+      counts.set(d, (counts.get(d) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => (a[0] === NO_DOMAIN ? 1 : b[0] === NO_DOMAIN ? -1 : b[1] - a[1]))
+  }, [graph])
+  const hasDomains = domains.some(([d]) => d !== NO_DOMAIN)
+
+  // Displayed subgraph: type + domain filters first, then (optionally) the BFS neighborhood
+  // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
+  // graph — that is also what keeps the force layout small in local mode on a huge vault.
   const { nodes, edges, focusIndex } = useMemo(() => {
-    let keep: boolean[] = graph.nodes.map((n) => !hiddenTypes.has(n.type))
+    let keep: boolean[] = graph.nodes.map((n) => !hiddenTypes.has(n.type) && !hiddenDomains.has(n.domain ?? NO_DOMAIN))
 
     if (localDepth > 0 && focusIndexFull >= 0) {
       const adj = new Map<number, number[]>()
@@ -166,7 +184,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         frontier = next
       }
       keep = keep.map((k, i) => k && within.has(i))
-      keep[focusIndexFull] = true // the focus survives its own type filter
+      keep[focusIndexFull] = true // the focus survives its own type/domain filter
     }
 
     const remap = new Map<number, number>()
@@ -184,12 +202,16 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       if (ra !== undefined && rb !== undefined) edges.push([ra, rb])
     }
     return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null }
-  }, [graph, hiddenTypes, localDepth, focusIndexFull])
+  }, [graph, hiddenTypes, hiddenDomains, localDepth, focusIndexFull])
 
+  // Search matches titles AND frontmatter tags — "finance" finds every page tagged
+  // german-finance even though no title contains the word.
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (q === '') return new Set<number>()
-    return new Set(nodes.map((n, i) => (n.title.toLowerCase().includes(q) ? i : -1)).filter((i) => i >= 0))
+    const hit = (n: GraphNode): boolean =>
+      n.title.toLowerCase().includes(q) || n.tags.some((t) => t.toLowerCase().includes(q))
+    return new Set(nodes.map((n, i) => (hit(n) ? i : -1)).filter((i) => i >= 0))
   }, [nodes, query])
 
   const toggleType = (t: string): void => {
@@ -197,6 +219,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     if (next.has(t)) next.delete(t)
     else next.add(t)
     setHiddenTypes(next)
+  }
+
+  const toggleDomain = (d: string): void => {
+    const next = new Set(hiddenDomains)
+    if (next.has(d)) next.delete(d)
+    else next.add(d)
+    setHiddenDomains(next)
   }
 
   const focusNode = focusIndexFull >= 0 ? graph.nodes[focusIndexFull] : undefined
@@ -209,7 +238,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           <Icon name="search" />
           <input
             type="search"
-            placeholder="Seite suchen…"
+            placeholder="Seite oder Tag suchen…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -219,7 +248,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                 if (only) navigate(pageRoute(only.path))
               }
             }}
-            aria-label="Seite im Graph suchen"
+            aria-label="Seite oder Tag im Graph suchen"
           />
           {query && <span className="graph-matches">{matches.size} Treffer</span>}
         </div>
@@ -235,6 +264,32 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             </button>
           ))}
         </div>
+        {hasDomains && (
+          <div className="filters">
+            <button
+              className={`chip${colorBy === 'domain' ? ' active' : ''}`}
+              onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
+              title="Knoten nach Domäne statt Seitentyp färben"
+            >
+              <Icon name="palette" /> nach Domäne färben
+            </button>
+            {domains.map(([d, count]) => (
+              <button
+                key={d || '∅'}
+                className={`chip${hiddenDomains.has(d) ? '' : ' active'}`}
+                onClick={() => toggleDomain(d)}
+                title={hiddenDomains.has(d) ? 'Einblenden' : 'Ausblenden'}
+              >
+                <span
+                  className="chip-dot"
+                  style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
+                  aria-hidden
+                />
+                {d === NO_DOMAIN ? 'ohne Domäne' : d} ({count})
+              </button>
+            ))}
+          </div>
+        )}
         {focusNode && (
           <div className="graph-focus">
             <span>
@@ -260,6 +315,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         edges={edges}
         focusIndex={focusIndex}
         matches={matches}
+        colorBy={colorBy}
         onSelect={(n) => navigate(pageRoute(n.path))}
       />
 

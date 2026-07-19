@@ -134,7 +134,9 @@ Five tabs, all live over SSE:
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("In Vault sichern").
 - **Vault** — the viewer that makes the Obsidian app optional for everyday use: an
-  interactive graph of the wikilink structure (search, per-bucket filters, and a local-
+  interactive graph of the wikilink structure (search over titles **and** frontmatter tags,
+  per-bucket **and per-domain** filters — nodes can be colored by wiki type or by their
+  frontmatter `domain:` meta-category — and a local-
   neighborhood mode around a focused page) and a page view with rendered markdown, clickable
   `[[wikilinks]]`, a frontmatter properties panel, and backlink/outgoing panels. Pages can be
   **edited and deleted right here** — every mutation is one git commit (`edit:`/`delete:`),

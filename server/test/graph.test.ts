@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { GraphBuilder } from '../src/pipeline/graph.js'
+import { GraphBuilder, parseFrontmatterMeta } from '../src/pipeline/graph.js'
 
 let vaultRoot: string
 
@@ -45,6 +45,40 @@ describe('GraphBuilder', () => {
     expect(edgeSet).toContain('Beta->Alpha') // heading stripped
     expect(g.nodes[byTitle.get('Alpha')!]!.in).toBe(2) // Beta + index
     expect(g.nodes[byTitle.get('Alpha')!]!.out).toBe(2)
+  })
+
+  it('carries frontmatter tags + domain on nodes and re-reads them on change', () => {
+    page(
+      'wiki/concepts/Fund.md',
+      '---\ntitle: "Fund"\ntags:\n  - german-finance\n  - "investment-funds"\n  - german-finance\ndomain: investment-funds\n---\n\n[[Bare]]',
+    )
+    page('wiki/concepts/Bare.md', 'no frontmatter at all')
+
+    const builder = new GraphBuilder(vaultRoot)
+    let g = builder.build()
+    const fund = g.nodes.find((n) => n.title === 'Fund')!
+    const bare = g.nodes.find((n) => n.title === 'Bare')!
+    expect(fund.tags).toEqual(['german-finance', 'investment-funds']) // deduped, unquoted
+    expect(fund.domain).toBe('investment-funds')
+    expect(bare.tags).toEqual([])
+    expect(bare.domain).toBeNull()
+
+    // A changed file must be re-parsed (per-file cache keys on mtime+size).
+    const abs = path.join(vaultRoot, 'wiki/concepts/Fund.md')
+    fs.writeFileSync(abs, '---\ntags: [cooking, recipe]\ndomain: "cooking"\n---\n\n[[Bare]]')
+    fs.utimesSync(abs, new Date(), new Date(Date.now() + 5000))
+    g = builder.build()
+    const changed = g.nodes.find((n) => n.title === 'Fund')!
+    expect(changed.tags).toEqual(['cooking', 'recipe']) // inline list form
+    expect(changed.domain).toBe('cooking')
+  })
+
+  it('parseFrontmatterMeta handles absence and malformed frontmatter', () => {
+    expect(parseFrontmatterMeta('no frontmatter')).toEqual({ tags: [], domain: null })
+    expect(parseFrontmatterMeta('---\ntags:\n---\nbody')).toEqual({ tags: [], domain: null })
+    expect(parseFrontmatterMeta('---\ndomain:\n---\nbody')).toEqual({ tags: [], domain: null })
+    // tags mentioned mid-body must not count — only the leading frontmatter block parses.
+    expect(parseFrontmatterMeta('body first\n---\ntags:\n  - nope\n---')).toEqual({ tags: [], domain: null })
   })
 
   it('resolves case-insensitively and counts dangling links as unresolved', () => {

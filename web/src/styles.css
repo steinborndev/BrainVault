@@ -617,6 +617,14 @@ button {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* Domain legend dot inside a filter chip — wears the same color as the domain's nodes. */
+.chip-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
 
 /* ---- Markdown ---- */
 /* The height cap belongs to the EMBEDDED uses (hot-cache panel, citation preview), where the

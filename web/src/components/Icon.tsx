@@ -17,6 +17,7 @@ export type IconName =
   | 'back'
   | 'upload'
   | 'edit'
+  | 'palette'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   grid: (
@@ -88,6 +89,14 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     <>
       <path d="M4 20l4-1L20 7l-3-3L5 16z" />
       <path d="M14 6l3 3" />
+    </>
+  ),
+  palette: (
+    <>
+      <path d="M12 3a9 9 0 1 0 0 18h1.2a2.1 2.1 0 0 0 1.5-3.6 2.1 2.1 0 0 1 1.5-3.6H19a3 3 0 0 0 3-3.2C21.7 6.3 17.3 3 12 3z" />
+      <circle cx="7.5" cy="11.5" r="1" />
+      <circle cx="10.5" cy="7.5" r="1" />
+      <circle cx="15" cy="7.5" r="1" />
     </>
   ),
 }

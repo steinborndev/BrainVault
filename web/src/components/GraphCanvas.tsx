@@ -29,6 +29,8 @@ export interface GraphCanvasProps {
   focusIndex: number | null
   /** Indices matching the current search, highlighted. */
   matches: ReadonlySet<number>
+  /** Node coloring axis: wiki bucket (`type`, default) or frontmatter meta-category (`domain`). */
+  colorBy?: 'type' | 'domain'
   onSelect: (node: GraphNode) => void
 }
 
@@ -40,6 +42,18 @@ const TYPE_VARS: Record<string, string> = {
   meta: '--muted',
   root: '--busy',
   questions: '--err',
+}
+
+/**
+ * Deterministic color for a domain: string hash → hue, fixed saturation/lightness that read
+ * on both themes. Domains are open-ended (the user coins new ones), so a fixed palette can't
+ * work — and hashing keeps a domain's color stable across sessions with zero bookkeeping.
+ * Exported so the filter chips can wear the same color as their nodes (the legend).
+ */
+export function domainColor(domain: string): string {
+  let h = 0
+  for (let i = 0; i < domain.length; i++) h = (h * 31 + domain.charCodeAt(i)) >>> 0
+  return `hsl(${h % 360} 62% 52%)`
 }
 
 /** A layout with at least this share of never-placed nodes restarts cold instead of reheating. */
@@ -59,7 +73,7 @@ interface WorkerFrame {
   positions: Float32Array
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', onSelect }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   /** Positions aligned with the CURRENT `nodes` prop, [x0, y0, x1, y1, …]; NaN = unplaced. */
   const positionsRef = useRef<Float32Array>(new Float32Array(0))
@@ -108,7 +122,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
 
     const styles = getComputedStyle(document.documentElement)
     const cssVar = (name: string, fallback: string): string => styles.getPropertyValue(name).trim() || fallback
-    const colorFor = (type: string): string => cssVar(TYPE_VARS[type] ?? '--muted', '#888')
+    const colorFor = (n: GraphNode): string =>
+      colorBy === 'domain'
+        ? n.domain !== null
+          ? domainColor(n.domain)
+          : cssVar('--muted', '#888')
+        : cssVar(TYPE_VARS[n.type] ?? '--muted', '#888')
     const edgeColor = cssVar('--border', '#444')
     const textColor = cssVar('--text-dim', '#aaa')
 
@@ -161,7 +180,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       const r = radius(i)
       const dimmed = highlight !== null && !highlight.has(i)
       ctx.globalAlpha = dimmed ? 0.18 : 1
-      ctx.fillStyle = colorFor(nodes[i]!.type)
+      ctx.fillStyle = colorFor(nodes[i]!)
       ctx.beginPath()
       ctx.arc(x, y, r, 0, Math.PI * 2)
       ctx.fill()
@@ -181,7 +200,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
           flashActive = true
           const p = age / FLASH_MS
           ctx.globalAlpha = (1 - p) * 0.9
-          ctx.strokeStyle = colorFor(nodes[i]!.type)
+          ctx.strokeStyle = colorFor(nodes[i]!)
           ctx.lineWidth = 2 / t.k
           ctx.beginPath()
           ctx.arc(x, y, r + (3 + p * 14) / t.k, 0, Math.PI * 2)
@@ -217,7 +236,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, matches, neighbors, radius])
+  }, [nodes, edges, focusIndex, matches, colorBy, neighbors, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
@@ -451,6 +470,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, onSelect }: Gra
       mq.removeEventListener('change', onTheme)
     }
   }, [scheduleDraw, fitToView])
+
+  // Repaint when pure-presentation props change (search rings, focus, color axis) — these
+  // must not depend on a pointer move or a layout tick happening to come along.
+  useEffect(() => {
+    scheduleDraw()
+  }, [matches, focusIndex, colorBy, scheduleDraw])
 
   /** Screen → world coordinates under the current transform. */
   const toWorld = useCallback((sx: number, sy: number): { x: number; y: number } => {

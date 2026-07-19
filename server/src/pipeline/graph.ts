@@ -23,6 +23,10 @@ export interface GraphNode {
   readonly title: string
   /** Top-level bucket: `concepts` | `entities` | `sources` | `meta` | … | `root` for wiki/*.md. */
   readonly type: string
+  /** Frontmatter `tags:` (as written, deduped); the thematic axis the folders don't carry. */
+  readonly tags: readonly string[]
+  /** Frontmatter `domain:` — the meta-category (SPEC §12.4 Stufe 1), or null when unset. */
+  readonly domain: string | null
   /** Out-degree (links this page makes) and in-degree (backlinks) over RESOLVED edges. */
   readonly out: number
   readonly in: number
@@ -42,9 +46,47 @@ interface CacheEntry {
   readonly size: number
   /** Raw wikilink targets as written (pre-resolution) — resolution is re-run per build. */
   readonly links: readonly string[]
+  readonly tags: readonly string[]
+  readonly domain: string | null
 }
 
 const toPosix = (p: string): string => p.split(path.sep).join(path.posix.sep)
+
+const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, '')
+
+/**
+ * Extracts `tags:` (block or inline list) and `domain:` from a page's YAML frontmatter.
+ * Deliberately a shallow parser, not a YAML library: the vault's frontmatter is
+ * agent-written and flat, and this runs on every changed file of a growing vault.
+ */
+export function parseFrontmatterMeta(markdown: string): { tags: string[]; domain: string | null } {
+  const fm = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fm) return { tags: [], domain: null }
+  const body = fm[1]!
+
+  const domainMatch = body.match(/^domain:[ \t]*(.+)$/m)
+  const domain = domainMatch ? unquote(domainMatch[1]!) || null : null
+
+  const tags: string[] = []
+  // Block list:  tags:\n  - a\n  - b
+  const block = body.match(/^tags:[ \t]*\r?\n((?:[ \t]+-[ \t]*.*\r?\n?)+)/m)
+  if (block) {
+    for (const line of block[1]!.split(/\r?\n/)) {
+      const item = line.match(/^[ \t]+-[ \t]*(.+)$/)
+      if (item) tags.push(unquote(item[1]!))
+    }
+  } else {
+    // Inline list:  tags: [a, b]
+    const inline = body.match(/^tags:[ \t]*\[([^\]]*)\]/m)
+    if (inline) {
+      for (const item of inline[1]!.split(',')) {
+        const t = unquote(item)
+        if (t) tags.push(t)
+      }
+    }
+  }
+  return { tags: [...new Set(tags)], domain }
+}
 
 export class GraphBuilder {
   private readonly cache = new Map<string, CacheEntry>()
@@ -70,12 +112,15 @@ export class GraphBuilder {
       const hit = this.cache.get(f.abs)
       if (hit !== undefined && hit.mtimeMs === f.mtimeMs && hit.size === f.size) continue
       let links: string[] = []
+      let meta: { tags: string[]; domain: string | null } = { tags: [], domain: null }
       try {
-        links = parseWikilinks(fs.readFileSync(f.abs, 'utf8'))
+        const markdown = fs.readFileSync(f.abs, 'utf8')
+        links = parseWikilinks(markdown)
+        meta = parseFrontmatterMeta(markdown)
       } catch {
         // A page deleted mid-build or unreadable: an empty node beats a failed graph.
       }
-      this.cache.set(f.abs, { mtimeMs: f.mtimeMs, size: f.size, links })
+      this.cache.set(f.abs, { mtimeMs: f.mtimeMs, size: f.size, links, tags: meta.tags, domain: meta.domain })
     }
 
     // Resolve: case-insensitive basename index, first occurrence wins (same rule the
@@ -108,13 +153,18 @@ export class GraphBuilder {
       }
     })
 
-    const nodes: GraphNode[] = files.map((f, i) => ({
-      path: f.rel,
-      title: f.title,
-      type: f.type,
-      out: outDeg[i]!,
-      in: inDeg[i]!,
-    }))
+    const nodes: GraphNode[] = files.map((f, i) => {
+      const entry = this.cache.get(f.abs)
+      return {
+        path: f.rel,
+        title: f.title,
+        type: f.type,
+        tags: entry?.tags ?? [],
+        domain: entry?.domain ?? null,
+        out: outDeg[i]!,
+        in: inDeg[i]!,
+      }
+    })
 
     const graph: VaultGraph = { nodes, edges, unresolved, builtAt: new Date().toISOString() }
     this.lastSignature = signature

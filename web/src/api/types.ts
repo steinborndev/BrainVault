@@ -145,6 +145,10 @@ export interface GraphNode {
   title: string
   /** Top-level wiki bucket: concepts | entities | sources | meta | … | root. */
   type: string
+  /** Frontmatter `tags:` — the thematic axis; searchable and (via domain) filterable. */
+  tags: string[]
+  /** Frontmatter `domain:` meta-category, or null when the page carries none. */
+  domain: string | null
   out: number
   in: number
 }

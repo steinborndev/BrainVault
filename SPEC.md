@@ -334,6 +334,20 @@ Schwerpunkt ihrer bereits platzierten Nachbarn und blinken kurz auf; die Kamera 
 Live-Updates nie (Auto-Fit nur beim allerersten Layout). Nebeneffekt: auch Filter- und
 Fokuswechsel erhalten jetzt die Positionen, statt die Simulation neu zu würfeln.
 
+**Meta-Kategorien, Stufe 1 (2026-07-19, User-Entscheidung):** Der Graph kennt jetzt die
+thematische Achse zusätzlich zur strukturellen: Der Graph-Builder parst im selben Lesedurchgang
+das Frontmatter (`tags:` als Block- oder Inline-Liste, `domain:`) und legt beides auf jeden
+Knoten. Im Vault-Tab gibt es dazu eine zweite Filterzeile nach Domäne — Seiten ohne `domain:`
+bilden bewusst einen sichtbaren „ohne Domäne"-Bucket (die Evidenz für den geplanten Backfill,
+keine Blindstelle), einen Umschalter „nach Domäne färben" (deterministische Hash-Farben pro
+Domänenname; die Filter-Chips tragen denselben Farbpunkt und sind damit die Legende), und die
+Suche matcht Titel **und** Tags. Geplant, noch nicht gebaut (Stufe 2/3): eine Domänen-Registry
+als Vault-Seite (`wiki/meta/domains.md`), die dem Ingest-Agenten über die
+System-Prompt-Extension vorgegeben wird (zuordnen oder `unassigned` — keine frei erfundenen
+Kategorien), ein einmaliger Backfill der Bestandsseiten per Agent-Run, und eine
+Governance-Schleife, die aus Clustern unter den `unassigned`-Seiten neue Domänen **vorschlägt**
+(Entscheidung bleibt beim Nutzer).
+
 ### 12.5 Reihenfolge
 
 Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits. ~~(6) In-Dashboard Vault-Viewer~~ — **vorgezogen und am 2026-07-18 umgesetzt** (12.4); die Obsidian-App ist damit im Alltag optional.

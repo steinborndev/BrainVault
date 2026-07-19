@@ -367,3 +367,29 @@ The graph view now updates live while an agent writes pages — the Obsidian gra
 - **Verified:** server suite 292 tests green; web typecheck + build clean; live probe against
   the running systemd service — an mtime touch on a wiki page produced exactly one
   `event: vault` / `data: {}` on the SSE wire (debounce confirmed live).
+
+
+### §8 addendum — meta-categories, stage 1 (2026-07-19, user-requested)
+
+Background (analysis delivered in-session): the vault's pages already carry a thematic layer
+the backend never read — 133 distinct `tags:` across 110/112 pages, plus a `domain:` field the
+ingest agent has been setting freely on 33 pages with inconsistent altitude (`cooking` next to
+`investment-funds`). Stage 1 makes that layer visible; the registry + governance loop
+(stages 2/3, see SPEC §12.4) are designed but deliberately not built yet.
+
+- **Server:** `parseFrontmatterMeta()` in `pipeline/graph.ts` — shallow YAML extraction of
+  `tags` (block or inline list, deduped, unquoted) and `domain`, parsed in the same read as
+  the wikilinks and cached in the same (mtime, size) per-file entry. `GraphNode` gains
+  `tags: string[]` + `domain: string | null`. Tests cover both list forms, dedupe, absence,
+  malformed frontmatter, mid-body false positives, and re-parse on change.
+- **Frontend:** second filter row in the graph toolbar — one chip per domain plus a visible
+  "ohne Domäne" bucket (80/113 pages today: that number IS the argument for the stage-2
+  backfill), intersected with the type filter. "Nach Domäne färben" toggle: deterministic
+  hash→hue colors per domain name (open-ended set — a fixed palette can't work), chips wear
+  the same color dot as legend. Search now matches frontmatter tags as well as titles
+  ("finance" finds `german-finance`-tagged pages whose titles never say finance).
+- Also fixed en passant: presentation-prop changes (search matches, focus, color axis) now
+  schedule a repaint explicitly — previously the search ring only appeared once a pointer
+  move or layout tick happened to trigger a draw.
+- **Verified:** 294 server tests green; live against the running service — `/api/v1/graph`
+  carries tags on 110/113 nodes and exactly the five known domains of the real vault.
