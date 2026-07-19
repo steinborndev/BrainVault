@@ -1,9 +1,10 @@
 /**
- * Wartung tab (SPEC.md §6.4): Lint (structured report), Autoresearch (web-enabled), and a
- * Hot-Cache refresh. Each triggers a vault-mutating agent run on the backend. Runs are
+ * Maintenance tab (SPEC.md §6.4): Lint (structured report) and a hot-cache refresh, plus the
+ * domain registry/governance and the settings editor. Autoresearch lives in the Query/Chat
+ * composer now (it deserved the prominent spot, not a maintenance corner). Runs are
  * async/job-style (TASKS-M5 §0): the POST returns a run id at once, we poll its result via
  * `GET /maintenance/runs/:id`, and the live log streams over the `maintenance:<kind>` SSE
- * channel (rendered via JobLog with seeding off), plus the settings editor.
+ * channel (rendered via JobLog with seeding off).
  */
 
 import { useState } from 'react'
@@ -28,10 +29,8 @@ export function Maintenance(): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
 
-  const [topic, setTopic] = useState('')
   const lint = useMaintenanceRun(() => api.lint())
   const hot = useMaintenanceRun(() => api.hotCache())
-  const research = useMaintenanceRun(() => api.research(topic.trim()))
   const backfill = useMaintenanceRun(() => api.domainBackfill())
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
@@ -61,31 +60,6 @@ export function Maintenance(): React.ReactElement {
             <Markdown source={lint.result.answer} />
           </div>
         )}
-      </div>
-
-      {/* Autoresearch */}
-      <div className="card card-pad section">
-        <div className="section-head">
-          <h3 className="section-title">Autoresearch</h3>
-        </div>
-        <p className="tab-hint">Researches a topic with web access and creates new source/concept pages.</p>
-        <div className="url-row">
-          <input
-            type="text"
-            placeholder="Topic, e.g. “Sourdough fermentation chemistry”…"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && topic.trim() && !research.running) research.start()
-            }}
-          />
-          <button className="btn primary" disabled={!topic.trim() || research.running} onClick={research.start}>
-            {research.running ? 'Running…' : 'Research'}
-          </button>
-        </div>
-        {research.running && <JobLog jobId="maintenance:research" seed={false} />}
-        {research.error && <div className="toast err">{research.error}</div>}
-        {research.result && <RunResult result={research.result} vaultName={vaultName} label="New/updated pages" />}
       </div>
 
       {/* Hot cache */}
