@@ -78,6 +78,7 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
       role: 'assistant',
       content: res.result,
       citations,
+      usage: res.usage, // persisted per message so every answer keeps its cost (v6)
     })
 
     return reply.code(200).send({

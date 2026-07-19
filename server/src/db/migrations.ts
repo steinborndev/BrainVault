@@ -152,10 +152,23 @@ CREATE TABLE domain_dismissals (
 );
 `
 
+/**
+ * v6 — per-message usage (tokens/cost) on assistant messages. The chat UI shows what each
+ * answer cost; before this only the LAST answer's usage was visible (returned transiently on
+ * the POST /query response) and vanished on session switch/reload. Nullable — user/system
+ * rows and pre-v6 history simply carry no usage.
+ */
+const V6 = `
+ALTER TABLE messages ADD COLUMN tokens_in INTEGER;
+ALTER TABLE messages ADD COLUMN tokens_out INTEGER;
+ALTER TABLE messages ADD COLUMN cost_usd REAL;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
   { version: 3, up: V3 },
   { version: 4, up: V4 },
   { version: 5, up: V5 },
+  { version: 6, up: V6 },
 ]

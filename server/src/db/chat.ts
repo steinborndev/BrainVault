@@ -31,6 +31,10 @@ export interface MessageRow {
   content: string
   /** JSON array of Citation, or null. */
   citations: string | null
+  /** Usage of the run that produced this answer — assistant rows only (v6), else null. */
+  tokens_in: number | null
+  tokens_out: number | null
+  cost_usd: number | null
   ts: string
 }
 
@@ -98,15 +102,23 @@ export class ChatStore {
     role: MessageRole
     content: string
     citations?: readonly Citation[]
+    /** The producing run's usage — persisted so every answer keeps its cost, not just the last. */
+    usage?: { tokensIn: number; tokensOut: number; costUsd: number }
   }): MessageRow {
     const ts = nowIso()
     const info = this.db
-      .prepare('INSERT INTO messages (session_id, role, content, citations, ts) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        `INSERT INTO messages (session_id, role, content, citations, tokens_in, tokens_out, cost_usd, ts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
       .run(
         input.sessionId,
         input.role,
         input.content,
         input.citations && input.citations.length > 0 ? JSON.stringify(input.citations) : null,
+        input.usage?.tokensIn ?? null,
+        input.usage?.tokensOut ?? null,
+        input.usage?.costUsd ?? null,
         ts,
       )
     // Bump the session's activity so the list re-sorts to the top.

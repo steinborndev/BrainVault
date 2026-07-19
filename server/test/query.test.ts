@@ -117,4 +117,20 @@ describe('ChatStore', () => {
     expect(chat.deleteSession(s2.id)).toBe(true)
     expect(chat.getSession(s2.id)).toBeUndefined()
   })
+
+  it('persists per-message usage on assistant messages (v6), null elsewhere', () => {
+    const s = chat.createSession({ title: 'usage' })
+    chat.addMessage({ sessionId: s.id, role: 'user', content: 'q' })
+    chat.addMessage({
+      sessionId: s.id,
+      role: 'assistant',
+      content: 'a',
+      usage: { tokensIn: 1200, tokensOut: 340, costUsd: 0.021 },
+    })
+    const [user, assistant] = chat.messages(s.id)
+    expect(user!.tokens_in).toBeNull()
+    expect(assistant!.tokens_in).toBe(1200)
+    expect(assistant!.tokens_out).toBe(340)
+    expect(assistant!.cost_usd).toBeCloseTo(0.021)
+  })
 })

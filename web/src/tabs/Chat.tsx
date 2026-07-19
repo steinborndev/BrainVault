@@ -1,14 +1,20 @@
 /**
  * Query/Chat tab (SPEC.md §6.3). A chat against the read-only query runner: answers render
  * as markdown with **clickable citation chips** (obsidian:// deep-link + copy fallback for
- * resolved pages; plain text for unresolved) — the M4 DoD. Multiple named sessions, with
- * context preserved across follow-ups (the backend resumes the SDK session).
+ * resolved pages; plain text for unresolved) — the M4 DoD. Multiple named sessions in a
+ * sidebar (desktop) that turns into a horizontal strip on small screens; context is preserved
+ * across follow-ups (the backend resumes the SDK session).
+ *
+ * Every assistant answer carries its own footer: sources, per-answer usage (persisted server-
+ * side since schema v6), and a copy action. "Save to vault" sits at the END of the thread —
+ * next to the result it saves — not in the session bar.
  *
  * The composer has two modes:
  *   - Ask      → the read-only query runner (this thread)
- *   - Research → the web-enabled autoresearch run (SPEC.md §6.4), promoted here from the
- *                maintenance tab. It is NOT a chat turn — it writes vault pages — so its
- *                live log + result render as a block in the thread area, not as a bubble.
+ *   - Research → the web-enabled autoresearch run (SPEC.md §6.4). It is NOT a chat turn — it
+ *                uses the web and writes vault pages — so the composer visibly changes (violet
+ *                accent + a hint line) while the mode is armed, and its live log + result
+ *                render as a block in the thread area, not as a bubble.
  *
  * The backend `/query` is request/response for now (no token streaming), so a pending
  * question shows an optimistic user bubble + a "thinking…" indicator until the answer
@@ -18,7 +24,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
-import type { ChatMessage, Session } from '../api/types.ts'
+import type { AuthMode, ChatMessage, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
@@ -26,7 +32,7 @@ import { JobLog } from '../components/JobLog.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo, tokens } from '../lib/format.ts'
-import { Cost, CostFootnote } from '../components/Cost.tsx'
+import { Cost } from '../components/Cost.tsx'
 
 type ComposerMode = 'ask' | 'research'
 
@@ -37,6 +43,7 @@ export function Chat(): React.ReactElement {
   const [mode, setMode] = useState<ComposerMode>('ask')
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
+  const authMode: AuthMode = stats.data?.authMode ?? 'oauth'
 
   const sessionsQ = useQuery({ queryKey: ['sessions'], queryFn: api.sessions })
   const sessions = sessionsQ.data?.sessions ?? []
@@ -118,8 +125,7 @@ export function Chat(): React.ReactElement {
 
   const selectSession = (id: string | null): void => {
     setActiveId(id)
-    // The last answer's usage line and save outcome belong to the previous session —
-    // carrying them over would caption the new thread with stale numbers.
+    // The save outcome belongs to the previous session — don't caption the new thread with it.
     ask.reset()
     save.reset()
   }
@@ -133,211 +139,175 @@ export function Chat(): React.ReactElement {
     messages.length === 0 && !ask.isPending && !ask.isError && !research.running && !research.result && !research.error
 
   return (
-    <div className={`chat${threadEmpty ? ' empty-thread' : ''}`} ref={rootRef}>
-      <SessionBar
-        sessions={sessions}
-        activeId={activeId}
-        onSelect={selectSession}
-        onNew={() => selectSession(null)}
-        onRenamed={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
-        onDeleted={(id) => {
-          if (id === activeId) selectSession(null)
-          qc.invalidateQueries({ queryKey: ['sessions'] })
-        }}
-        canSave={canSave}
-        saving={save.running}
-        onSave={save.start}
-      />
-
-      {save.running && <JobLog jobId="maintenance:save" seed={false} />}
-      {save.error && <div className="toast err">{save.error}</div>}
-      {save.result?.ok && (
-        <div className="toast ok">
-          Session saved
-          {save.result.pages.length > 0 ? (
-            <PageLinks vaultName={vaultName} paths={save.result.pages} />
-          ) : (
-            <> — no new pages.</>
-          )}
+    <div className="research-layout" ref={rootRef}>
+      <aside className="sess-side">
+        <button className="btn sess-new" onClick={() => selectSession(null)}>
+          + New session
+        </button>
+        <div className="sess-list">
+          {sessions.map((s) => (
+            <SessionRow
+              key={s.id}
+              session={s}
+              active={s.id === activeId}
+              onSelect={() => selectSession(s.id)}
+              onRenamed={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
+              onDeleted={() => {
+                if (s.id === activeId) selectSession(null)
+                qc.invalidateQueries({ queryKey: ['sessions'] })
+              }}
+            />
+          ))}
         </div>
-      )}
+      </aside>
 
-      <div className="chat-thread" ref={threadRef}>
-        {threadEmpty && (
-          <div className="chat-empty">
-            <div className="icon">
-              <Icon name="chat" />
+      <div className={`chat${threadEmpty ? ' empty-thread' : ''}`}>
+        <div className="chat-thread" ref={threadRef}>
+          {threadEmpty && (
+            <div className="chat-empty">
+              <div className="icon">
+                <Icon name="chat" />
+              </div>
+              <p>Ask the vault anything — answers cite the underlying wiki pages as clickable chips.</p>
+              <p className="dim">
+                Or switch the composer to <strong>Research</strong> to explore a topic on the web and turn it
+                into new vault pages.
+              </p>
             </div>
-            <p>Ask the vault anything — answers cite the underlying wiki pages as clickable chips.</p>
-            <p className="dim">
-              Or switch the composer to <strong>Research</strong> to explore a topic on the web and turn it
-              into new vault pages.
-            </p>
-          </div>
-        )}
+          )}
 
-        {messages.map((m) => (
-          <Bubble key={m.id} message={m} vaultName={vaultName} />
-        ))}
+          {messages.map((m) => (
+            <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
+          ))}
 
-        {ask.isPending && (
-          <>
-            <div className="bubble user">
-              <div className="bubble-body">{ask.variables}</div>
+          {ask.isPending && (
+            <>
+              <div className="bubble user">
+                <div className="bubble-body">{ask.variables}</div>
+              </div>
+              <div className="bubble assistant">
+                <div className="bubble-body typing">thinking…</div>
+              </div>
+            </>
+          )}
+          {ask.isError && (
+            <div className="bubble system">
+              <div className="bubble-body">Error: {(ask.error as Error).message}</div>
             </div>
-            <div className="bubble assistant">
-              <div className="bubble-body typing">thinking…</div>
-            </div>
-          </>
-        )}
-        {ask.isError && (
-          <div className="bubble system">
-            <div className="bubble-body">Error: {(ask.error as Error).message}</div>
-          </div>
-        )}
-        {ask.data && !ask.isPending && (
-          // Usage for the last answer — the server has always returned it (SPEC.md §7.1);
-          // Cost marks it as an estimate in subscription mode.
-          <div className="chat-usage">
-            {tokens(ask.data.usage.tokensIn + ask.data.usage.tokensOut)} tokens ·{' '}
-            <Cost value={ask.data.usage.costUsd} authMode={ask.data.authMode} />
-            <CostFootnote authMode={ask.data.authMode} />
-          </div>
-        )}
+          )}
 
-        {(research.running || research.result || research.error) && (
-          <div className="research-block">
-            <div className="research-head">
-              <Icon name="search" />
-              <span>
-                Research: <strong>{lastTopic}</strong>
-              </span>
-              <span className="spacer" />
-              {!research.running && (
-                <button className="btn ghost" onClick={research.reset} title="Dismiss" aria-label="Dismiss research result">
-                  <Icon name="x" />
-                </button>
-              )}
-            </div>
-            {research.running && <JobLog jobId="maintenance:research" seed={false} />}
-            {research.error && <div className="toast err">{research.error}</div>}
-            {research.result?.ok && (
-              <div className="toast ok">
-                New/updated pages
-                {research.result.pages.length > 0 ? (
-                  <PageLinks vaultName={vaultName} paths={research.result.pages} />
-                ) : (
-                  <> — no changes.</>
+          {(research.running || research.result || research.error) && (
+            <div className="research-block">
+              <div className="research-head">
+                <Icon name="search" />
+                <span>
+                  Research: <strong>{lastTopic}</strong>
+                </span>
+                <span className="spacer" />
+                {!research.running && (
+                  <button className="btn ghost" onClick={research.reset} title="Dismiss" aria-label="Dismiss research result">
+                    <Icon name="x" />
+                  </button>
                 )}
               </div>
-            )}
-          </div>
-        )}
-      </div>
+              {research.running && <JobLog jobId="maintenance:research" seed={false} />}
+              {research.error && <div className="toast err">{research.error}</div>}
+              {research.result?.ok && (
+                <div className="toast ok">
+                  New/updated pages
+                  {research.result.pages.length > 0 ? (
+                    <PageLinks vaultName={vaultName} paths={research.result.pages} />
+                  ) : (
+                    <> — no changes.</>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
-      <div className="composer">
-        <div className="composer-modes" role="tablist" aria-label="Composer mode">
-          <button
-            className={`chip${mode === 'ask' ? ' active' : ''}`}
-            onClick={() => setMode('ask')}
-            title="Ask the vault (read-only)"
-          >
-            Ask
-          </button>
-          <button
-            className={`chip${mode === 'research' ? ' active' : ''}`}
-            onClick={() => setMode('research')}
-            title="Research a topic on the web and create new vault pages"
-          >
-            Research
-          </button>
+          {/* Save-to-vault lives at the END of the thread — next to the result it saves. */}
+          {canSave && (
+            <div className="savebar">
+              <button className="btn" disabled={save.running} onClick={save.start}>
+                {save.running ? 'Saving…' : 'Save conversation to vault'}
+              </button>
+              <span className="dim">creates/updates wiki pages from this thread — one git commit</span>
+            </div>
+          )}
+          {save.running && <JobLog jobId="maintenance:save" seed={false} />}
+          {save.error && <div className="toast err">{save.error}</div>}
+          {save.result?.ok && (
+            <div className="toast ok">
+              Session saved
+              {save.result.pages.length > 0 ? (
+                <PageLinks vaultName={vaultName} paths={save.result.pages} />
+              ) : (
+                <> — no new pages.</>
+              )}
+            </div>
+          )}
         </div>
-        <textarea
-          ref={composerRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
-          placeholder={
-            mode === 'ask'
-              ? 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
-              : 'Topic to research on the web — creates new vault pages…'
-          }
-          rows={1}
-        />
-        <button className="btn primary" disabled={draft.trim() === '' || busy} onClick={send}>
-          {sendLabel}
-        </button>
-      </div>
-    </div>
-  )
-}
 
-function SessionBar({
-  sessions,
-  activeId,
-  onSelect,
-  onNew,
-  onRenamed,
-  onDeleted,
-  canSave,
-  saving,
-  onSave,
-}: {
-  sessions: Session[]
-  activeId: string | null
-  onSelect: (id: string) => void
-  onNew: () => void
-  onRenamed: () => void
-  onDeleted: (id: string) => void
-  /** False until the session has an answer — there is nothing to write up before that. */
-  canSave: boolean
-  saving: boolean
-  onSave: () => void
-}): React.ReactElement {
-  return (
-    <div className="session-bar">
-      <button className="btn" onClick={onNew}>
-        + New
-      </button>
-      <div className="session-chips">
-        {sessions.map((s) => (
-          <SessionChip
-            key={s.id}
-            session={s}
-            active={s.id === activeId}
-            onSelect={() => onSelect(s.id)}
-            onRenamed={onRenamed}
-            onDeleted={() => onDeleted(s.id)}
-          />
-        ))}
+        <div className={`composer${mode === 'research' ? ' research-mode' : ''}`}>
+          {mode === 'research' && (
+            <div className="comp-hint">
+              <strong>Research mode</strong> — searches the web and <strong>writes new vault pages</strong>. Not a
+              chat turn.
+            </div>
+          )}
+          <div className="comp-main">
+            <div className="composer-modes" role="tablist" aria-label="Composer mode">
+              <button
+                className={`chip${mode === 'ask' ? ' active' : ''}`}
+                onClick={() => setMode('ask')}
+                title="Ask the vault (read-only)"
+              >
+                Ask
+              </button>
+              <button
+                className={`chip${mode === 'research' ? ' active research-on' : ''}`}
+                onClick={() => setMode('research')}
+                title="Research a topic on the web and create new vault pages"
+              >
+                Research
+              </button>
+            </div>
+            <textarea
+              ref={composerRef}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  send()
+                }
+              }}
+              placeholder={
+                mode === 'ask'
+                  ? 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
+                  : 'Topic to research on the web — creates new vault pages…'
+              }
+              rows={1}
+            />
+            <button
+              className={`btn primary${mode === 'research' ? ' research' : ''}`}
+              disabled={draft.trim() === '' || busy}
+              onClick={send}
+            >
+              {sendLabel}
+            </button>
+          </div>
+        </div>
       </div>
-      <span className="spacer" />
-      <button
-        className="btn"
-        disabled={!canSave || saving}
-        onClick={onSave}
-        title={
-          canSave
-            ? 'Save this session as a page in the vault'
-            : 'Available after the first answer'
-        }
-      >
-        {saving ? 'Saving…' : 'Save to vault'}
-      </button>
     </div>
   )
 }
 
 /**
- * One session chip. Rename is an inline input (no `window.prompt` — native dialogs are blocked
- * or ugly in installed-PWA mode); delete is a two-step confirm on the chip itself.
+ * One session as a sidebar row: title + meta (message count, last activity), with rename
+ * (inline input — no `window.prompt`, blocked/ugly in installed PWAs) and a two-step delete.
  */
-function SessionChip({
+function SessionRow({
   session,
   active,
   onSelect,
@@ -380,7 +350,7 @@ function SessionChip({
 
   if (editing) {
     return (
-      <div className={`session-chip${active ? ' active' : ''}`}>
+      <div className={`sess${active ? ' active' : ''}`}>
         <input
           className="session-rename"
           value={title}
@@ -398,57 +368,106 @@ function SessionChip({
   }
 
   return (
-    <div className={`session-chip${active ? ' active' : ''}`}>
-      <button className="session-name" onClick={onSelect} title={session.title ?? 'untitled'}>
-        {session.title ?? 'New session'}
+    <div className={`sess${active ? ' active' : ''}`}>
+      <button className="sess-main" onClick={onSelect} title={session.title ?? 'untitled'}>
+        <span className="st">{session.title ?? 'New session'}</span>
+        <span className="sm">
+          {session.message_count !== undefined && <span>{session.message_count} msgs</span>}
+          <span>{timeAgo(session.last_ts ?? session.created_at)}</span>
+        </span>
       </button>
-      <button
-        className="session-act"
-        onClick={() => {
-          setTitle(session.title ?? '')
-          setEditing(true)
-        }}
-        title="Rename"
-        aria-label="Rename session"
-      >
-        <Icon name="edit" />
-      </button>
-      <button
-        className={`session-act${confirming ? ' danger' : ''}`}
-        onClick={() => void del()}
-        title={confirming ? 'Really delete?' : 'Delete'}
-        aria-label={confirming ? 'Confirm delete' : 'Delete session'}
-      >
-        {confirming ? 'Really?' : <Icon name="x" />}
-      </button>
+      <span className="sess-acts">
+        <button
+          className="session-act"
+          onClick={() => {
+            setTitle(session.title ?? '')
+            setEditing(true)
+          }}
+          title="Rename"
+          aria-label="Rename session"
+        >
+          <Icon name="edit" />
+        </button>
+        <button
+          className={`session-act${confirming ? ' danger' : ''}`}
+          onClick={() => void del()}
+          title={confirming ? 'Really delete?' : 'Delete'}
+          aria-label={confirming ? 'Confirm delete' : 'Delete session'}
+        >
+          {confirming ? 'Really?' : <Icon name="x" />}
+        </button>
+      </span>
     </div>
   )
 }
 
-function Bubble({ message, vaultName }: { message: ChatMessage; vaultName: string }): React.ReactElement {
+function Bubble({
+  message,
+  vaultName,
+  authMode,
+}: {
+  message: ChatMessage
+  vaultName: string
+  authMode: AuthMode
+}): React.ReactElement {
   const citations = parseCitations(message.citations)
-  return (
-    <div className={`bubble ${message.role}`}>
-      <div className="bubble-body">
-        {message.role === 'assistant' ? <Markdown source={message.content} /> : message.content}
+  const [copied, setCopied] = useState(false)
+  const copy = (): void => {
+    void navigator.clipboard?.writeText(message.content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  if (message.role !== 'assistant') {
+    return (
+      <div className={`bubble ${message.role}`}>
+        <div className="bubble-body">{message.content}</div>
+        <div className="bubble-ts">{timeAgo(message.ts)}</div>
       </div>
-      {citations.length > 0 && (
-        <div className="bubble-cites">
-          <span className="cites-label">Sources</span>
-          <div className="pages">
-            {citations.map((c, i) =>
-              c.path ? (
-                <CitationChip key={`${c.label}-${i}`} vaultName={vaultName} path={c.path} />
-              ) : (
-                <span key={`${c.label}-${i}`} className="pagelink unresolved" title="Page not found in the vault">
-                  {c.label}
-                </span>
-              ),
+    )
+  }
+
+  // Every answer keeps its own usage (persisted since v6); older rows simply have none.
+  const hasUsage = message.tokens_out !== null
+  return (
+    <div className="bubble assistant">
+      <div className="bubble-body">
+        <Markdown source={message.content} />
+      </div>
+      <div className="bfoot">
+        {citations.length > 0 && (
+          <>
+            <span className="cites-label">Sources</span>
+            <span className="pages">
+              {citations.map((c, i) =>
+                c.path ? (
+                  <CitationChip key={`${c.label}-${i}`} vaultName={vaultName} path={c.path} />
+                ) : (
+                  <span key={`${c.label}-${i}`} className="pagelink unresolved" title="Page not found in the vault">
+                    {c.label}
+                  </span>
+                ),
+              )}
+            </span>
+          </>
+        )}
+        <span className="bact">
+          <span className="busage">
+            {timeAgo(message.ts)}
+            {hasUsage && (
+              <>
+                {' · '}
+                {tokens((message.tokens_in ?? 0) + (message.tokens_out ?? 0))} tok ·{' '}
+                <Cost value={message.cost_usd} authMode={authMode} />
+              </>
             )}
-          </div>
-        </div>
-      )}
-      <div className="bubble-ts">{timeAgo(message.ts)}</div>
+          </span>
+          <button onClick={copy} title="Copy answer as markdown">
+            <Icon name="copy" /> {copied ? 'Copied' : 'Copy'}
+          </button>
+        </span>
+      </div>
     </div>
   )
 }

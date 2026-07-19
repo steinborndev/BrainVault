@@ -12,6 +12,9 @@
   --text-faint: #6b7791;
   --accent: #5b8def;
   --accent-soft: #23324f;
+  /* The research composer mode — visually distinct from Ask because it has side effects
+     (web access + vault writes). Violet, validated against both surfaces. */
+  --research: #9085e9;
   --radius: 12px;
   --radius-sm: 8px;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -42,6 +45,7 @@
     --text-faint: #8a94a8;
     --accent: #3a6fd8;
     --accent-soft: #e4ecfb;
+    --research: #4a3aa7;
     --shadow: 0 2px 8px rgba(20, 30, 60, 0.08);
 
     --ok: #1c8a5c;
@@ -1232,59 +1236,101 @@ details.hot-cache[open] .hc-summary::before {
 }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 
-/* ---- Chat ---- */
-/* A full-height column (session bar / scrolling thread / composer) in a reading-width
-   lane: the thread owns the scrolling, the composer is always visible at the bottom,
-   nothing floats in the middle of the viewport. 175px ≈ topbar + content padding. */
+/* ---- Chat / Research ---- */
+/* Sidebar (sessions) + a full-height thread column: the thread owns the scrolling, the
+   composer is always visible at the bottom, nothing floats in the middle of the viewport.
+   175px ≈ topbar + content padding. */
+.research-layout {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 16px;
+}
 .chat {
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-width: 860px;
   margin: 0 auto;
+  width: 100%;
   min-height: 420px;
   height: calc(100vh - 175px);
   height: calc(100dvh - 175px);
 }
-.session-bar {
+
+/* Session sidebar: a list with title + meta scales past the handful of sessions the old
+   horizontal chip strip could hold; rename/delete live on the row (revealed on hover). */
+.sess-side {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 420px;
+  height: calc(100vh - 175px);
+  height: calc(100dvh - 175px);
 }
-.session-chips {
+.sess-new {
+  justify-content: center;
+}
+.sess-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 2px;
+  flex-direction: column;
+  gap: 4px;
 }
-.session-chip {
-  display: inline-flex;
+.sess {
+  display: flex;
   align-items: center;
   gap: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 2px 4px 2px 0;
+}
+.sess:hover {
   background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 4px 2px 10px;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
-.session-chip.active {
-  border-color: var(--accent);
+.sess.active {
   background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
-.session-chip .session-name {
+.sess-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
   border: none;
   background: transparent;
   color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sess-main .st {
   font-size: 13px;
-  max-width: 180px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 2px 2px;
 }
-.session-chip.active .session-name {
+.sess.active .sess-main .st {
   color: var(--accent);
+}
+.sess-main .sm {
+  font-size: 11px;
+  color: var(--text-faint);
+  display: flex;
+  gap: 8px;
+}
+.sess-acts {
+  display: none;
+  align-items: center;
+  flex-shrink: 0;
+}
+.sess:hover .sess-acts,
+.sess.active .sess-acts,
+.sess:focus-within .sess-acts {
+  display: inline-flex;
 }
 .session-act {
   border: none;
@@ -1354,16 +1400,61 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
   font-style: italic;
 }
-.bubble-cites {
+/* Assistant-answer footer: sources left, timestamp/usage/copy right. */
+.bfoot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.bfoot .pages {
+  margin-top: 0;
 }
 .cites-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
+}
+.bact {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.busage {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bact button {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bact button:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+/* Save-to-vault at the end of the thread — next to the result it saves. */
+.savebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  flex-wrap: wrap;
+  padding: 2px 0;
 }
 .pagelink.unresolved {
   color: var(--text-faint);
@@ -1376,24 +1467,57 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
 }
 
-/* One bordered card: [Ask|Research] · borderless textarea · send. The mode toggle is part
-   of the input, not a floating row of chips above it. */
+/* One bordered card: hint line (research mode only), then [Ask|Research] · borderless
+   textarea · send. The mode toggle is part of the input, not a floating row of chips.
+   Research mode wears its own accent — it has side effects (web access + vault writes),
+   so the composer must not look like a harmless filter switch. */
 .composer {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  padding: 8px;
 }
 .composer:focus-within {
   border-color: var(--accent);
+}
+.composer.research-mode,
+.composer.research-mode:focus-within {
+  border-color: var(--research);
+}
+.comp-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--research) 9%, transparent);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.comp-hint strong:first-child {
+  color: var(--research);
+}
+.comp-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
 }
 .composer-modes {
   display: flex;
   gap: 4px;
   padding-bottom: 5px;
+}
+.chip.research-on {
+  background: color-mix(in srgb, var(--research) 16%, transparent);
+  border-color: var(--research);
+  color: var(--research);
+}
+.btn.primary.research {
+  background: var(--research);
+  border-color: var(--research);
 }
 .composer textarea {
   flex: 1;
@@ -1622,11 +1746,35 @@ details.hot-cache[open] .hc-summary::before {
   margin-left: 8px;
   cursor: help;
 }
-.chat-usage {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-align: right;
+/* Small screens: the session sidebar becomes a horizontal strip above the thread. */
+@media (max-width: 860px) {
+  .research-layout {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .sess-side {
+    height: auto;
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+  .sess-new {
+    flex-shrink: 0;
+  }
+  .sess-list {
+    flex-direction: row;
+    overflow-y: visible;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .sess {
+    flex-shrink: 0;
+    max-width: 220px;
+  }
+  /* On the strip, the meta line is noise — title + actions are enough. */
+  .sess-main .sm {
+    display: none;
+  }
 }
 
 /* Autoresearch block inside the chat thread (not a bubble — it writes vault pages). */

@@ -207,6 +207,10 @@ export interface ChatMessage {
   content: string
   /** JSON string of Citation[] as stored, or null. Parse with parseCitations(). */
   citations: string | null
+  /** Usage of the run that produced this answer — assistant rows only (v6), else null. */
+  tokens_in: number | null
+  tokens_out: number | null
+  cost_usd: number | null
   ts: string
 }
 
