@@ -150,7 +150,16 @@ Five tabs, all live over SSE:
   browser — Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only
   work from a WSLg browser.
 - **Wartung** — lint (structured report), autoresearch, hot-cache refresh with its last-refresh
-  time, and the settings editor.
+  time, the domain registry with its backfill action, and the settings editor.
+
+**Domains** are the vault's meta-categories (`biomedicine`, `finance`, `cooking`, …), the axis
+the graph filters and colors by. The allowed list lives in the vault itself, as the editable
+page `wiki/meta/domains.md` — install the seed with `scripts/install-domain-registry.sh`. Every
+vault-writing agent run gets that list as a **closed** set: it files each page under one key, or
+under `unassigned` when nothing fits, and may never coin a new key. New domains are created by a
+human editing that page; the rule of thumb is that five or more coherent `unassigned` pages are
+what justifies one. `Wartung → Domänen → Backfill` files existing pages retroactively (frontmatter
+only — it never touches page bodies).
 
 The graph renders on a canvas with the force layout in a web worker, so it stays smooth as the
 vault grows — deliberately, since the WSLg Obsidian graph does not. It also updates **live**:
@@ -335,7 +344,10 @@ PUT    /pages                    user edit {path, markdown, baseMtime} → write
 DELETE /pages?path=…             user delete → unlink + git commit; returns staleLinks
                                  (backlinks that now dangle, drives the lint banner)
 GET    /graph                    the vault's wikilink graph: typed nodes + directed edges
-POST   /maintenance/{lint,research,hot-cache}   starts an async run → { id, channel }
+GET    /domains                  the vault's domain registry (installed? + parsed entries)
+POST   /maintenance/{lint,research,hot-cache,domain-backfill}
+                                 starts an async run → { id, channel }; backfill 409s
+                                 without an installed registry
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration

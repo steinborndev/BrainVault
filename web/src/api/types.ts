@@ -248,7 +248,21 @@ export interface LintReport {
 }
 
 /** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save' | 'domain-backfill'
+
+/** One meta-category from the vault's domain registry (GET /api/v1/domains, SPEC §12.4). */
+export interface DomainEntry {
+  key: string
+  description: string
+  tags: string[]
+}
+
+export interface DomainsResponse {
+  /** False when the vault has no `wiki/meta/domains.md` — the backfill is then unavailable. */
+  installed: boolean
+  path: string
+  domains: DomainEntry[]
+}
 
 export interface MaintenanceResult {
   ok: boolean

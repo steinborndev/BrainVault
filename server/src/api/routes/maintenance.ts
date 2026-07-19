@@ -10,6 +10,8 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
+import { DomainRegistryMissingError } from '../../pipeline/maintenance.js'
+import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 
 export function registerMaintenanceRoute(app: FastifyInstance, ctx: AppContext): void {
   const { maintenance } = ctx
@@ -20,6 +22,30 @@ export function registerMaintenanceRoute(app: FastifyInstance, ctx: AppContext):
 
   app.post('/api/v1/maintenance/hot-cache', async (_req, reply) => {
     return reply.code(202).send(maintenance.startHotCache())
+  })
+
+  // The domain backfill (SPEC.md §12.4 Stufe 2). 409 when no registry is installed — the
+  // action is meaningless without the closed list it files against.
+  app.post('/api/v1/maintenance/domain-backfill', async (_req, reply) => {
+    try {
+      return reply.code(202).send(maintenance.startDomainBackfill())
+    } catch (err) {
+      if (err instanceof DomainRegistryMissingError) {
+        return reply.code(409).send({ error: err.message, registryPath: DOMAIN_REGISTRY_PATH })
+      }
+      throw err
+    }
+  })
+
+  // Read-only view of the registry, so the UI can say whether one is installed and what it
+  // holds without the user having to open the vault page.
+  app.get('/api/v1/domains', async (_req, reply) => {
+    const registry = readDomainRegistry(ctx.config.vaultRoot)
+    return reply.send({
+      installed: registry !== null,
+      path: DOMAIN_REGISTRY_PATH,
+      domains: registry?.domains ?? [],
+    })
   })
 
   app.post('/api/v1/maintenance/research', async (req, reply) => {

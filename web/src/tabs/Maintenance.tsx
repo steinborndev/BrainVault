@@ -26,6 +26,11 @@ export function Maintenance(): React.ReactElement {
   const lint = useMaintenanceRun(() => api.lint())
   const hot = useMaintenanceRun(() => api.hotCache())
   const research = useMaintenanceRun(() => api.research(topic.trim()))
+  const backfill = useMaintenanceRun(() => api.domainBackfill())
+  const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
+  const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  // How much of the vault is still unfiled — the number that says whether a backfill is due.
+  const undomained = graph.data?.nodes.filter((n) => n.domain === null).length ?? 0
 
   return (
     <div>
@@ -98,6 +103,52 @@ export function Maintenance(): React.ReactElement {
         {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
         {hot.error && <div className="toast err">{hot.error}</div>}
         {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Aktualisiert" />}
+      </div>
+
+      {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
+      <div className="card card-pad section">
+        <div className="section-head">
+          <h3 className="section-title">Domänen</h3>
+          <button
+            className="btn"
+            disabled={backfill.running || !domains.data?.installed}
+            onClick={backfill.start}
+            title={domains.data?.installed ? 'Bestandsseiten einsortieren' : 'Keine Registry installiert'}
+          >
+            {backfill.running ? 'Läuft…' : 'Backfill starten'}
+          </button>
+        </div>
+        {domains.data?.installed === false ? (
+          <p className="tab-hint">
+            Keine Domänen-Registry im Vault. Anlegen mit{' '}
+            <code>scripts/install-domain-registry.sh</code> — danach steht sie als{' '}
+            <PageLink path={domains.data.path} vaultName={vaultName} /> zum Bearbeiten bereit.
+          </p>
+        ) : (
+          <>
+            <p className="tab-hint">
+              Die Meta-Kategorien, unter denen Seiten abgelegt werden — gepflegt in{' '}
+              {domains.data && <PageLink path={domains.data.path} vaultName={vaultName} />}. Jeder Ingest bekommt
+              diese Liste als geschlossene Vorgabe; passt nichts, wird <code>unassigned</code> gesetzt. Der Backfill
+              sortiert Bestandsseiten nach, ohne Seiteninhalte anzufassen.
+              {undomained > 0 && (
+                <>
+                  {' '}Aktuell <strong>{undomained}</strong> Seite{undomained === 1 ? '' : 'n'} ohne Domäne.
+                </>
+              )}
+            </p>
+            <div className="filters">
+              {domains.data?.domains.map((d) => (
+                <span key={d.key} className="chip" title={d.description}>
+                  {d.key}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+        {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
+        {backfill.error && <div className="toast err">{backfill.error}</div>}
+        {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Einsortiert" />}
       </div>
 
       <div className="card card-pad section">

@@ -716,4 +716,29 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     const res = await fetch(`${baseUrl}/api/v1/maintenance/runs/does-not-exist`)
     expect(res.status).toBe(404)
   })
+
+  it('domain backfill 409s without a registry, and starts once one is installed', async () => {
+    const before = await fetch(`${baseUrl}/api/v1/domains`)
+    expect(((await before.json()) as { installed: boolean }).installed).toBe(false)
+
+    const refused = await fetch(`${baseUrl}/api/v1/maintenance/domain-backfill`, { method: 'POST' })
+    expect(refused.status).toBe(409)
+
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'meta'), { recursive: true })
+    fs.writeFileSync(
+      path.join(vaultRoot, 'wiki', 'meta', 'domains.md'),
+      '## Domains\n\n## biomedicine\n\nBiology.\n\n**Tags:** `biomedical`\n',
+    )
+
+    const listed = (await (await fetch(`${baseUrl}/api/v1/domains`)).json()) as {
+      installed: boolean
+      domains: Array<{ key: string }>
+    }
+    expect(listed.installed).toBe(true)
+    expect(listed.domains.map((d) => d.key)).toEqual(['biomedicine'])
+
+    const started = await fetch(`${baseUrl}/api/v1/maintenance/domain-backfill`, { method: 'POST' })
+    expect(started.status).toBe(202)
+    expect(((await started.json()) as StartedRun).status).toBe('running')
+  })
 })

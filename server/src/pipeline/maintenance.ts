@@ -25,6 +25,7 @@ import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitRe
 import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { parseLintReport, type LintReport } from './lint-report.js'
+import { readDomainRegistry, domainSystemPrompt, DOMAIN_REGISTRY_PATH, UNASSIGNED } from './domains.js'
 import { indexWikiPages } from './citations.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -35,7 +36,12 @@ import { Mutex } from '../util/mutex.js'
  * Sharing this runner also shares its run mutex, which is what stops a save interleaving with a
  * lint; two concurrent vault writers is exactly what that mutex exists to prevent.
  */
-export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save'
+export type MaintenanceKind = 'lint' | 'research' | 'hot-cache' | 'save' | 'domain-backfill'
+
+/** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
+export class DomainRegistryMissingError extends Error {
+  override readonly name = 'DomainRegistryMissingError'
+}
 
 /** Stable SSE channel id per kind, so the UI can subscribe to a run's live log. */
 export const maintenanceChannel = (kind: MaintenanceKind): string => `maintenance:${kind}`
@@ -102,6 +108,8 @@ interface RunOptions {
   readonly resumeSessionId?: string
   /** Overrides the default `maintenance: <kind>` commit subject. */
   readonly commitMessage?: string
+  /** Vault-derived system-prompt extension; defaults to the domain registry for write runs. */
+  readonly systemPromptExtra?: string
 }
 
 export class MaintenanceRunner {
@@ -180,6 +188,53 @@ export class MaintenanceRunner {
   /** Starts a hot-cache refresh in the background; returns its tracked run immediately. */
   startHotCache(): MaintenanceRun {
     return this.start('hot-cache', 'update hot cache', 'ingest')
+  }
+
+  /**
+   * Files every existing wiki page under a registry domain (SPEC.md §12.4 Stufe 2). This is
+   * the one-time catch-up for pages written before the registry existed — from here on the
+   * ingest system-prompt extension keeps new pages classified.
+   *
+   * Throws when no registry is installed: a backfill with no closed list to file against is
+   * exactly the free-for-all this feature exists to end, so it must fail loudly rather than
+   * let the agent improvise 80 domains.
+   *
+   * Frontmatter-only by construction, which is also why this is cheap and safe: the vault's
+   * semantic-tiling cache hashes page BODIES, so a domain backfill does not invalidate it.
+   */
+  startDomainBackfill(): MaintenanceRun {
+    const registry = readDomainRegistry(this.vaultRoot)
+    if (!registry) {
+      throw new DomainRegistryMissingError(
+        `no domain registry at ${DOMAIN_REGISTRY_PATH} — install it (scripts/install-domain-registry.sh) before running a backfill`,
+      )
+    }
+    const keys = registry.domains.map((d) => d.key).join(', ')
+    return this.start(
+      'domain-backfill',
+      `Read ${DOMAIN_REGISTRY_PATH} — it is the closed list of allowed domains. Then go through ` +
+        'EVERY markdown page under wiki/ (all subdirectories, all page types: concepts, entities, ' +
+        'sources, references, comparisons, questions, folds, meta, and the pages directly in wiki/) ' +
+        'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
+        `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
+        'Rules:\n' +
+        `- A page that already has a valid \`domain:\` from the list keeps it. A page whose current ` +
+        'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
+        '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
+        `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
+        `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
+        '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
+        'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
+        '- Edit ONLY the frontmatter `domain:` field. Do not touch page bodies, other frontmatter ' +
+        'fields, titles, or wikilinks. Do not create, delete, rename or merge any page.\n' +
+        `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
+        'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
+        'Work through the pages systematically so none is skipped. When done, report the total ' +
+        'number of pages touched and a per-domain count, plus the list of pages you left as ' +
+        `\`${UNASSIGNED}\` and why.`,
+      'ingest',
+      { commitMessage: 'maintenance: domain backfill' },
+    )
   }
 
   /**
@@ -285,6 +340,9 @@ export class MaintenanceRunner {
         this.events.publish({ kind: 'log', log: { jobId: channel, ts: new Date().toISOString(), level, message } })
 
       log('info', `maintenance: ${kind} started`)
+      // Read the registry per run (it is a user-editable vault page), unless the caller pinned
+      // its own extension text.
+      const systemPromptExtra = opts.systemPromptExtra ?? domainSystemPrompt(readDomainRegistry(this.vaultRoot))
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
       // can still be committed — but only if we turn out to be the sole writer (F4).
       const dirtyBefore = await dirtyPaths(this.vaultRoot)
@@ -300,6 +358,9 @@ export class MaintenanceRunner {
         // being asked to write up. The profile is applied fresh per run, so resuming a
         // read-only chat under a write-enabled profile is what grants the save its write access.
         ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
+        // Any run that may write pages gets the domain rules, not just ingest: a lint fixing a
+        // frontmatter gap or an autoresearch filing new pages must obey the same closed list.
+        ...(systemPromptExtra ? { systemPromptExtra } : {}),
         onMessage: (m: SDKMessage) => {
           const line = formatMessage(m)
           if (line !== undefined) log('info', line)

@@ -33,6 +33,7 @@ import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitRe
 import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
+import { readDomainRegistry, domainSystemPrompt } from './domains.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
@@ -56,6 +57,8 @@ export type IngestRunner = (opts: {
   readonly auth: AgentAuth
   readonly timeoutMs: number
   readonly onMessage: (message: SDKMessage) => void
+  /** Vault-derived system-prompt extension (the domain registry, SPEC.md §12.4). */
+  readonly systemPromptExtra?: string
 }) => Promise<AgentRunResult>
 
 export interface IngestQueueOptions {
@@ -597,6 +600,9 @@ export class IngestQueue {
       prompt,
       auth: this.auth,
       timeoutMs: this.timeoutMs,
+      // Read per run, not cached: the registry is a vault page the user may edit at any
+      // time, and the next ingest should honour the edit without a service restart.
+      systemPromptExtra: domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(job.id, 'info', line)
@@ -763,6 +769,9 @@ export class IngestQueue {
       prompt,
       auth: this.auth,
       timeoutMs: this.timeoutMs,
+      // Read per run, not cached: the registry is a vault page the user may edit at any
+      // time, and the next ingest should honour the edit without a service restart.
+      systemPromptExtra: domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(lead, 'info', line)

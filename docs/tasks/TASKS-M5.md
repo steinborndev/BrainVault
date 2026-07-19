@@ -393,3 +393,42 @@ ingest agent has been setting freely on 33 pages with inconsistent altitude (`co
   move or layout tick happened to trigger a draw.
 - **Verified:** 294 server tests green; live against the running service — `/api/v1/graph`
   carries tags on 110/113 nodes and exactly the five known domains of the real vault.
+
+
+### §8 addendum — meta-categories, stage 2 (2026-07-19, user-requested)
+
+Turns `domain:` from a free-text field the agent filled at will into a closed, governed list.
+
+- **Registry** `wiki/meta/domains.md`, parsed by `pipeline/domains.ts`
+  (`parseDomainRegistry` / `readDomainRegistry` / `domainSystemPrompt`). Prose-first format so
+  the page stays hand-editable: domains are `## <key>` sections under a `## Domains` marker,
+  with a lead-paragraph description and an optional wrapped `**Tags:**` line. Everything above
+  the marker is human documentation and is skipped. Seed in `scripts/vault-extensions/domains.md`
+  (the first use of the Hard-Rule-5 vault-extensions directory, which TASKS-M0 §72 had decided
+  not to create), installed by the non-destructive `scripts/install-domain-registry.sh`.
+  Initial cut: biomedicine, finance, cooking, knowledge-management, ai-tooling, meta.
+- **Agent guardrail:** new `RunAgentOptions.systemPromptExtra`, appended to
+  `AUTOMATION_SYSTEM_PROMPT` for the writing profiles only (`query` keeps its minimal read-only
+  prompt). Both the ingest queue and the maintenance runner read the registry **per run**, so a
+  registry edit takes effect without a restart. No registry → empty string → pre-feature
+  behaviour, which is what keeps a fresh checkout working before setup.
+- **Backfill** `MaintenanceKind` `'domain-backfill'` + `POST /api/v1/maintenance/domain-backfill`,
+  modelled on the existing lint/hot-cache actions (same run registry, run mutex, commit mutex,
+  SSE channel `maintenance:domain-backfill`). `startDomainBackfill()` throws
+  `DomainRegistryMissingError` → **409** when no registry is installed; a backfill with no closed
+  list is precisely the free-for-all the feature exists to end. The prompt is frontmatter-only and
+  forbids creating/deleting/renaming pages or editing the registry itself.
+- **Visibility:** `GET /api/v1/domains` (installed? + parsed entries) and a "Domänen" card in the
+  Wartung tab showing the domain chips, a link to the registry page, the count of pages still
+  without a domain, and the backfill button (disabled when no registry).
+- **A live probe caught what the tests could not:** the seed registry's 12-tag domains arrived
+  with 4 — the parser read only the `**Tags:**` line itself, and the real file wraps its tag lists
+  across three lines. The test fixture had single-line lists and passed happily. Fixed (tag
+  collection continues until a blank line) with two regression tests, including one that the
+  collection stops at the blank line so trailing prose backticks aren't eaten.
+- **Verified:** 309 server tests green; web typecheck + build clean; registry installed into the
+  real vault and committed there (`12fa1cb`); `/api/v1/domains` returns all six domains with full
+  tag counts (12/6/5/6/12/5); the built `domainSystemPrompt` renders 2652 chars containing the
+  closed list, the `unassigned` escape hatch, and the "never invent a key" rule.
+- **Not built (stage 3):** the governance loop that proposes new domains from `unassigned`
+  clusters. The registry page documents the ≥5-page rule of thumb for humans in the meantime.

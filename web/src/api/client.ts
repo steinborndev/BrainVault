@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  DomainsResponse,
   SettingsResponse,
   SettingsPatch,
   PagePreview,
@@ -174,8 +175,13 @@ export const api = {
       body: JSON.stringify({ topic }),
     }).then(json<MaintenanceRun>),
 
+  domainBackfill: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/domain-backfill`, { method: 'POST' }).then(json<MaintenanceRun>),
+
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  domains: (): Promise<DomainsResponse> => fetch(`${BASE}/domains`).then(json<DomainsResponse>),
 
   // ---- Settings ----
 

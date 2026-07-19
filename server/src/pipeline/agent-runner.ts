@@ -98,6 +98,12 @@ export interface RunAgentOptions {
    * fresh session. The resumed session's id is returned in the result either way.
    */
   readonly resumeSessionId?: string
+  /**
+   * Extra text appended to the profile's system prompt — the sanctioned extension point for
+   * vault-derived instructions (CLAUDE.md hard rule 5), used to hand a run the domain
+   * registry (SPEC.md §12.4). Ignored for `query`, which must stay read-only and minimal.
+   */
+  readonly systemPromptExtra?: string
 }
 
 const EMPTY_USAGE: AgentUsage = { tokensIn: 0, tokensOut: 0, costUsd: 0 }
@@ -175,8 +181,12 @@ export function buildOptions(
       type: 'preset',
       preset: 'claude_code',
       // A read-only query gets the read-only prompt; ingest/research keep the automation
-      // prompt (both write pages and must not stall on a question).
-      append: profile === 'query' ? QUERY_SYSTEM_PROMPT : AUTOMATION_SYSTEM_PROMPT,
+      // prompt (both write pages and must not stall on a question). Vault-derived extras
+      // (the domain registry) ride along on the writing profiles only.
+      append:
+        profile === 'query'
+          ? QUERY_SYSTEM_PROMPT
+          : [AUTOMATION_SYSTEM_PROMPT, opts.systemPromptExtra?.trim()].filter(Boolean).join('\n\n'),
     },
     /**
      * OS-level confinement — the only thing that makes "writes only under

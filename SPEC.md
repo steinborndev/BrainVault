@@ -341,12 +341,40 @@ Knoten. Im Vault-Tab gibt es dazu eine zweite Filterzeile nach Domäne — Seite
 bilden bewusst einen sichtbaren „ohne Domäne"-Bucket (die Evidenz für den geplanten Backfill,
 keine Blindstelle), einen Umschalter „nach Domäne färben" (deterministische Hash-Farben pro
 Domänenname; die Filter-Chips tragen denselben Farbpunkt und sind damit die Legende), und die
-Suche matcht Titel **und** Tags. Geplant, noch nicht gebaut (Stufe 2/3): eine Domänen-Registry
-als Vault-Seite (`wiki/meta/domains.md`), die dem Ingest-Agenten über die
-System-Prompt-Extension vorgegeben wird (zuordnen oder `unassigned` — keine frei erfundenen
-Kategorien), ein einmaliger Backfill der Bestandsseiten per Agent-Run, und eine
-Governance-Schleife, die aus Clustern unter den `unassigned`-Seiten neue Domänen **vorschlägt**
-(Entscheidung bleibt beim Nutzer).
+Suche matcht Titel **und** Tags.
+
+**Meta-Kategorien, Stufe 2 (2026-07-19, User-Entscheidung):** Die Domänen sind jetzt eine
+geschlossene, bewachte Liste statt eines frei beschreibbaren Feldes.
+
+- **Registry als Vault-Seite** (`wiki/meta/domains.md`): führt die erlaubten Domänen mit
+  Beschreibung und Tag-Hinweisen. Sie liegt bewusst im Vault und nicht in der DB — git-versioniert
+  mit dem Inhalt, den sie beschreibt, im Dashboard-Seiteneditor pflegbar und für Agent-Runs ohne
+  Zusatzverdrahtung lesbar. Das Saatgut liegt im Repo (`scripts/vault-extensions/domains.md`,
+  installiert von `scripts/install-domain-registry.sh`, nicht-destruktiv); ab Installation ist die
+  Vault-Kopie die Source of Truth und der Service liest sie nur (Hard Rule 1). Initialer Zuschnitt:
+  `biomedicine`, `finance`, `cooking`, `knowledge-management`, `ai-tooling`, `meta` — plus den
+  Sentinel `unassigned`.
+- **Agent-Vorgabe:** Jeder schreibende Run (Ingest, Backfill, Lint, Autoresearch) bekommt die
+  Registry über die System-Prompt-Extension (`RunAgentOptions.systemPromptExtra`, der von Hard
+  Rule 5 sanktionierte Erweiterungsweg) als geschlossene Liste: genau einen Schlüssel daraus
+  setzen, sonst `unassigned` — **niemals einen neuen Schlüssel erfinden**. Neue Domänen entstehen
+  ausschließlich dadurch, dass ein Mensch die Registry-Seite editiert. Die Liste wird pro Run frisch
+  gelesen, eine Registry-Änderung wirkt also ohne Neustart. Ohne installierte Registry ist die
+  Extension leer und alles verhält sich wie zuvor.
+- **Backfill** als Wartungs-Aktion (`POST /api/v1/maintenance/domain-backfill`, Kind
+  `domain-backfill`): ein Agent-Run, der Bestandsseiten nachsortiert — Werte, die vor der Registry
+  entstanden sind (`investment-funds`, `mrna-delivery`), werden auf die gültige Domäne umgehängt.
+  Ausdrücklich nur das Frontmatter-Feld; Seiteninhalte, andere Felder und die Registry selbst bleiben
+  unangetastet, und es entstehen keine neuen Seiten. Ohne Registry antwortet die Route `409` statt
+  den Agenten improvisieren zu lassen. Nebenbei billig: der Semantic-Tiling-Cache des Vaults hasht
+  Seiten-**Bodies**, ein reiner Frontmatter-Backfill invalidiert ihn also nicht.
+- **Sichtbarkeit:** `GET /api/v1/domains` meldet, ob eine Registry installiert ist und was sie
+  enthält; die Wartungs-Karte zeigt die Domänen und die Zahl der Seiten ohne Domäne — genau die
+  Zahl, an der man sieht, ob ein Backfill fällig ist.
+
+Geplant, noch nicht gebaut (Stufe 3): die Governance-Schleife, die aus Clustern unter den
+`unassigned`-Seiten neue Domänen **vorschlägt** (Faustregel ≥5 kohärente Seiten; Entscheidung und
+Registry-Edit bleiben beim Nutzer).
 
 ### 12.5 Reihenfolge
 
