@@ -32,6 +32,8 @@ export interface GraphCanvasProps {
   /** Node coloring axis: wiki bucket (`type`, default) or frontmatter meta-category (`domain`). */
   colorBy?: 'type' | 'domain'
   onSelect: (node: GraphNode) => void
+  /** Extra UI rendered inside the canvas wrap (e.g. the search box, top-right). */
+  overlay?: React.ReactNode
 }
 
 /** Bucket → CSS variable. Falls back to --muted for unknown buckets. */
@@ -102,7 +104,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', onSelect }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', onSelect, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -695,13 +697,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
         >
           Fit
         </button>
-        <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
-          +
-        </button>
         <button className="btn ghost" onClick={() => zoomBy(1 / 1.4)} title="Zoom out" aria-label="Zoom out">
           −
         </button>
+        <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
+          +
+        </button>
       </div>
+      {overlay}
       {layouting && <div className="graph-status">Laying out…</div>}
       {hover !== null && nodes[hover] && (
         <div className="graph-tooltip">

@@ -127,8 +127,15 @@ const NO_DOMAIN = ''
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   const [query, setQuery] = useState('')
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
-  const [hiddenDomains, setHiddenDomains] = useState<ReadonlySet<string>>(new Set())
-  const [colorBy, setColorBy] = useState<'type' | 'domain'>('type')
+  /**
+   * Domain chips are SOLO-selects, not hide-toggles: clicking "finance" means "show me
+   * finance", so an empty set = everything visible and a non-empty set = only those
+   * domains. (The old hide-semantics did the exact opposite of what a click intends.)
+   */
+  const [selectedDomains, setSelectedDomains] = useState<ReadonlySet<string>>(new Set())
+  // Domain coloring is the default view — the meta-categories are the axis the user
+  // actually thinks in; the wiki bucket coloring stays available as a toggle.
+  const [colorBy, setColorBy] = useState<'type' | 'domain'>('domain')
   const [localDepth, setLocalDepth] = useState<1 | 2 | 0>(focusPath ? 2 : 0) // 0 = whole graph
 
   const focusIndexFull = useMemo(
@@ -159,7 +166,11 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
   // graph — that is also what keeps the force layout small in local mode on a huge vault.
   const { nodes, edges, focusIndex } = useMemo(() => {
-    let keep: boolean[] = graph.nodes.map((n) => !hiddenTypes.has(n.type) && !hiddenDomains.has(n.domain ?? NO_DOMAIN))
+    let keep: boolean[] = graph.nodes.map(
+      (n) =>
+        !hiddenTypes.has(n.type) &&
+        (selectedDomains.size === 0 || selectedDomains.has(n.domain ?? NO_DOMAIN)),
+    )
 
     if (localDepth > 0 && focusIndexFull >= 0) {
       const adj = new Map<number, number[]>()
@@ -202,7 +213,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       if (ra !== undefined && rb !== undefined) edges.push([ra, rb])
     }
     return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null }
-  }, [graph, hiddenTypes, hiddenDomains, localDepth, focusIndexFull])
+  }, [graph, hiddenTypes, selectedDomains, localDepth, focusIndexFull])
 
   // Search matches titles AND frontmatter tags — "finance" finds every page tagged
   // german-finance even though no title contains the word.
@@ -232,94 +243,101 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setHiddenTypes(next)
   }
 
+  // Solo-select semantics: empty = all; a click adds/removes a domain from the selection,
+  // and deselecting the last one falls back to "all".
   const toggleDomain = (d: string): void => {
-    const next = new Set(hiddenDomains)
+    const next = new Set(selectedDomains)
     if (next.has(d)) next.delete(d)
     else next.add(d)
-    setHiddenDomains(next)
+    setSelectedDomains(next)
   }
 
   const focusNode = focusIndexFull >= 0 ? graph.nodes[focusIndexFull] : undefined
+
+  // The search lives INSIDE the drawing area (top-right), like the zoom controls
+  // (top-left) — it searches the canvas, so it sits on the canvas.
+  const searchOverlay = (
+    <div className="graph-search graph-search-overlay">
+      <Icon name="search" />
+      <input
+        type="search"
+        placeholder="Search pages or tags…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter on an unambiguous match opens the page.
+          if (e.key === 'Enter' && matches.size === 1) {
+            const only = nodes[[...matches][0]!]
+            if (only) navigate(pageRoute(only.path))
+          }
+        }}
+        aria-label="Search the graph for a page or tag"
+      />
+      {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
+      {query.trim() !== '' && results.length > 0 && (
+        <ul className="graph-search-results">
+          {results.map((n) => (
+            <li key={n.path}>
+              <button
+                onClick={() => {
+                  setQuery('')
+                  navigate(pageRoute(n.path))
+                }}
+              >
+                <span className="bucket">{TYPE_LABELS[n.type] ?? n.type}</span>
+                {n.title}
+              </button>
+            </li>
+          ))}
+          {matches.size > results.length && (
+            <li className="more">…{matches.size - results.length} more highlighted in the graph</li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
 
   return (
     <div className="vault-graph">
       <StaleLinksBanner />
       <div className="graph-toolbar">
-        <div className="graph-search">
-          <Icon name="search" />
-          <input
-            type="search"
-            placeholder="Search pages or tags…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter on an unambiguous match opens the page.
-              if (e.key === 'Enter' && matches.size === 1) {
-                const only = nodes[[...matches][0]!]
-                if (only) navigate(pageRoute(only.path))
-              }
-            }}
-            aria-label="Search the graph for a page or tag"
-          />
-          {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
-          {query.trim() !== '' && results.length > 0 && (
-            <ul className="graph-search-results">
-              {results.map((n) => (
-                <li key={n.path}>
-                  <button
-                    onClick={() => {
-                      setQuery('')
-                      navigate(pageRoute(n.path))
-                    }}
-                  >
-                    <span className="bucket">{TYPE_LABELS[n.type] ?? n.type}</span>
-                    {n.title}
-                  </button>
-                </li>
-              ))}
-              {matches.size > results.length && (
-                <li className="more">…{matches.size - results.length} more highlighted in the graph</li>
-              )}
-            </ul>
-          )}
-        </div>
-        <div className="filters">
-          {types.map(([t, count]) => (
-            <button
-              key={t}
-              className={`chip${hiddenTypes.has(t) ? '' : ' active'}`}
-              onClick={() => toggleType(t)}
-              title={hiddenTypes.has(t) ? 'Show' : 'Hide'}
-            >
-              {TYPE_LABELS[t] ?? t} ({count})
-            </button>
-          ))}
-        </div>
         {hasDomains && (
           <div className="filters">
-            <button
-              className={`chip${colorBy === 'domain' ? ' active' : ''}`}
-              onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
-              title="Color nodes by domain instead of page type"
-            >
-              <Icon name="palette" /> color by domain
-            </button>
-            {domains.map(([d, count]) => (
-              <button
-                key={d || '∅'}
-                className={`chip${hiddenDomains.has(d) ? '' : ' active'}`}
-                onClick={() => toggleDomain(d)}
-                title={hiddenDomains.has(d) ? 'Show' : 'Hide'}
-              >
-                <span
-                  className="chip-dot"
-                  style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
-                  aria-hidden
-                />
-                {d === NO_DOMAIN ? 'no domain' : d} ({count})
+            {domains.map(([d, count]) => {
+              const visible = selectedDomains.size === 0 || selectedDomains.has(d)
+              return (
+                <button
+                  key={d || '∅'}
+                  className={`chip${visible ? ' active' : ''}`}
+                  onClick={() => toggleDomain(d)}
+                  title={selectedDomains.has(d) ? 'Deselect (back to all)' : 'Show only this domain'}
+                >
+                  <span
+                    className="chip-dot"
+                    style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
+                    aria-hidden
+                  />
+                  {d === NO_DOMAIN ? 'no domain' : d} ({count})
+                </button>
+              )
+            })}
+            {selectedDomains.size > 0 && (
+              <button className="chip" onClick={() => setSelectedDomains(new Set())} title="Show all domains">
+                <Icon name="x" /> all
               </button>
-            ))}
+            )}
           </div>
+        )}
+        <span className="spacer" />
+        <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
+        {hasDomains && (
+          <button
+            className={`chip${colorBy === 'domain' ? ' active' : ''}`}
+            onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
+            title="Toggle node coloring between domain and page type"
+          >
+            <Icon name="palette" /> {colorBy === 'domain' ? 'colored by domain' : 'colored by type'}
+          </button>
         )}
         {focusNode && (
           <div className="graph-focus">
@@ -346,14 +364,66 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         edges={edges}
         focusIndex={focusIndex}
         matches={matches}
-        colorBy={colorBy}
+        colorBy={hasDomains ? colorBy : 'type'}
         onSelect={(n) => navigate(pageRoute(n.path))}
+        overlay={searchOverlay}
       />
 
       <div className="graph-footer">
         {nodes.length} of {graph.nodes.length} pages · {edges.length} links
         {graph.unresolved > 0 ? ` · ${graph.unresolved} unresolved links` : ''}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The wiki-bucket visibility filters, tucked behind a dropdown: they are an occasional
+ * refinement (hide meta noise, isolate sources), not something worth a permanent row of
+ * nine chips above the graph. Checkbox = visible.
+ */
+function TypesDropdown({
+  types,
+  hidden,
+  onToggle,
+}: {
+  types: Array<[string, number]>
+  hidden: ReadonlySet<string>
+  onToggle: (t: string) => void
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  return (
+    <div className="dropdown" ref={ref}>
+      <button
+        className={`chip${hidden.size > 0 ? ' active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
+      >
+        Page types{hidden.size > 0 ? ` (${hidden.size} hidden)` : ''} ▾
+      </button>
+      {open && (
+        <div className="dropdown-menu" role="menu">
+          {types.map(([t, count]) => (
+            <label key={t} className="dropdown-item">
+              <input type="checkbox" checked={!hidden.has(t)} onChange={() => onToggle(t)} />
+              {TYPE_LABELS[t] ?? t}
+              <span className="count">{count}</span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
