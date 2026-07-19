@@ -89,59 +89,70 @@ export function Dropzone(): React.ReactElement {
   }
 
   const busy = upload.isPending || submit.isPending
+  const maxMb = maxBytes !== undefined ? Math.round(maxBytes / 1024 / 1024) : undefined
 
+  // One compact card, two equal entry paths: files (drop/click) left, link/note right —
+  // instead of two stacked blocks that cost twice the height.
   return (
     <div className="section">
-      <div
-        className={`dropzone${over ? ' over' : ''}`}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setOver(true)
-        }}
-        onDragLeave={() => setOver(false)}
-        onDrop={onDrop}
-        onClick={() => fileInput.current?.click()}
-        onKeyDown={(e) => {
-          // role="button" promises keyboard activation — deliver it (Enter/Space open the picker).
-          if (e.key === 'Enter' || e.key === ' ') {
+      <div className={`card intake${over ? ' over' : ''}`}>
+        <div
+          className="dropzone"
+          onDragOver={(e) => {
             e.preventDefault()
-            fileInput.current?.click()
-          }
-        }}
-        role="button"
-        tabIndex={0}
-        aria-label="Choose files or drag them here"
-      >
-        <div className="icon">
-          <Icon name="upload" />
-        </div>
-        <h3>{busy ? 'Uploading…' : 'Drop files here or click'}</h3>
-        <p>PDF, Office, images, text — multiple files are processed as a batch.</p>
-        <input
-          ref={fileInput}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            takeFiles(Array.from(e.target.files ?? []))
-            e.target.value = ''
+            setOver(true)
           }}
-        />
-      </div>
-
-      <div className="url-row" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="text"
-          placeholder="Paste a URL or type a note…"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
+          onDragLeave={() => setOver(false)}
+          onDrop={onDrop}
+          onClick={() => fileInput.current?.click()}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && url.trim()) submit.mutate(url.trim())
+            // role="button" promises keyboard activation — deliver it (Enter/Space open the picker).
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              fileInput.current?.click()
+            }
           }}
-        />
-        <button className="btn primary" disabled={!url.trim() || busy} onClick={() => submit.mutate(url.trim())}>
-          Add
-        </button>
+          role="button"
+          tabIndex={0}
+          aria-label="Choose files or drag them here"
+        >
+          <div className="icon">
+            <Icon name="upload" />
+          </div>
+          <h3>{busy ? 'Uploading…' : 'Drop files here or click'}</h3>
+          <p>PDF, Office, images, text — multiple files become one batch.</p>
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              takeFiles(Array.from(e.target.files ?? []))
+              e.target.value = ''
+            }}
+          />
+        </div>
+
+        <div className="intake-side">
+          <span className="intake-label">Or paste a link / note</span>
+          <div className="url-row">
+            <input
+              type="text"
+              placeholder="https://… or a quick note"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && url.trim()) submit.mutate(url.trim())
+              }}
+            />
+            <button className="btn primary" disabled={!url.trim() || busy} onClick={() => submit.mutate(url.trim())}>
+              Add
+            </button>
+          </div>
+          <span className="intake-cap">
+            {maxMb !== undefined ? `Max ${maxMb} MB per file · ` : ''}archives are not extracted
+          </span>
+        </div>
       </div>
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

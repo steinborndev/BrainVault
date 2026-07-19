@@ -680,39 +680,72 @@ button {
   cursor: default;
 }
 
-/* ---- Dropzone ---- */
-.dropzone {
-  border: 2px dashed var(--border-strong);
-  border-radius: var(--radius);
-  padding: 30px 20px;
-  text-align: center;
-  transition: border-color 0.15s, background 0.15s;
-  background: var(--bg-elev);
+/* ---- Intake card: dropzone + link/note in one compact card ---- */
+.intake {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  overflow: hidden;
 }
-.dropzone.over {
+.intake.over {
   border-color: var(--accent);
+}
+@media (max-width: 780px) {
+  .intake {
+    grid-template-columns: 1fr;
+  }
+  .intake .dropzone {
+    border-right: none;
+    border-bottom: 1px dashed var(--border-strong);
+  }
+}
+.dropzone {
+  border-right: 1px dashed var(--border-strong);
+  padding: 22px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.dropzone:hover,
+.intake.over .dropzone {
   background: var(--accent-soft);
 }
 .dropzone h3 {
-  margin: 8px 0 4px;
-  font-size: 16px;
+  margin: 6px 0 3px;
+  font-size: 15px;
 }
 .dropzone p {
   margin: 0;
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 .dropzone .icon {
-  font-size: 32px;
+  font-size: 26px;
   opacity: 0.7;
+}
+.intake-side {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+}
+.intake-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+.intake-cap {
+  font-size: 11.5px;
+  color: var(--text-faint);
 }
 .url-row {
   display: flex;
   gap: 8px;
-  margin-top: 14px;
 }
 .url-row input {
   flex: 1;
+  min-width: 0;
   background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -779,6 +812,151 @@ button {
   font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ---- Phase stepper (active jobs) ---- */
+.stepper {
+  display: flex;
+  align-items: center;
+  margin: 10px 0 2px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.step .sdot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  display: grid;
+  place-items: center;
+  background: var(--bg-elev);
+  flex-shrink: 0;
+}
+.step .sdot svg {
+  width: 11px;
+  height: 11px;
+}
+.step.done {
+  color: var(--text-dim);
+}
+.step.done .sdot {
+  border-color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.step.now {
+  color: var(--busy);
+  font-weight: 600;
+}
+.step.now .sdot {
+  border-color: var(--busy);
+  background: var(--busy-bg);
+}
+.step.now .sdot i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--busy);
+  animation: badge-pulse 1.4s ease infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .step.now .sdot i { animation: none; }
+}
+.stepline {
+  flex: 0 0 28px;
+  height: 2px;
+  background: var(--border-strong);
+  margin: 0 8px;
+}
+.stepline.done {
+  background: var(--ok);
+}
+.elapsed {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--busy);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Batch group in the queue ---- */
+.batch {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.batch-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-elev-2);
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.batch-head strong {
+  color: var(--text);
+}
+.batch .job {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* ---- History toolbar (search + count chips) ---- */
+.hist-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.hist-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  color: var(--text-faint);
+}
+.hist-search input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  width: 150px;
+  font-size: 13px;
+}
+.chip .chip-n {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.chip.active .chip-n {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* Armed (two-step) destructive confirm — red fill + visible countdown. */
+.btn.armed {
+  background: var(--err);
+  border-color: var(--err);
+  color: #fff;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.btn.armed:hover {
+  border-color: var(--err);
+  filter: brightness(1.08);
 }
 
 /* ---- Live log ---- */
