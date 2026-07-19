@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, describeConfig, ConfigError } from '../config.js'
+import { loadConfig, describeConfig, requireAuth, ConfigError } from '../config.js'
 import { runAgent, DEFAULT_TIMEOUT_MS } from '../pipeline/agent-runner.js'
 import { formatMessage } from '../pipeline/format-message.js'
 
@@ -76,7 +76,7 @@ async function main(): Promise<number> {
   const run = await runAgent({
     vaultRoot: config.vaultRoot,
     prompt,
-    auth: config.auth,
+    auth: requireAuth(config),
     onMessage: (message) => {
       const line = formatMessage(message)
       if (line !== undefined) console.log(line)
@@ -90,7 +90,7 @@ async function main(): Promise<number> {
   console.log(`  tokens:   ${run.usage.tokensIn} in / ${run.usage.tokensOut} out`)
   console.log(
     `  cost:     $${run.usage.costUsd.toFixed(4)}` +
-      (config.auth.mode === 'oauth' ? '  (estimate — subscription mode, not billed)' : ''),
+      (requireAuth(config).mode === 'oauth' ? '  (estimate — subscription mode, not billed)' : ''),
   )
   console.log(`  session:  ${run.sessionId}`)
   if (run.ok) console.log(`\n${run.result}`)

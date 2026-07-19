@@ -13,6 +13,8 @@ export function registerHealthRoute(app: FastifyInstance, ctx: AppContext): void
       // No vaultRoot here: this route is public (PUBLIC_PATHS), and once the token-mode
       // remote-bind seam is used it must not leak filesystem layout to the unauthenticated.
       // The authenticated settings route exposes it for the UI.
+      // False = setup mode; drives the app-wide "set up your credential" banner.
+      credentialConfigured: ctx.config.auth !== null,
       queue: ctx.queue.stats(),
       jobs: ctx.store.counts(),
       // Client-side pre-checks (the dropzone warns before uploading a file the server

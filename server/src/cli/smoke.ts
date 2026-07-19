@@ -11,7 +11,7 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, describeConfig, ConfigError } from '../config.js'
+import { loadConfig, describeConfig, requireAuth, ConfigError } from '../config.js'
 import { buildAgentEnv } from '../pipeline/agent-runner.js'
 
 async function main(): Promise<number> {
@@ -46,7 +46,7 @@ async function main(): Promise<number> {
         abortController: controller,
         // Without this the subprocess has no credential and answers
         // "Not logged in" as a *successful* result.
-        env: buildAgentEnv(config.auth),
+        env: buildAgentEnv(requireAuth(config)),
       },
     })) {
       if (message.type !== 'result') continue
@@ -65,7 +65,7 @@ async function main(): Promise<number> {
         console.log(`  tokens: ${message.usage.input_tokens} in / ${message.usage.output_tokens} out`)
         console.log(
           `  cost:   $${message.total_cost_usd.toFixed(4)}` +
-            (config.auth.mode === 'oauth' ? '  (estimate — subscription mode)' : ''),
+            (requireAuth(config).mode === 'oauth' ? '  (estimate — subscription mode)' : ''),
         )
         return 0
       }

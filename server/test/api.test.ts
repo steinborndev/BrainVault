@@ -156,6 +156,61 @@ describe('GET /api/v1/health', () => {
   })
 })
 
+describe('setup mode (no credential)', () => {
+  it('serves the API read-only-ish: health flags it, run-starting routes 503', async () => {
+    const setupApp = await buildServer({
+      config: { ...makeConfig(), auth: null },
+      store,
+      chat,
+      queue: new IngestQueue({
+        store,
+        vaultRoot,
+        auth: null,
+        detectToolsFn: async () => NO_TOOLS,
+      }),
+      events,
+      maintenance,
+      settings: new SettingsStore(db),
+      runQuery: (input) => queryImpl(input),
+      autoCommit: () => false,
+      logger: false,
+    })
+    try {
+      const health = await setupApp.inject({ method: 'GET', url: '/api/v1/health' })
+      expect(health.json()).toMatchObject({ status: 'ok', credentialConfigured: false })
+
+      const settingsRes = await setupApp.inject({ method: 'GET', url: '/api/v1/settings' })
+      expect(settingsRes.json()).toMatchObject({ readOnly: { credentialConfigured: 'no', authMode: 'none' } })
+
+      const upload = await setupApp.inject({
+        method: 'POST',
+        url: '/api/v1/jobs',
+        headers: { 'content-type': 'application/json' },
+        payload: { url: 'https://example.com/a' },
+      })
+      expect(upload.statusCode).toBe(503)
+
+      const query = await setupApp.inject({
+        method: 'POST',
+        url: '/api/v1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { question: 'anything' },
+      })
+      expect(query.statusCode).toBe(503)
+
+      const lint = await setupApp.inject({ method: 'POST', url: '/api/v1/maintenance/lint' })
+      expect(lint.statusCode).toBe(503)
+    } finally {
+      await setupApp.close()
+    }
+  })
+
+  it('a queue built without auth refuses to start (wiring backstop)', () => {
+    const q = new IngestQueue({ store, vaultRoot, auth: null, detectToolsFn: async () => NO_TOOLS })
+    expect(() => q.start()).toThrow(/setup mode/)
+  })
+})
+
 describe('cross-origin guard', () => {
   it('rejects a state-changing request with a foreign Origin (drive-by CSRF)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/jobs`, {

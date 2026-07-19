@@ -26,7 +26,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { loadConfig } from '../config.js'
+import { loadConfig, requireAuth } from '../config.js'
 import { runAgent } from '../pipeline/agent-runner.js'
 
 /**
@@ -102,7 +102,7 @@ console.log(`starting a run with a ${RUN_TIMEOUT_MS / 1000}s timeout that will g
 
 const result = await runAgent({
   vaultRoot: config.vaultRoot,
-  auth: config.auth,
+  auth: requireAuth(config),
   // See the header: `query` makes the agent refuse the blocking command, so this uses `ingest`
   // (also the profile the real hang occurred under). Point VAULT_ROOT at a throwaway vault.
   profile: 'ingest',

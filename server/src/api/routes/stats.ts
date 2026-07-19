@@ -94,8 +94,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
 
     return {
       vaultName: config.obsidianVaultName,
-      /** Anthropic auth mode — drives the "Schätzwert (Abo)" labelling across the whole UI. */
-      authMode: config.auth.mode,
+      /** Anthropic auth mode — drives the "estimate (subscription)" labelling across the whole UI. */
+      authMode: config.auth?.mode ?? 'none',
       pages: derived.pages,
       recentPages: derived.recentPages,
       commits: derived.commits,
@@ -116,7 +116,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       budget,
       jobs: counts,
       queue: { queued, active, ...queue.stats() },
-      watcher: { active: true, folder: config.server.watchFolder },
+      // The watcher only starts outside setup mode (main.ts) — report what actually runs.
+      watcher: { active: config.auth !== null, folder: config.server.watchFolder },
       generatedAt: new Date().toISOString(),
     }
   })

@@ -37,6 +37,13 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
   const { queue, store, events } = ctx
 
   app.post('/api/v1/jobs', async (req, reply) => {
+    // Setup mode: the queue never claims, so accepting the upload would strand it in
+    // `queued` with no feedback. Refuse with the same guidance the other run routes give.
+    if (ctx.config.auth === null) {
+      return reply.code(503).send({
+        error: 'no Anthropic credential configured — add it under Maintenance → Settings, then restart',
+      })
+    }
     const enqueued: EnqueuedRef[] = []
 
     if (req.isMultipart()) {

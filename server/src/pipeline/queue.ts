@@ -64,7 +64,8 @@ export type IngestRunner = (opts: {
 export interface IngestQueueOptions {
   readonly store: JobStore
   readonly vaultRoot: string
-  readonly auth: AgentAuth
+  /** `null` in setup mode (no credential yet): the queue accepts jobs but must not be started. */
+  readonly auth: AgentAuth | null
   readonly concurrency?: number
   readonly timeoutMs?: number
   readonly maxRetries?: number
@@ -186,7 +187,7 @@ export function sanitizeOriginalName(name: string): string {
 export class IngestQueue {
   private readonly store: JobStore
   private readonly vaultRoot: string
-  private readonly auth: AgentAuth
+  private readonly auth: AgentAuth | null
   /** Not readonly: settings can raise/lower it live (SPEC.md §6.4 "Parallelität"). */
   private concurrency: number
   private readonly timeoutMs: number
@@ -251,10 +252,20 @@ export class IngestQueue {
     this.pump()
   }
 
+  /**
+   * The credential for a run. Runs are unreachable in setup mode (start() is never called,
+   * pump() checks `running`), so this throwing means a wiring bug, not a user error.
+   */
+  private assertAuth(): AgentAuth {
+    if (this.auth === null) throw new Error('agent run attempted with no credential configured (setup mode)')
+    return this.auth
+  }
+
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
    * batches whose members are still queued are reconstructed into pending units. Jobs
    * stranded mid-flight by an abrupt stop are first reconciled to `failed` (retryable). */
   start(): void {
+    if (this.auth === null) throw new Error('IngestQueue.start() requires a configured credential (setup mode)')
     this.running = true
     const recovered = this.store.recoverInterrupted()
     if (recovered.length > 0) {
@@ -616,7 +627,7 @@ export class IngestQueue {
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
       prompt,
-      auth: this.auth,
+      auth: this.assertAuth(),
       timeoutMs: this.timeoutMs,
       // Read per run, not cached: the registry is a vault page the user may edit at any
       // time, and the next ingest should honour the edit without a service restart.
@@ -785,7 +796,7 @@ export class IngestQueue {
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
       prompt,
-      auth: this.auth,
+      auth: this.assertAuth(),
       timeoutMs: this.timeoutMs,
       // Read per run, not cached: the registry is a vault page the user may edit at any
       // time, and the next ingest should honour the edit without a service restart.

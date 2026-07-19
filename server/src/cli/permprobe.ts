@@ -15,7 +15,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { query } from '@anthropic-ai/claude-agent-sdk'
-import { loadConfig } from '../config.js'
+import { loadConfig, requireAuth } from '../config.js'
 import { buildOptions } from '../pipeline/agent-runner.js'
 
 const config = loadConfig()
@@ -28,7 +28,7 @@ const abortController = new AbortController()
 setTimeout(() => abortController.abort(), 120_000)
 
 const options = buildOptions(
-  { vaultRoot: config.vaultRoot, prompt: '', auth: config.auth },
+  { vaultRoot: config.vaultRoot, prompt: '', auth: requireAuth(config) },
   abortController,
 )
 

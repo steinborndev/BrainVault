@@ -65,7 +65,8 @@ export type MaintenanceAgentRunner = typeof runAgent
 
 export interface MaintenanceRunnerOptions {
   readonly vaultRoot: string
-  readonly auth: AgentAuth
+  /** `null` in setup mode (no credential yet): runs are refused at the route with a 503. */
+  readonly auth: AgentAuth | null
   readonly events: EventBus
   /** Shared with the ingest queue so commits never interleave (TASKS-M4 §2). */
   readonly commitMutex: Mutex
@@ -130,7 +131,7 @@ interface RunOptions {
 
 export class MaintenanceRunner {
   private readonly vaultRoot: string
-  private readonly auth: AgentAuth
+  private readonly auth: AgentAuth | null
   private readonly events: EventBus
   private readonly commitMutex: Mutex
   private readonly runAgentFn: MaintenanceAgentRunner
@@ -151,6 +152,12 @@ export class MaintenanceRunner {
     this.commit = opts.commit ?? commitVault
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
+  }
+
+  /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
+  private assertAuth(): AgentAuth {
+    if (this.auth === null) throw new Error('maintenance run attempted with no credential configured (setup mode)')
+    return this.auth
   }
 
   /** Starts a lint run in the background; returns its tracked run immediately. */
@@ -448,7 +455,7 @@ export class MaintenanceRunner {
       const res = await this.runAgentFn({
         vaultRoot: this.vaultRoot,
         prompt,
-        auth: this.auth,
+        auth: this.assertAuth(),
         profile,
         timeoutMs: this.timeoutMs,
         // A save resumes the chat's SDK session so the agent still has the conversation it is

@@ -33,7 +33,7 @@ export interface BudgetStatus {
 
 /** The unit the budget is expressed in for this auth mode. */
 export function budgetUnit(config: Config): BudgetUnit {
-  return config.auth.mode === 'oauth' ? 'jobs' : 'usd'
+  return config.auth?.mode === 'oauth' ? 'jobs' : 'usd'
 }
 
 /** Local midnight that starts today's budget window. */

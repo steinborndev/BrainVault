@@ -32,10 +32,11 @@ export function registerSettingsRoute(app: FastifyInstance, ctx: AppContext): vo
     vaultRoot: config.vaultRoot,
     bind: `${config.server.host}:${config.server.port}`,
     httpAuthMode: config.server.authMode,
-    // "API-Key-Status (Key selbst wird nie angezeigt)" — SPEC.md §6.4.
-    authMode: config.auth.mode,
-    credentialSource: config.auth.envVar,
-    credentialConfigured: 'yes',
+    // "API-Key-Status (Key selbst wird nie angezeigt)" — SPEC.md §6.4. In setup mode
+    // (no credential yet) the UI uses this to show the onboarding form.
+    authMode: config.auth?.mode ?? 'none',
+    credentialSource: config.auth?.envVar ?? 'none',
+    credentialConfigured: config.auth !== null ? 'yes' : 'no',
   })
 
   const snapshot = (): object => {

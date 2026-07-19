@@ -29,6 +29,13 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
   let activeQueries = 0
 
   app.post('/api/v1/query', async (req, reply) => {
+    // Setup mode: a query is an agent run; refuse with guidance instead of spawning.
+    const auth = config.auth
+    if (auth === null) {
+      return reply.code(503).send({
+        error: 'no Anthropic credential configured — add it under Maintenance → Settings, then restart',
+      })
+    }
     const body = (req.body ?? {}) as { question?: unknown; sessionId?: unknown }
     const question = typeof body.question === 'string' ? body.question.trim() : ''
     if (question === '') return reply.code(400).send({ error: 'provide a non-empty "question"' })
@@ -53,7 +60,7 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
       res = await runQuery({
         vaultRoot: config.vaultRoot,
         question,
-        auth: config.auth,
+        auth,
         ...(session.sdk_session_id ? { resumeSessionId: session.sdk_session_id } : {}),
       })
     } finally {
@@ -86,7 +93,7 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
       message,
       citations,
       usage: res.usage,
-      authMode: config.auth.mode, // so the UI can label cost "Schätzwert (Abo)" (SPEC.md §7.1)
+      authMode: auth.mode, // so the UI can label cost "estimate (subscription)" (SPEC.md §7.1)
     })
   })
 
@@ -132,6 +139,11 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
    * vault-mutating runs: returns a run id at once, poll `GET /maintenance/runs/:id`.
    */
   app.post('/api/v1/sessions/:id/save', async (req, reply) => {
+    if (config.auth === null) {
+      return reply.code(503).send({
+        error: 'no Anthropic credential configured — add it under Maintenance → Settings, then restart',
+      })
+    }
     const { id } = req.params as { id: string }
     const session = chat.getSession(id)
     if (session === undefined) return reply.code(404).send({ error: 'no such session' })

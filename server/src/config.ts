@@ -53,6 +53,13 @@ export interface ServerConfig {
   readonly watchPolling?: boolean
 }
 
+export interface AuthConfig {
+  readonly mode: AuthMode
+  /** The credential value. Never log this — use describeConfig(). */
+  readonly credential: string
+  readonly envVar: CredentialEnvVar
+}
+
 export interface Config {
   readonly vaultRoot: string
   /**
@@ -62,12 +69,13 @@ export interface Config {
    * added to Obsidian under a different name.
    */
   readonly obsidianVaultName: string
-  readonly auth: {
-    readonly mode: AuthMode
-    /** The credential value. Never log this — use describeConfig(). */
-    readonly credential: string
-    readonly envVar: CredentialEnvVar
-  }
+  /**
+   * `null` = SETUP MODE: no credential configured yet. The service still starts and serves
+   * the dashboard so a first-run user can enter the key there (SPEC.md §7.1 onboarding),
+   * but nothing that would spawn an agent runs — the queue does not claim, the watcher does
+   * not start, and query/maintenance answer 503. CLIs that need a credential use requireAuth.
+   */
+  readonly auth: AuthConfig | null
   readonly server: ServerConfig
 }
 
@@ -236,15 +244,10 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     )
   }
 
-  if (present.length === 0) {
-    throw new ConfigError(
-      `no Anthropic credential configured. Set exactly one of ${CREDENTIAL_ENV_VARS.join(' or ')} ` +
-        `(subscription path: run \`claude setup-token\` and store the token in ${DEFAULT_ENV_FILE}).`,
-    )
-  }
-
-  const envVar = present[0] as CredentialEnvVar
-  const credential = parsed.data[envVar] as string
+  // Zero credentials is NOT a startup error: the service starts in setup mode so the
+  // dashboard can walk a first-run user through entering the key (Config.auth doc above).
+  const envVar = present[0] as CredentialEnvVar | undefined
+  const credential = envVar !== undefined ? (parsed.data[envVar] as string) : undefined
 
   const authMode: HttpAuthMode = parsed.data.HTTP_AUTH_MODE ?? 'local-single-user'
   const watchPolling = parsed.data.WATCH_POLLING
@@ -267,9 +270,25 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   return {
     vaultRoot,
     obsidianVaultName: parsed.data.OBSIDIAN_VAULT_NAME ?? path.basename(vaultRoot),
-    auth: { mode: envVar === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'oauth' : 'api-key', credential, envVar },
+    auth:
+      envVar !== undefined && credential !== undefined
+        ? { mode: envVar === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'oauth' : 'api-key', credential, envVar }
+        : null,
     server,
   }
+}
+
+/**
+ * The credential, or a fail-fast ConfigError for entrypoints that cannot run without one
+ * (the CLIs). The HTTP service deliberately does NOT call this — it starts in setup mode.
+ */
+export function requireAuth(config: Config): AuthConfig {
+  if (config.auth !== null) return config.auth
+  throw new ConfigError(
+    `no Anthropic credential configured. Set exactly one of ${CREDENTIAL_ENV_VARS.join(' or ')} ` +
+      `(subscription path: run \`claude setup-token\` and store the token in ${DEFAULT_ENV_FILE}, ` +
+      `or start the service and enter it under Maintenance → Settings).`,
+  )
 }
 
 /**
@@ -281,9 +300,9 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
 export function describeConfig(config: Config): Record<string, string> {
   return {
     vaultRoot: config.vaultRoot,
-    authMode: config.auth.mode,
-    credentialSource: config.auth.envVar,
-    credential: `<redacted, ${config.auth.credential.length} chars>`,
+    authMode: config.auth?.mode ?? 'none (setup mode)',
+    credentialSource: config.auth?.envVar ?? '-',
+    credential: config.auth ? `<redacted, ${config.auth.credential.length} chars>` : '<not configured>',
     bind: `${config.server.host}:${config.server.port}`,
     watchFolder: config.server.watchFolder,
     httpAuth: config.server.authMode,

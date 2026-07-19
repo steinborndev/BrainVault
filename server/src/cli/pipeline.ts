@@ -14,7 +14,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { loadConfig, describeConfig, ConfigError } from '../config.js'
+import { loadConfig, describeConfig, requireAuth, ConfigError } from '../config.js'
 import { openDb, defaultDbPath } from '../db/index.js'
 import { JobStore } from '../db/jobs.js'
 import { IngestQueue } from '../pipeline/queue.js'
@@ -82,7 +82,7 @@ async function main(): Promise<number> {
 
   const db = openDb(dbPath)
   const store = new JobStore(db)
-  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: config.auth })
+  const queue = new IngestQueue({ store, vaultRoot: config.vaultRoot, auth: requireAuth(config) })
   queue.start()
 
   const jobIds: string[] = []

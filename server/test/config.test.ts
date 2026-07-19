@@ -6,6 +6,7 @@ import {
   loadConfig,
   parseEnvFile,
   describeConfig,
+  requireAuth,
   ConfigError,
   CREDENTIAL_ENV_VARS,
 } from '../src/config.js'
@@ -68,10 +69,14 @@ describe('loadConfig — credential rules (CLAUDE.md hard rule 3)', () => {
       .toThrow(ConfigError)
   })
 
-  it('refuses when NO credential is set', () => {
-    expect(() => loadConfig({ envFile: false, env: { VAULT_ROOT: vault } })).toThrow(
-      /no anthropic credential/i,
-    )
+  it('enters setup mode (auth null) when NO credential is set — the service must still start', () => {
+    const config = loadConfig({ envFile: false, env: { VAULT_ROOT: vault } })
+    expect(config.auth).toBeNull()
+  })
+
+  it('requireAuth fails fast for CLIs when in setup mode', () => {
+    const config = loadConfig({ envFile: false, env: { VAULT_ROOT: vault } })
+    expect(() => requireAuth(config)).toThrow(/no anthropic credential/i)
   })
 
   it('treats an empty credential value as unset, not as configured', () => {
@@ -116,14 +121,14 @@ describe('loadConfig — env file handling', () => {
     const envFile = path.join(vault, 'env')
     fs.writeFileSync(envFile, '# comment\nCLAUDE_CODE_OAUTH_TOKEN=from-file\n')
     const config = loadConfig({ envFile, env: { VAULT_ROOT: vault } })
-    expect(config.auth.credential).toBe('from-file')
+    expect(config.auth!.credential).toBe('from-file')
   })
 
   it('lets the process environment win over the file for the same var', () => {
     const envFile = path.join(vault, 'env')
     fs.writeFileSync(envFile, 'CLAUDE_CODE_OAUTH_TOKEN=from-file\n')
     const config = loadConfig({ envFile, env: { VAULT_ROOT: vault, CLAUDE_CODE_OAUTH_TOKEN: 'from-env' } })
-    expect(config.auth.credential).toBe('from-env')
+    expect(config.auth!.credential).toBe('from-env')
   })
 
   it('ignores a missing env file rather than failing', () => {
@@ -131,7 +136,7 @@ describe('loadConfig — env file handling', () => {
       envFile: path.join(vault, 'does-not-exist'),
       env: { VAULT_ROOT: vault, CLAUDE_CODE_OAUTH_TOKEN: 'tok' },
     })
-    expect(config.auth.credential).toBe('tok')
+    expect(config.auth!.credential).toBe('tok')
   })
 })
 

@@ -70,7 +70,12 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // queue's pause decision and the dashboard's display can never disagree (SPEC.md §11.3).
     budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
   })
-  queue.start()
+  // SETUP MODE (config.auth === null): serve the dashboard so the user can enter the
+  // credential there, but start nothing that could spawn an agent — the queue never claims
+  // and the inbox watcher stays off. A restart after the credential is written picks
+  // everything up (queued rows included).
+  const setupMode = config.auth === null
+  if (!setupMode) queue.start()
 
   const maintenance = new MaintenanceRunner({
     vaultRoot: config.vaultRoot,
@@ -92,11 +97,13 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     },
   }
 
-  const watcher = startWatcher({
-    queue,
-    config: effectiveConfig,
-    ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
-  })
+  const watcher: Watcher = setupMode
+    ? { close: async () => {} }
+    : startWatcher({
+        queue,
+        config: effectiveConfig,
+        ...(config.server.watchPolling !== undefined ? { usePolling: config.server.watchPolling } : {}),
+      })
 
   // Live-graph signal (SPEC.md §12.4): wiki file changes → debounced `vault` SSE event.
   const vaultWatcher = startVaultWatcher({ vaultRoot: config.vaultRoot, events })
@@ -121,6 +128,12 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
 
   // Log what the service actually runs with (overrides applied), not the bare baseline.
   app.log.info({ ...describeConfig(effectiveConfig), transportPin: pin }, 'vault-service started')
+  if (setupMode) {
+    app.log.warn(
+      `SETUP MODE: no Anthropic credential configured — ingestion, watcher, query and maintenance ` +
+        `are disabled. Open ${url} and add the credential under Maintenance → Settings.`,
+    )
+  }
 
   const stop = async (): Promise<void> => {
     await watcher.close()
