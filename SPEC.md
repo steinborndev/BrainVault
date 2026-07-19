@@ -143,7 +143,7 @@ Chat-Oberfläche gegen den Query-Runner. Antworten enthalten die vom wiki-query-
 - **Lint:** Button startet `lint the wiki` als Agent-Run; Ergebnis wird strukturiert dargestellt (Orphans, tote Links, stale Claims, fehlende Cross-Links, `[!contradiction]`-Funde), jeweils mit Link zur Seite. Optional: wöchentlicher Auto-Lint (Cron im Service), Ergebnis landet als Bericht im Tab.
 - **Autoresearch:** Eingabefeld für ein Thema, startet `/autoresearch <topic>` mit explizit freigeschaltetem Web-Egress; Fortschritt (Runden, gefundene Quellen) live im Log; Ergebnis-Seiten verlinkt.
 - **Hot Cache:** manueller Refresh-Button + Anzeige des letzten Refresh-Zeitpunkts.
-- **Einstellungen:** Watch-Ordner-Pfad, Parallelität, Datei-Limits, Git-Commit-Verhalten, API-Key-Status (Key selbst wird nie angezeigt).
+- **Einstellungen:** Watch-Ordner-Pfad, Parallelität, Datei-Limits, Git-Commit-Verhalten, API-Key-Status (Key selbst wird nie angezeigt). **Ergänzt 2026-07-19:** hier liegt zusätzlich die Credential-Eingabe der Ersteinrichtung (Abo-Token vs. API-Key zur Auswahl, je mit Anleitung) — im Setup-Modus aufgeklappt und über ein app-weites Banner verlinkt, mit konfiguriertem Credential hinter "Replace credential…" verborgen. Angezeigt wird weiterhin nur der Status, nie der Wert.
 
 ### 6.5 API (Auszug)
 
@@ -160,6 +160,8 @@ POST   /api/v1/maintenance/lint     Lint-Run starten
 POST   /api/v1/maintenance/research Autoresearch starten
 GET    /api/v1/events               SSE: Job-Updates, Log-Streams, Statistik-Invalidation
 GET/PUT /api/v1/settings            Konfiguration
+POST   /api/v1/settings/credential  Credential der Ersteinrichtung entgegennehmen (7.1);
+                                    schreibt die Service-Env-Datei, liefert den Wert nie zurück
 ```
 
 ---
@@ -187,6 +189,10 @@ GET/PUT /api/v1/settings            Konfiguration
 3. **Anzeige:** Das Dashboard zeigt Token-Verbrauch pro Job und aggregiert (aus den SDK-Usage-Daten); die Spalte `cost_usd` wird im Abo-Modus als rechnerischer Gegenwert zu API-Preisen befüllt und als "Schätzwert (Abo)" gekennzeichnet — nützlich, um den Wechsel auf API-Key-Betrieb zu bewerten.
 
 **Sekundärer Pfad: API-Key.** Umschalten ist reine Konfiguration (`ANTHROPIC_API_KEY` statt Token setzen); Pay-per-Use mit echten Kosten pro Job, dann greift das Tageslimit als Dollarbetrag.
+
+**Ersteinrichtung ohne Credential: Setup-Modus (ergänzt 2026-07-19).** Ist *kein* Credential konfiguriert, bricht der Service **nicht** mehr beim Start ab, sondern läuft im **Setup-Modus**: Dashboard, Vault-Viewer und lesende Endpunkte sind verfügbar, aber alles, was einen Agent-Run starten würde, ist abgeschaltet — die Queue beansprucht keine Jobs, der Watch-Ordner wird nicht überwacht, und Upload/Query/Session-Save/Maintenance antworten mit `503` samt Hinweis. Grund für die Abweichung vom bisherigen Startabbruch: Ohne laufenden Service gibt es keine Oberfläche, in der ein Erstnutzer den Key hinterlegen könnte — der Abbruch machte die Ersteinrichtung zwingend zu einem Terminal-Vorgang. Der Startabbruch bei **doppelt** konfiguriertem Credential bleibt unverändert bestehen.
+
+Das Credential wird über `POST /api/v1/settings/credential` entgegengenommen (Kind `oauth` | `api-key` plus Wert) und in die Service-Env-Datei `~/.config/vault-service/env` geschrieben (Modus 0600, Write-then-Rename, vorhandene Nicht-Credential-Einträge bleiben erhalten, das jeweils andere Credential wird entfernt). Diese Datei *ist* die Service-Umgebung im Sinne von Abschnitt 9 — der Wert erreicht weder SQLite noch Logs, Frontend oder API-Antworten, und wird nach dem Schreiben nie wieder ausgeliefert. Der Endpunkt validiert die Token-Form je Kind (Präfix `sk-ant-oat…` vs. `sk-ant-api…`), lehnt mit `409` ab, wenn das Credential aus der Prozess-Umgebung stammt (dort würde es die Datei überlagern) oder gerade Runs laufen. Aktivierung erfolgt per Neustart, da das Credential an allen Aufrufstellen zum Startzeitpunkt gebunden wird: unter systemd startet sich der Dienst dafür selbst neu (`Restart=on-failure`), sonst weist die Oberfläche den manuellen Neustart aus.
 
 **Policy-Vorbehalt:** Anthropics Regelung zur Agent-SDK-Nutzung mit Abos ist in Bewegung (Feb 2026: OAuth-Verbot fürs SDK; Juni 2026: angekündigtes separates SDK-Monatsguthaben, dessen Einführung am 15. Juni pausiert wurde — aktuell zählt SDK-Nutzung laut offizieller Support-Seite weiter gegen die Abo-Limits). Die Spec behandelt die Auth deshalb als austauschbares Modul; sollte Anthropic die Abo-Nutzung fürs SDK einschränken oder das Guthabenmodell aktivieren, ist nur die Umgebungskonfiguration und ggf. die Limit-Anzeige anzupassen. Vor Implementierungsstart von M0 ist der dann aktuelle Stand unter support.claude.com zu verifizieren.
 
@@ -226,7 +232,9 @@ Der Vault selbst bleibt die einzige Wahrheit für Wissen; SQLite hält ausschlie
 - Server bindet in v1 ausschließlich an `127.0.0.1`; die Auth-Middleware läuft im Modus "local-single-user" (alles erlaubt). Der Guard ist im Code verankert: Bind ≠ localhost ⇒ Startabbruch, solange kein Auth-Modus mit Token/Passwort aktiviert ist. Damit ist der Remote-Zugriff (Abschnitt 12.2/12.3) ein Konfigurationsschritt mit erzwungener Auth, kein ungeschützter Zufallszustand.
 - Agent-Runs: Schreibrechte nur unterhalb des Vault-Pfads; Bash auf Skript-Whitelist; Web-Egress nur im Autoresearch-Flow, dort mit den Hygiene-Regeln des Repos (URL-Validierung, Sanitization, 50-KB-Fetch-Cap).
 - Eingehende Dateien werden nie ausgeführt; Magic-Byte-Prüfung gegen getarnte Executables; Archive nicht auto-entpackt.
-- Credentials (OAuth-Token bzw. API-Key) nur in der Service-Umgebung, nie im Frontend, nie in Logs, nie im Repo.
+- Credentials (OAuth-Token bzw. API-Key) nur in der Service-Umgebung, nie im Frontend, nie in Logs, nie im Repo. Die Env-Datei `~/.config/vault-service/env` (0600) gilt als diese Umgebung; sie darf durch den Credential-Endpunkt aus Abschnitt 7.1 beschrieben, aber niemals ausgelesen und zurückgegeben werden. Ohne konfiguriertes Credential läuft der Service im Setup-Modus (ebenfalls 7.1) statt zu terminieren.
+- **Schutz gegen Drive-by-Zugriffe aus dem Browser (ergänzt 2026-07-19):** Zustandsändernde Requests (`POST`/`PUT`/`PATCH`/`DELETE`) mit fremdem `Origin`-Header werden mit `403` abgelehnt. Der Modus "local-single-user" kennt kein Credential, und ein Multipart-Upload ist ein CORS-"simple request" ohne Preflight — ohne diese Prüfung könnte jede beliebige besuchte Webseite Uploads und damit kostenpflichtige Agent-Runs gegen `127.0.0.1` auslösen. Loopback-Origins (beliebiger Port, für den Vite-Dev-Proxy) und Requests ohne `Origin` (curl, systemd-Probe) passieren.
+- **Dateinamen aus Uploads werden auf den reinen Basename reduziert**, bevor sie unter `.raw/<job-id>/` abgelegt werden; ein `../`-haltiger Name aus dem Multipart-Header könnte sonst *außerhalb* von `VAULT_ROOT` schreiben — an der Sandbox vorbei, da diese nur Agent-Runs umschließt, nicht den HTTP-Pfad.
 - Git-History als Undo-Mechanismus: Jeder Ingest ist ein Commit, fehlerhafte Läufe sind per `git revert` rückholbar (Button "Ingest rückgängig" im Verlauf, v1.1).
 
 ---
