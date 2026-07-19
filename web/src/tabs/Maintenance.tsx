@@ -43,13 +43,13 @@ export function Maintenance(): React.ReactElement {
       {/* Lint */}
       <div className="card card-pad section">
         <div className="section-head">
-          <h3 className="section-title">Lint — Wiki-Gesundheit</h3>
+          <h3 className="section-title">Lint — wiki health</h3>
           <button className="btn primary" disabled={lint.running} onClick={lint.start}>
-            {lint.running ? 'Läuft…' : 'Lint starten'}
+            {lint.running ? 'Running…' : 'Start lint'}
           </button>
         </div>
         <p className="tab-hint">
-          Findet Orphans, tote Links, stale Claims und fehlende Cross-Links; schreibt einen Bericht in den Vault.
+          Finds orphans, dead links, stale claims and missing cross-links; writes a report into the vault.
         </p>
         {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
         {lint.error && <div className="toast err">{lint.error}</div>}
@@ -68,11 +68,11 @@ export function Maintenance(): React.ReactElement {
         <div className="section-head">
           <h3 className="section-title">Autoresearch</h3>
         </div>
-        <p className="tab-hint">Recherchiert ein Thema mit Web-Zugriff und legt neue Quellen-/Konzeptseiten an.</p>
+        <p className="tab-hint">Researches a topic with web access and creates new source/concept pages.</p>
         <div className="url-row">
           <input
             type="text"
-            placeholder="Thema, z. B. „Sourdough fermentation chemistry“…"
+            placeholder="Topic, e.g. “Sourdough fermentation chemistry”…"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
             onKeyDown={(e) => {
@@ -80,66 +80,66 @@ export function Maintenance(): React.ReactElement {
             }}
           />
           <button className="btn primary" disabled={!topic.trim() || research.running} onClick={research.start}>
-            {research.running ? 'Läuft…' : 'Recherchieren'}
+            {research.running ? 'Running…' : 'Research'}
           </button>
         </div>
         {research.running && <JobLog jobId="maintenance:research" seed={false} />}
         {research.error && <div className="toast err">{research.error}</div>}
-        {research.result && <RunResult result={research.result} vaultName={vaultName} label="Neue/aktualisierte Seiten" />}
+        {research.result && <RunResult result={research.result} vaultName={vaultName} label="New/updated pages" />}
       </div>
 
       {/* Hot cache */}
       <div className="card card-pad section">
         <div className="section-head">
-          <h3 className="section-title">Hot Cache</h3>
+          <h3 className="section-title">Hot cache</h3>
           <button className="btn" disabled={hot.running} onClick={hot.start}>
-            {hot.running ? 'Läuft…' : 'Aktualisieren'}
+            {hot.running ? 'Running…' : 'Refresh'}
           </button>
         </div>
         <p className="tab-hint">
-          Frischt <code>wiki/hot.md</code> auf (schnellerer Kontext für künftige Läufe).
+          Refreshes <code>wiki/hot.md</code> (faster context for future runs).
           {' '}
           {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) — the file's mtime. */}
           {stats.data?.hotCacheUpdatedAt ? (
-            <>Letzter Refresh: <strong title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('de-DE')}>{timeAgo(stats.data.hotCacheUpdatedAt)}</strong>.</>
+            <>Last refresh: <strong title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('en-US')}>{timeAgo(stats.data.hotCacheUpdatedAt)}</strong>.</>
           ) : (
-            <>Noch nie aktualisiert.</>
+            <>Never refreshed.</>
           )}
         </p>
         {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
         {hot.error && <div className="toast err">{hot.error}</div>}
-        {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Aktualisiert" />}
+        {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
       </div>
 
       {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
       <div className="card card-pad section">
         <div className="section-head">
-          <h3 className="section-title">Domänen</h3>
+          <h3 className="section-title">Domains</h3>
           <button
             className="btn"
             disabled={backfill.running || !domains.data?.installed}
             onClick={backfill.start}
-            title={domains.data?.installed ? 'Bestandsseiten einsortieren' : 'Keine Registry installiert'}
+            title={domains.data?.installed ? 'File existing pages into domains' : 'No registry installed'}
           >
-            {backfill.running ? 'Läuft…' : 'Backfill starten'}
+            {backfill.running ? 'Running…' : 'Start backfill'}
           </button>
         </div>
         {domains.data?.installed === false ? (
           <p className="tab-hint">
-            Keine Domänen-Registry im Vault. Anlegen mit{' '}
-            <code>scripts/install-domain-registry.sh</code> — danach steht sie als{' '}
-            <PageLink path={domains.data.path} vaultName={vaultName} /> zum Bearbeiten bereit.
+            No domain registry in the vault. Create it with{' '}
+            <code>scripts/install-domain-registry.sh</code> — afterwards it's editable as{' '}
+            <PageLink path={domains.data.path} vaultName={vaultName} />.
           </p>
         ) : (
           <>
             <p className="tab-hint">
-              Die Meta-Kategorien, unter denen Seiten abgelegt werden — gepflegt in{' '}
-              {domains.data && <PageLink path={domains.data.path} vaultName={vaultName} />}. Jeder Ingest bekommt
-              diese Liste als geschlossene Vorgabe; passt nichts, wird <code>unassigned</code> gesetzt. Der Backfill
-              sortiert Bestandsseiten nach, ohne Seiteninhalte anzufassen.
+              The meta-categories pages are filed under — maintained in{' '}
+              {domains.data && <PageLink path={domains.data.path} vaultName={vaultName} />}. Every ingest gets
+              this list as a closed set; when nothing fits, <code>unassigned</code> is used. The backfill files
+              existing pages without touching page content.
               {undomained > 0 && (
                 <>
-                  {' '}Aktuell <strong>{undomained}</strong> Seite{undomained === 1 ? '' : 'n'} ohne Domäne.
+                  {' '}Currently <strong>{undomained}</strong> page{undomained === 1 ? '' : 's'} without a domain.
                 </>
               )}
             </p>
@@ -154,12 +154,12 @@ export function Maintenance(): React.ReactElement {
         )}
         {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
         {backfill.error && <div className="toast err">{backfill.error}</div>}
-        {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Einsortiert" />}
+        {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Filed" />}
         {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
       </div>
 
       <div className="card card-pad section">
-        <h3 className="section-title">Einstellungen</h3>
+        <h3 className="section-title">Settings</h3>
         <SettingsEditor />
       </div>
     </div>
@@ -202,27 +202,26 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
   return (
     <div className="domain-candidates">
       <div className="section-head">
-        <h4 className="section-title">Kandidaten für neue Domänen</h4>
+        <h4 className="section-title">Candidates for new domains</h4>
         <div className="candidate-actions">
-          <label className="toggle" title="Kandidaten zusätzlich von einem Agenten bewerten lassen (kostet einen Lauf)">
+          <label className="toggle" title="Additionally have an agent judge the candidates (costs one run)">
             <input type="checkbox" checked={withAgent} onChange={(e) => setWithAgent(e.target.checked)} />
-            Mit Agent-Bewertung
+            With agent review
           </label>
           <button className="btn" disabled={review.running || (withAgent && data.candidates.length === 0)} onClick={start}>
-            {review.running ? 'Läuft…' : 'Kandidaten prüfen'}
+            {review.running ? 'Running…' : 'Check candidates'}
           </button>
         </div>
       </div>
 
       <p className="tab-hint">
-        Themen unter den <code>unassigned</code>-Seiten, die groß genug für eine eigene Domäne wären (ab{' '}
-        {data.threshold} Seiten). {data.unassignedCount} Seite{data.unassignedCount === 1 ? '' : 'n'} ohne
-        passende Domäne.
+        Topics among the <code>unassigned</code> pages large enough for a domain of their own ({data.threshold}+
+        pages). {data.unassignedCount} page{data.unassignedCount === 1 ? '' : 's'} without a fitting domain.
         {data.undomainedCount > 0 && (
           <>
             {' '}
-            <strong>{data.undomainedCount}</strong> Seite{data.undomainedCount === 1 ? '' : 'n'} tragen noch gar
-            kein Domänen-Feld — dafür ist der Backfill zuständig, bis dahin ist die Analyse unvollständig.
+            <strong>{data.undomainedCount}</strong> page{data.undomainedCount === 1 ? '' : 's'} carry no domain
+            field at all — that's what the backfill is for; until then this analysis is incomplete.
           </>
         )}
       </p>
@@ -237,8 +236,8 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
 
       {data.candidates.length === 0 ? (
         <p className="empty-inline">
-          Keine Kandidaten. Neue Domänen entstehen, sobald sich genug thematisch verwandte Seiten sammeln, für
-          die keine bestehende Domäne passt.
+          No candidates. New domains emerge once enough thematically related pages accumulate that no existing
+          domain fits.
         </p>
       ) : (
         <div className="candidate-list">
@@ -261,13 +260,13 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
 
       {data.dismissed.length > 0 && (
         <p className="tab-hint">
-          Verworfen:{' '}
+          Dismissed:{' '}
           {data.dismissed.map((d, i) => (
             <span key={d.key}>
               {i > 0 && ', '}
               <button
                 className="linkish"
-                title="Wieder vorschlagen"
+                title="Propose again"
                 onClick={() => void api.restoreCandidate(d.key).then(refresh)}
               >
                 {d.key}
@@ -281,9 +280,9 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
 }
 
 const VERDICT_LABEL: Record<string, string> = {
-  'new-domain': 'Agent: eigene Domäne',
-  existing: 'Agent: gehört zu einer bestehenden Domäne',
-  'not-a-domain': 'Agent: keine Domäne',
+  'new-domain': 'Agent: own domain',
+  existing: 'Agent: belongs to an existing domain',
+  'not-a-domain': 'Agent: not a domain',
 }
 
 function CandidateCard({
@@ -331,7 +330,7 @@ function CandidateCard({
       <div className="candidate-head">
         <strong>{candidate.key}</strong>
         <span className="candidate-meta">
-          {candidate.pageCount} Seiten · {Math.round(candidate.cohesion * 100)}% verlinkt
+          {candidate.pageCount} pages · {Math.round(candidate.cohesion * 100)}% linked
         </span>
         {verdict && <span className={`chip verdict-${verdict.verdict}`}>{VERDICT_LABEL[verdict.verdict]}</span>}
       </div>
@@ -340,8 +339,8 @@ function CandidateCard({
       {verdict?.reason && <p className="tab-hint">{verdict.reason}</p>}
       {verdict?.verdict === 'existing' && verdict.existing && (
         <p className="tab-hint">
-          Vorschlag: diese Seiten unter <code>{verdict.existing}</code> einsortieren — dafür die Seiten
-          bearbeiten oder einen Backfill laufen lassen.
+          Suggestion: file these pages under <code>{verdict.existing}</code> — edit the pages or run a
+          backfill to do so.
         </p>
       )}
 
@@ -350,42 +349,42 @@ function CandidateCard({
       {editing ? (
         <div className="candidate-form">
           <label>
-            Schlüssel
-            <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="z. B. history" />
+            Key
+            <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="e.g. history" />
           </label>
           <label>
-            Beschreibung
+            Description
             <input
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Was deckt diese Domäne ab?"
+              placeholder="What does this domain cover?"
             />
           </label>
           <label>
-            Tags (kommagetrennt)
+            Tags (comma-separated)
             <input value={tags} onChange={(e) => setTags(e.target.value)} />
           </label>
           {error && <div className="toast err">{error}</div>}
           <div className="candidate-actions">
             <button className="btn primary" disabled={busy || !key.trim() || !description.trim()} onClick={create}>
-              {busy ? 'Wird angelegt…' : 'Domäne anlegen'}
+              {busy ? 'Creating…' : 'Create domain'}
             </button>
             <button className="btn ghost" onClick={onEdit}>
-              Abbrechen
+              Cancel
             </button>
           </div>
         </div>
       ) : (
         <div className="candidate-actions">
           <button className="btn" onClick={onEdit}>
-            Als Domäne anlegen
+            Create as domain
           </button>
           <button
             className="btn ghost"
-            title="Nicht mehr vorschlagen"
+            title="Stop proposing this"
             onClick={() => void api.dismissCandidate(candidate.key).then(onDone)}
           >
-            Verwerfen
+            Dismiss
           </button>
         </div>
       )}
@@ -406,7 +405,7 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
       </div>
       {report.totalFindings === 0 ? (
         <div className="empty">
-          <Icon name="check" /> Keine Befunde — das Wiki ist sauber.
+          <Icon name="check" /> No findings — the wiki is clean.
         </div>
       ) : (
         report.sections.map((s) => (
@@ -427,7 +426,7 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
       )}
       {reportPath && (
         <div className="job-meta" style={{ marginTop: 8 }}>
-          <span>Bericht: <code>{reportPath}</code></span>
+          <span>Report: <code>{reportPath}</code></span>
         </div>
       )}
     </div>
@@ -435,11 +434,11 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
 }
 
 function RunResult({ result, vaultName, label }: { result: MaintenanceResult; vaultName: string; label: string }): React.ReactElement {
-  if (!result.ok) return <div className="toast err">{result.error ?? 'Fehlgeschlagen'}</div>
+  if (!result.ok) return <div className="toast err">{result.error ?? 'Failed'}</div>
   return (
     <div className="toast ok">
       {label}
-      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> — keine Änderungen.</>}
+      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> — no changes.</>}
     </div>
   )
 }

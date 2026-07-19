@@ -1,14 +1,14 @@
 import type { JobStatus, JobType } from '../api/types.ts'
 
 const LABELS: Record<JobStatus, string> = {
-  queued: 'Warteschlange',
+  queued: 'Queued',
   preprocessing: 'Preprocessing',
-  ingesting: 'Ingest läuft',
-  done: 'Fertig',
-  failed: 'Fehler',
-  deferred: 'Zurückgestellt',
-  duplicate: 'Duplikat',
-  cancelled: 'Abgebrochen',
+  ingesting: 'Ingesting',
+  done: 'Done',
+  failed: 'Failed',
+  deferred: 'Deferred',
+  duplicate: 'Duplicate',
+  cancelled: 'Cancelled',
 }
 
 export function StatusBadge({ status }: { status: JobStatus }): React.ReactElement {

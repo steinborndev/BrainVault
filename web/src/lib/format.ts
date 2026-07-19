@@ -11,21 +11,21 @@ export function parsePages(createdPages: string | null): string[] {
   }
 }
 
-/** Relative time in German, e.g. "vor 3 min". Falls back to a date for older stamps. */
+/** Relative time, e.g. "3 min ago". Falls back to a date for older stamps. */
 export function timeAgo(iso: string | null): string {
   if (!iso) return '—'
   const then = new Date(iso).getTime()
   if (Number.isNaN(then)) return '—'
   const secs = Math.round((Date.now() - then) / 1000)
-  if (secs < 5) return 'gerade eben'
-  if (secs < 60) return `vor ${secs} s`
+  if (secs < 5) return 'just now'
+  if (secs < 60) return `${secs} s ago`
   const mins = Math.round(secs / 60)
-  if (mins < 60) return `vor ${mins} min`
+  if (mins < 60) return `${mins} min ago`
   const hours = Math.round(mins / 60)
-  if (hours < 24) return `vor ${hours} h`
+  if (hours < 24) return `${hours} h ago`
   const days = Math.round(hours / 24)
-  if (days < 30) return `vor ${days} d`
-  return new Date(iso).toLocaleDateString('de-DE')
+  if (days < 30) return `${days} d ago`
+  return new Date(iso).toLocaleDateString('en-US')
 }
 
 /** Duration between two ISO stamps, e.g. "1m 12s". */

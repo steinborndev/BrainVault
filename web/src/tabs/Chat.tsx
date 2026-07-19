@@ -98,11 +98,11 @@ export function Chat(): React.ReactElement {
       {save.error && <div className="toast err">{save.error}</div>}
       {save.result?.ok && (
         <div className="toast ok">
-          Session gesichert
+          Session saved
           {save.result.pages.length > 0 ? (
             <PageLinks vaultName={vaultName} paths={save.result.pages} />
           ) : (
-            <> — keine neuen Seiten.</>
+            <> — no new pages.</>
           )}
         </div>
       )}
@@ -113,7 +113,7 @@ export function Chat(): React.ReactElement {
             <div className="icon">
               <Icon name="chat" />
             </div>
-            <p>Frag den Vault etwas — die Antwort zitiert die zugrunde liegenden Wiki-Seiten als klickbare Chips.</p>
+            <p>Ask the vault anything — answers cite the underlying wiki pages as clickable chips.</p>
           </div>
         )}
 
@@ -127,20 +127,20 @@ export function Chat(): React.ReactElement {
               <div className="bubble-body">{ask.variables}</div>
             </div>
             <div className="bubble assistant">
-              <div className="bubble-body typing">denkt nach…</div>
+              <div className="bubble-body typing">thinking…</div>
             </div>
           </>
         )}
         {ask.isError && (
           <div className="bubble system">
-            <div className="bubble-body">Fehler: {(ask.error as Error).message}</div>
+            <div className="bubble-body">Error: {(ask.error as Error).message}</div>
           </div>
         )}
         {ask.data && !ask.isPending && (
           // Usage for the last answer — the server has always returned it (SPEC.md §7.1);
           // Cost marks it as an estimate in subscription mode.
           <div className="chat-usage">
-            {tokens(ask.data.usage.tokensIn + ask.data.usage.tokensOut)} Tokens ·{' '}
+            {tokens(ask.data.usage.tokensIn + ask.data.usage.tokensOut)} tokens ·{' '}
             <Cost value={ask.data.usage.costUsd} authMode={ask.data.authMode} />
             <CostFootnote authMode={ask.data.authMode} />
           </div>
@@ -157,11 +157,11 @@ export function Chat(): React.ReactElement {
               send()
             }
           }}
-          placeholder="Frage an den Vault… (Enter zum Senden, Shift+Enter für neue Zeile)"
+          placeholder="Ask the vault… (Enter to send, Shift+Enter for a new line)"
           rows={2}
         />
         <button className="btn primary" disabled={draft.trim() === '' || ask.isPending} onClick={send}>
-          Senden
+          Send
         </button>
       </div>
     </div>
@@ -193,7 +193,7 @@ function SessionBar({
   return (
     <div className="session-bar">
       <button className="btn" onClick={onNew}>
-        + Neu
+        + New
       </button>
       <div className="session-chips">
         {sessions.map((s) => (
@@ -213,11 +213,11 @@ function SessionBar({
         onClick={onSave}
         title={
           canSave
-            ? 'Diese Session als Seite im Vault sichern'
-            : 'Erst nach der ersten Antwort verfügbar'
+            ? 'Save this session as a page in the vault'
+            : 'Available after the first answer'
         }
       >
-        {saving ? 'Sichere…' : 'In Vault sichern'}
+        {saving ? 'Saving…' : 'Save to vault'}
       </button>
     </div>
   )
@@ -281,7 +281,7 @@ function SessionChip({
             if (e.key === 'Enter') void commitRename()
             if (e.key === 'Escape') setEditing(false)
           }}
-          aria-label="Session umbenennen"
+          aria-label="Rename session"
         />
       </div>
     )
@@ -289,8 +289,8 @@ function SessionChip({
 
   return (
     <div className={`session-chip${active ? ' active' : ''}`}>
-      <button className="session-name" onClick={onSelect} title={session.title ?? 'ohne Titel'}>
-        {session.title ?? 'Neue Session'}
+      <button className="session-name" onClick={onSelect} title={session.title ?? 'untitled'}>
+        {session.title ?? 'New session'}
       </button>
       <button
         className="session-act"
@@ -298,18 +298,18 @@ function SessionChip({
           setTitle(session.title ?? '')
           setEditing(true)
         }}
-        title="Umbenennen"
-        aria-label="Session umbenennen"
+        title="Rename"
+        aria-label="Rename session"
       >
         <Icon name="edit" />
       </button>
       <button
         className={`session-act${confirming ? ' danger' : ''}`}
         onClick={() => void del()}
-        title={confirming ? 'Wirklich löschen?' : 'Löschen'}
-        aria-label={confirming ? 'Löschen bestätigen' : 'Session löschen'}
+        title={confirming ? 'Really delete?' : 'Delete'}
+        aria-label={confirming ? 'Confirm delete' : 'Delete session'}
       >
-        {confirming ? 'Wirklich?' : <Icon name="x" />}
+        {confirming ? 'Really?' : <Icon name="x" />}
       </button>
     </div>
   )
@@ -324,13 +324,13 @@ function Bubble({ message, vaultName }: { message: ChatMessage; vaultName: strin
       </div>
       {citations.length > 0 && (
         <div className="bubble-cites">
-          <span className="cites-label">Quellen</span>
+          <span className="cites-label">Sources</span>
           <div className="pages">
             {citations.map((c, i) =>
               c.path ? (
                 <CitationChip key={`${c.label}-${i}`} vaultName={vaultName} path={c.path} />
               ) : (
-                <span key={`${c.label}-${i}`} className="pagelink unresolved" title="Seite nicht im Vault gefunden">
+                <span key={`${c.label}-${i}`} className="pagelink unresolved" title="Page not found in the vault">
                   {c.label}
                 </span>
               ),

@@ -54,7 +54,7 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
   const running =
     start.isPending || (runId !== null && (poll.data === undefined || poll.data.status === 'running'))
   const startError = start.error ? (start.error as Error).message : null
-  const runError = settled && poll.data?.status === 'error' ? poll.data.error ?? 'Fehlgeschlagen' : null
+  const runError = settled && poll.data?.status === 'error' ? poll.data.error ?? 'Failed' : null
 
   return {
     start: () => start.mutate(),

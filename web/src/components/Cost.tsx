@@ -3,17 +3,17 @@
  *
  * In `oauth` (subscription) mode the SDK still reports a `cost_usd`, but it is an API-price
  * EQUIVALENT — no money is charged for that run; it competes against the subscription's shared
- * limits instead. The spec requires it be marked "Schätzwert (Abo)" wherever it is shown, so the
+ * limits instead. The spec requires it be marked as a subscription estimate wherever shown, so the
  * marking lives here rather than at each call site, where it would eventually be forgotten.
  */
 
 import { usd } from '../lib/format.ts'
 import type { AuthMode } from '../api/types.ts'
 
-export const ESTIMATE_LABEL = 'Schätzwert (Abo)'
+export const ESTIMATE_LABEL = 'estimate (subscription)'
 
 const ESTIMATE_TITLE =
-  'Schätzwert (Abo): rechnerischer Gegenwert zu API-Preisen — im Abo-Modus wird dieser Betrag nicht berechnet.'
+  'Estimate (subscription): the API-price equivalent — in subscription mode this amount is not actually charged.'
 
 /** True when a cost figure is an estimate rather than money actually charged. */
 export function isEstimate(authMode: AuthMode): boolean {

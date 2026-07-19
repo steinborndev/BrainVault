@@ -26,7 +26,7 @@ export function JobLog({ jobId, seed = true }: { jobId: string; seed?: boolean }
   return (
     <div className="log" ref={ref} onScroll={onScroll}>
       {lines.length === 0 ? (
-        <div className="log-empty">Warte auf Log-Ausgabe…</div>
+        <div className="log-empty">Waiting for log output…</div>
       ) : (
         lines.map((l, i) => (
           <div key={`${l.ts}-${i}`} className={`log-line ${l.level}`}>

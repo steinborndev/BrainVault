@@ -57,18 +57,18 @@ export function JobCard({
 
         <span className="job-actions">
           {variant === 'queue' && (
-            <button className="btn ghost danger" disabled={cancel.isPending} onClick={() => cancel.mutate()} title="Abbrechen">
-              <Icon name="x" /> Abbrechen
+            <button className="btn ghost danger" disabled={cancel.isPending} onClick={() => cancel.mutate()} title="Cancel">
+              <Icon name="x" /> Cancel
             </button>
           )}
           {variant === 'history' && (job.status === 'failed' || job.status === 'deferred') && (
-            <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate()} title="Erneut versuchen">
-              <Icon name="retry" /> Erneut versuchen
+            <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate()} title="Retry">
+              <Icon name="retry" /> Retry
             </button>
           )}
           {variant === 'history' && (
             <button className="btn ghost" onClick={() => setShowLog((v) => !v)}>
-              {showLog ? 'Log verbergen' : 'Log'}
+              {showLog ? 'Hide log' : 'Log'}
             </button>
           )}
         </span>
@@ -77,14 +77,14 @@ export function JobCard({
       <div className="job-meta">
         <span>{job.source}</span>
         <span>{timeAgo(job.finished_at ?? job.started_at ?? job.created_at)}</span>
-        {job.started_at && job.finished_at && <span>Dauer {duration(job.started_at, job.finished_at)}</span>}
-        {job.tokens_out != null && <span>{tokens((job.tokens_in ?? 0) + job.tokens_out)} Tokens</span>}
+        {job.started_at && job.finished_at && <span>Took {duration(job.started_at, job.finished_at)}</span>}
+        {job.tokens_out != null && <span>{tokens((job.tokens_in ?? 0) + job.tokens_out)} tokens</span>}
         {job.cost_usd != null && (
           <span>
             <Cost value={job.cost_usd} authMode={authMode} />
           </span>
         )}
-        {job.attempts > 1 && <span>{job.attempts} Versuche</span>}
+        {job.attempts > 1 && <span>{job.attempts} attempts</span>}
       </div>
 
       {job.error && variant !== 'active' && <div className="job-error">{job.error}</div>}

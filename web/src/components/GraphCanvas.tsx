@@ -629,7 +629,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
           }
         }}
         role="img"
-        aria-label={`Wikilink-Graph mit ${nodes.length} Seiten`}
+        aria-label={`Wikilink graph with ${nodes.length} pages`}
         style={{ cursor: hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
       />
       <div className="graph-controls">
@@ -639,12 +639,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
             userMovedRef.current = false
             fitToView()
           }}
-          title="Ansicht einpassen"
+          title="Fit the view to the graph"
         >
-          Einpassen
+          Fit
         </button>
       </div>
-      {layouting && <div className="graph-status">Layout läuft…</div>}
+      {layouting && <div className="graph-status">Laying out…</div>}
       {hover !== null && nodes[hover] && <div className="graph-tooltip">{nodes[hover]!.title}</div>}
     </div>
   )

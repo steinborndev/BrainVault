@@ -16,10 +16,10 @@ function summarize(res: EnqueueResult): string {
   const dupes = res.jobs.filter((j) => j.status === 'duplicate' || j.duplicateOf).length
   const fresh = res.jobs.length - dupes
   const parts: string[] = []
-  if (fresh > 0) parts.push(`${fresh} in Warteschlange`)
-  if (dupes > 0) parts.push(`${dupes} Duplikat${dupes > 1 ? 'e' : ''} übersprungen`)
-  if (res.batchId) parts.push('als Batch')
-  return parts.join(' · ') || 'Angenommen'
+  if (fresh > 0) parts.push(`${fresh} queued`)
+  if (dupes > 0) parts.push(`${dupes} duplicate${dupes > 1 ? 's' : ''} skipped`)
+  if (res.batchId) parts.push('as a batch')
+  return parts.join(' · ') || 'Accepted'
 }
 
 export function Dropzone(): React.ReactElement {
@@ -66,7 +66,7 @@ export function Dropzone(): React.ReactElement {
         const mb = Math.round(maxBytes / 1024 / 1024)
         setToast({
           kind: 'err',
-          text: `${oversized.map((f) => f.name).join(', ')}: über dem Limit von ${mb} MB — nicht hochgeladen`,
+          text: `${oversized.map((f) => f.name).join(', ')}: over the ${mb} MB limit — not uploaded`,
         })
         files = files.filter((f) => f.size <= maxBytes)
         if (files.length === 0) return
@@ -110,13 +110,13 @@ export function Dropzone(): React.ReactElement {
         }}
         role="button"
         tabIndex={0}
-        aria-label="Dateien auswählen oder hierher ziehen"
+        aria-label="Choose files or drag them here"
       >
         <div className="icon">
           <Icon name="upload" />
         </div>
-        <h3>{busy ? 'Wird hochgeladen…' : 'Dateien hierher ziehen oder klicken'}</h3>
-        <p>PDF, Office, Bilder, Text — mehrere Dateien werden als Batch verarbeitet.</p>
+        <h3>{busy ? 'Uploading…' : 'Drop files here or click'}</h3>
+        <p>PDF, Office, images, text — multiple files are processed as a batch.</p>
         <input
           ref={fileInput}
           type="file"
@@ -132,7 +132,7 @@ export function Dropzone(): React.ReactElement {
       <div className="url-row" onClick={(e) => e.stopPropagation()}>
         <input
           type="text"
-          placeholder="URL einfügen oder Notiztext eingeben…"
+          placeholder="Paste a URL or type a note…"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
@@ -140,7 +140,7 @@ export function Dropzone(): React.ReactElement {
           }}
         />
         <button className="btn primary" disabled={!url.trim() || busy} onClick={() => submit.mutate(url.trim())}>
-          Hinzufügen
+          Add
         </button>
       </div>
 

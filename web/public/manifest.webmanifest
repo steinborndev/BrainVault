@@ -1,7 +1,7 @@
 {
   "name": "BrainVault",
   "short_name": "BrainVault",
-  "description": "Ingestion-Service & Dashboard für den claude-obsidian Vault",
+  "description": "Ingestion service & dashboard for the claude-obsidian vault",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

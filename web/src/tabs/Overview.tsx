@@ -15,12 +15,12 @@ import { timeAgo, tokens, usd } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 
 const DIR_LABELS: Record<string, string> = {
-  concepts: 'Konzepte',
+  concepts: 'Concepts',
   entities: 'Entities',
-  sources: 'Quellen',
-  references: 'Referenzen',
-  comparisons: 'Vergleiche',
-  questions: 'Fragen',
+  sources: 'Sources',
+  references: 'References',
+  comparisons: 'Comparisons',
+  questions: 'Questions',
   folds: 'Folds',
   meta: 'Meta',
 }
@@ -34,9 +34,9 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
     // transient failure would blank the dashboard until something else invalidates stats.
     return (
       <div className="empty">
-        Statistik konnte nicht geladen werden: {(error as Error)?.message ?? 'unbekannt'}{' '}
+        Failed to load stats: {(error as Error)?.message ?? 'unknown'}{' '}
         <button className="btn" onClick={() => void refetch()}>
-          Erneut versuchen
+          Retry
         </button>
       </div>
     )
@@ -49,7 +49,7 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
 
       <div className="grid two section">
         <div className="card card-pad">
-          <h3 className="section-title">Seiten nach Typ</h3>
+          <h3 className="section-title">Pages by type</h3>
           <div className="grid kpis">
             {Object.entries(data.pages.byDir)
               .filter(([, n]) => n > 0)
@@ -63,17 +63,17 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
         </div>
 
         <div className="card card-pad">
-          <h3 className="section-title">Wachstum (30 Tage)</h3>
+          <h3 className="section-title">Growth (30 days)</h3>
           <GrowthChart points={data.growth} />
         </div>
       </div>
 
       <div className="grid two section">
         <div className="card card-pad">
-          <h3 className="section-title">Zuletzt geändert</h3>
+          <h3 className="section-title">Recently changed</h3>
           {data.recentPages.length === 0 ? (
             <div className="empty">
-              Noch keine Seiten. <button className="btn ghost" onClick={onGoto}>Erste Datei ingesten →</button>
+              No pages yet. <button className="btn ghost" onClick={onGoto}>Ingest your first file →</button>
             </div>
           ) : (
             <div className="pages">
@@ -85,10 +85,10 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
         </div>
 
         <div className="card card-pad">
-          <h3 className="section-title">Letzte Commits</h3>
+          <h3 className="section-title">Recent commits</h3>
           <div className="rows">
             {data.commits.length === 0 ? (
-              <div className="empty">Keine Commits.</div>
+              <div className="empty">No commits.</div>
             ) : (
               data.commits.map((c) => (
                 <div key={c.hash} className="row">
@@ -121,29 +121,29 @@ function Kpis({ stats }: { stats: Stats }): React.ReactElement {
   return (
     <div className="grid kpis section">
       <div className="stat card">
-        <div className="label">Seiten gesamt</div>
+        <div className="label">Total pages</div>
         <div className="value">{stats.pages.total}</div>
       </div>
       <div className="stat card">
-        <div className="label">Ingests (7 T.)</div>
+        <div className="label">Ingests (7 d)</div>
         <div className="value ok">{stats.kpis7d.ingests}</div>
       </div>
       <div className="stat card">
-        <div className="label">Fehler (7 T.)</div>
+        <div className="label">Failures (7 d)</div>
         <div className={`value${stats.kpis7d.failures > 0 ? ' err' : ''}`}>{stats.kpis7d.failures}</div>
       </div>
       <div className="stat card">
-        <div className="label">Warteschlange</div>
+        <div className="label">Queue</div>
         <div className={`value${queueLen > 0 ? ' busy' : ''}`}>{queueLen}</div>
-        <div className="sub">{stats.queue.active} aktiv · {stats.queue.queued} wartend</div>
+        <div className="sub">{stats.queue.active} active · {stats.queue.queued} waiting</div>
       </div>
       <div className="stat card">
-        <div className="label">Kosten (7 T.)</div>
+        <div className="label">Cost (7 d)</div>
         <div className="value">
           <Cost value={stats.usage.last7d.costUsd} authMode={stats.authMode} />
         </div>
         <div className="sub">
-          {tokens(stats.usage.last7d.tokensIn + stats.usage.last7d.tokensOut)} Tokens
+          {tokens(stats.usage.last7d.tokensIn + stats.usage.last7d.tokensOut)} tokens
           {isEstimate(stats.authMode) && <> · {ESTIMATE_LABEL}</>}
         </div>
       </div>
@@ -166,9 +166,9 @@ function BudgetBar({ stats }: { stats: Stats }): React.ReactElement | null {
   return (
     <div className="card card-pad section">
       <div className="section-head">
-        <h3 className="section-title">Tagesbudget</h3>
+        <h3 className="section-title">Daily budget</h3>
         <span className={`setting-tag${budget.exceeded ? ' warn' : ''}`}>
-          {budget.exceeded ? 'erreicht — Queue pausiert' : `${pct} %`}
+          {budget.exceeded ? 'reached — queue paused' : `${pct} %`}
         </span>
       </div>
       <div className="budget-bar">
@@ -176,10 +176,10 @@ function BudgetBar({ stats }: { stats: Stats }): React.ReactElement | null {
       </div>
       <div className="job-meta" style={{ fontSize: 13, marginTop: 8 }}>
         <span>
-          {fmt(budget.spent)} von {fmt(budget.limit)} {budget.unit === 'jobs' ? 'Ingests' : ''} heute
+          {fmt(budget.spent)} of {fmt(budget.limit)} {budget.unit === 'jobs' ? 'ingests' : ''} today
         </span>
         <span>
-          Zurücksetzung {resets.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
+          Resets at {resets.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
         </span>
         {budget.unit === 'usd' && isEstimate(authMode) && <span>{ESTIMATE_LABEL}</span>}
       </div>
@@ -191,15 +191,15 @@ function ServiceStatus({ stats }: { stats: Stats }): React.ReactElement {
   const last = stats.commits[0]
   return (
     <div className="card card-pad section">
-      <h3 className="section-title">Dienststatus</h3>
+      <h3 className="section-title">Service status</h3>
       <div className="job-meta" style={{ fontSize: 13 }}>
         <span>
           Watcher{' '}
           <strong style={{ color: stats.watcher.active ? 'var(--ok)' : 'var(--muted)' }}>
-            {stats.watcher.active ? 'aktiv' : 'inaktiv'}
+            {stats.watcher.active ? 'active' : 'inactive'}
           </strong>
         </span>
-        <span title={stats.watcher.folder}>Ordner: <code>{stats.watcher.folder}</code></span>
+        <span title={stats.watcher.folder}>Folder: <code>{stats.watcher.folder}</code></span>
         <span>
           Queue: {stats.queue.queued + stats.queue.active}
           {stats.queue.paused && (
@@ -207,15 +207,15 @@ function ServiceStatus({ stats }: { stats: Stats }): React.ReactElement {
               {' '}
               <strong style={{ color: 'var(--warn)' }}>
                 {stats.queue.pauseReason === 'budget'
-                  ? '(pausiert — Tagesbudget)'
+                  ? '(paused — daily budget)'
                   : stats.queue.pauseReason === 'rate-limit'
-                    ? '(pausiert — Nutzungslimit)'
-                    : '(pausiert)'}
+                    ? '(paused — usage limit)'
+                    : '(paused)'}
               </strong>
             </>
           )}
         </span>
-        {last && <span>Letzter Commit {timeAgo(last.date)}</span>}
+        {last && <span>Last commit {timeAgo(last.date)}</span>}
         <span>Vault: <code>{stats.vaultName}</code></span>
       </div>
     </div>

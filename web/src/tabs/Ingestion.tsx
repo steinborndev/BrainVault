@@ -18,12 +18,12 @@ import { JobCard } from '../components/JobCard.tsx'
 
 const ACTIVE: JobStatus[] = ['preprocessing', 'ingesting']
 const HISTORY_FILTERS: Array<{ id: 'all' | JobStatus; label: string }> = [
-  { id: 'all', label: 'Alle' },
-  { id: 'done', label: 'Fertig' },
-  { id: 'failed', label: 'Fehler' },
-  { id: 'deferred', label: 'Zurückgestellt' },
-  { id: 'duplicate', label: 'Duplikate' },
-  { id: 'cancelled', label: 'Abgebrochen' },
+  { id: 'all', label: 'All' },
+  { id: 'done', label: 'Done' },
+  { id: 'failed', label: 'Failed' },
+  { id: 'deferred', label: 'Deferred' },
+  { id: 'duplicate', label: 'Duplicates' },
+  { id: 'cancelled', label: 'Cancelled' },
 ]
 
 export function Ingestion(): React.ReactElement {
@@ -82,16 +82,16 @@ export function Ingestion(): React.ReactElement {
     clear.mutate()
   }
 
-  if (isLoading) return <div className="empty">Lade Jobs…</div>
-  if (isError) return <div className="empty">Jobs konnten nicht geladen werden: {(error as Error)?.message}</div>
+  if (isLoading) return <div className="empty">Loading jobs…</div>
+  if (isError) return <div className="empty">Failed to load jobs: {(error as Error)?.message}</div>
 
   return (
     <div>
       <Dropzone />
 
-      <Section title={`Aktiv${active.length ? ` (${active.length})` : ''}`}>
+      <Section title={`Active${active.length ? ` (${active.length})` : ''}`}>
         {active.length === 0 ? (
-          <div className="empty">Momentan läuft kein Ingest.</div>
+          <div className="empty">No ingest is running right now.</div>
         ) : (
           <div className="joblist">
             {active.map((j) => (
@@ -102,7 +102,7 @@ export function Ingestion(): React.ReactElement {
       </Section>
 
       {queued.length > 0 && (
-        <Section title={`Warteschlange (${queued.length})`}>
+        <Section title={`Queue (${queued.length})`}>
           <div className="joblist">
             {queued.map((j) => (
               <JobCard key={j.id} job={j} variant="queue" vaultName={vaultName} authMode={authMode} />
@@ -112,20 +112,20 @@ export function Ingestion(): React.ReactElement {
       )}
 
       <Section
-        title="Verlauf"
+        title="History"
         action={
           filteredHistory.length > 0 ? (
             <button
               className="btn ghost danger"
               disabled={clear.isPending}
               onClick={onClear}
-              title="Nur der Job-Verlauf wird gelöscht — Vault und erzeugte Seiten bleiben unberührt."
+              title="Only the job history is cleared — the vault and created pages stay untouched."
             >
               {confirmClear
-                ? `Wirklich ${filteredHistory.length} Einträge löschen?`
+                ? `Really delete ${filteredHistory.length} entries?`
                 : filter === 'all'
-                  ? 'Verlauf leeren'
-                  : 'Auswahl leeren'}
+                  ? 'Clear history'
+                  : 'Clear selection'}
             </button>
           ) : undefined
         }
@@ -139,7 +139,7 @@ export function Ingestion(): React.ReactElement {
           ))}
         </div>
         {filteredHistory.length === 0 ? (
-          <div className="empty">Noch keine abgeschlossenen Jobs.</div>
+          <div className="empty">No finished jobs yet.</div>
         ) : (
           <div className="joblist">
             {filteredHistory.map((j) => (

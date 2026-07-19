@@ -69,18 +69,18 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
         e.preventDefault()
         navigate(pageRoute(path))
       }}
-      title={`Im Vault-Viewer öffnen: ${path}`}
+      title={`Open in the vault viewer: ${path}`}
     >
       <span className="bucket">{pageBucket(path)}</span>
       {pageLabel(path)}
-      <button className="copy" onClick={openObsidian} title="In Obsidian öffnen" aria-label="In Obsidian öffnen">
+      <button className="copy" onClick={openObsidian} title="Open in Obsidian" aria-label="Open in Obsidian">
         <Icon name="link" />
       </button>
       <button
         className="copy"
         onClick={copy}
-        title={copied === 'failed' ? `Kopieren fehlgeschlagen — Pfad: ${path}` : 'Vault-Pfad kopieren'}
-        aria-label="Pfad kopieren"
+        title={copied === 'failed' ? `Copy failed — path: ${path}` : 'Copy vault path'}
+        aria-label="Copy path"
       >
         {copied === 'ok' ? <Icon name="check" /> : copied === 'failed' ? <Icon name="x" /> : <Icon name="copy" />}
       </button>

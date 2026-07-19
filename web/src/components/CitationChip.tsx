@@ -38,7 +38,7 @@ export function CitationChip({
         <button
           className="cite-peek"
           onClick={() => setOpen((v) => !v)}
-          title={open ? 'Vorschau schließen' : 'Seiteninhalt anzeigen'}
+          title={open ? 'Close preview' : 'Show page content'}
           aria-expanded={open}
         >
           <Icon name={open ? 'x' : 'file'} />
@@ -47,12 +47,12 @@ export function CitationChip({
 
       {open && (
         <div className="cite-preview">
-          {preview.isLoading && <div className="tab-hint">Lade Vorschau…</div>}
+          {preview.isLoading && <div className="tab-hint">Loading preview…</div>}
           {preview.isError && <div className="toast err">{(preview.error as Error).message}</div>}
           {preview.data && (
             <>
               <Markdown source={preview.data.markdown} />
-              {preview.data.truncated && <div className="tab-hint">… gekürzt — in Obsidian öffnen für die ganze Seite.</div>}
+              {preview.data.truncated && <div className="tab-hint">… truncated — open in Obsidian for the full page.</div>}
             </>
           )}
         </div>

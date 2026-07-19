@@ -14,11 +14,11 @@ const Vault = lazy(() => import('./tabs/Vault.tsx').then((m) => ({ default: m.Va
 type TabId = 'overview' | 'ingestion' | 'chat' | 'vault' | 'maintenance'
 
 const TABS: Array<{ id: TabId; label: string; icon: IconName; route: string }> = [
-  { id: 'overview', label: 'Übersicht', icon: 'grid', route: '/' },
+  { id: 'overview', label: 'Overview', icon: 'grid', route: '/' },
   { id: 'ingestion', label: 'Ingestion', icon: 'inbox', route: '/ingestion' },
   { id: 'chat', label: 'Query/Chat', icon: 'chat', route: '/chat' },
   { id: 'vault', label: 'Vault', icon: 'graph', route: '/vault' },
-  { id: 'maintenance', label: 'Wartung', icon: 'wrench', route: '/wartung' },
+  { id: 'maintenance', label: 'Maintenance', icon: 'wrench', route: '/maintenance' },
 ]
 
 /** Which tab a path belongs to (the vault tab owns /vault and /vault/page/…). */
@@ -27,7 +27,8 @@ function tabForPath(path: string): TabId {
   if (pathname.startsWith('/vault')) return 'vault'
   if (pathname.startsWith('/ingestion')) return 'ingestion'
   if (pathname.startsWith('/chat')) return 'chat'
-  if (pathname.startsWith('/wartung')) return 'maintenance'
+  // `/wartung` is the pre-English-sweep route — old bookmarks/PWA shortcuts still carry it.
+  if (pathname.startsWith('/maintenance') || pathname.startsWith('/wartung')) return 'maintenance'
   return 'overview'
 }
 
@@ -45,6 +46,11 @@ export function App(): React.ReactElement {
   useEffect(() => {
     if (tab === 'vault') setVaultPath(path)
   }, [tab, path])
+
+  // Normalize the legacy German route so the address bar and history show the real one.
+  useEffect(() => {
+    if (path.split('?')[0]!.startsWith('/wartung')) navigate('/maintenance', { replace: true })
+  }, [path])
 
   return (
     <div className="app">
@@ -65,7 +71,7 @@ export function App(): React.ReactElement {
           ))}
         </nav>
         <span className="spacer" />
-        <span className={`conn${connected ? ' live' : ''}`} title={connected ? 'Live (SSE verbunden)' : 'Getrennt'}>
+        <span className={`conn${connected ? ' live' : ''}`} title={connected ? 'Live (SSE connected)' : 'Disconnected'}>
           <span className="dot" />
           {connected ? 'Live' : 'Offline'}
         </span>
@@ -83,7 +89,7 @@ export function App(): React.ReactElement {
         </section>
         <section className="tab-panel" hidden={tab !== 'vault'}>
           {vaultPath !== null && (
-            <Suspense fallback={<div className="empty">Lade Vault-Ansicht…</div>}>
+            <Suspense fallback={<div className="empty">Loading vault view…</div>}>
               <Vault path={vaultPath} />
             </Suspense>
           )}

@@ -11,7 +11,7 @@ const PAD = 6
 
 export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactElement {
   if (points.length < 2) {
-    return <div className="empty">Noch zu wenig Historie für einen Trend — sobald an mehreren Tagen ingestet wird, erscheint hier die Kurve.</div>
+    return <div className="empty">Not enough history for a trend yet — once ingests span several days, the curve appears here.</div>
   }
 
   const totals = points.map((p) => p.total)
@@ -31,7 +31,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactE
 
   return (
     <div>
-      <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Wachstum der Wiki-Seiten">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Wiki page growth">
         <path className="area" d={area} />
         <path className="line" d={line} />
         <circle className="dot" cx={x(points.length - 1)} cy={y(last.total)} r={3} />
@@ -39,7 +39,7 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactE
       <div className="job-meta" style={{ justifyContent: 'space-between' }}>
         <span>{first.date}</span>
         <span>
-          {min} → {max} Seiten
+          {min} → {max} pages
         </span>
         <span>{last.date}</span>
       </div>

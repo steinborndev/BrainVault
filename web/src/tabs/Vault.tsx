@@ -83,16 +83,16 @@ function renderMetaValue(
   return parts
 }
 
-/** German labels for the wiki buckets (fallback: the raw directory name). */
+/** Display labels for the wiki buckets (fallback: the raw directory name). */
 const TYPE_LABELS: Record<string, string> = {
-  concepts: 'Konzepte',
-  entities: 'Entitäten',
-  sources: 'Quellen',
+  concepts: 'Concepts',
+  entities: 'Entities',
+  sources: 'Sources',
   meta: 'Meta',
-  root: 'Wurzel',
-  questions: 'Fragen',
-  references: 'Referenzen',
-  comparisons: 'Vergleiche',
+  root: 'Root',
+  questions: 'Questions',
+  references: 'References',
+  comparisons: 'Comparisons',
   folds: 'Folds',
 }
 
@@ -103,13 +103,13 @@ export function Vault({ path }: { path: string }): React.ReactElement {
   const page = pageFromPath(pathname)
   const focus = new URLSearchParams(search ?? '').get('focus')
 
-  if (graphQ.isLoading) return <div className="empty">Lade Graph…</div>
+  if (graphQ.isLoading) return <div className="empty">Loading graph…</div>
   if (graphQ.isError || !graphQ.data) {
     return (
       <div className="empty">
-        Graph konnte nicht geladen werden: {(graphQ.error as Error)?.message ?? 'unbekannt'}{' '}
+        Failed to load the graph: {(graphQ.error as Error)?.message ?? 'unknown'}{' '}
         <button className="btn" onClick={() => void graphQ.refetch()}>
-          Erneut versuchen
+          Retry
         </button>
       </div>
     )
@@ -238,7 +238,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           <Icon name="search" />
           <input
             type="search"
-            placeholder="Seite oder Tag suchen…"
+            placeholder="Search pages or tags…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -248,9 +248,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                 if (only) navigate(pageRoute(only.path))
               }
             }}
-            aria-label="Seite oder Tag im Graph suchen"
+            aria-label="Search the graph for a page or tag"
           />
-          {query && <span className="graph-matches">{matches.size} Treffer</span>}
+          {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
         </div>
         <div className="filters">
           {types.map(([t, count]) => (
@@ -258,7 +258,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               key={t}
               className={`chip${hiddenTypes.has(t) ? '' : ' active'}`}
               onClick={() => toggleType(t)}
-              title={hiddenTypes.has(t) ? 'Einblenden' : 'Ausblenden'}
+              title={hiddenTypes.has(t) ? 'Show' : 'Hide'}
             >
               {TYPE_LABELS[t] ?? t} ({count})
             </button>
@@ -269,23 +269,23 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             <button
               className={`chip${colorBy === 'domain' ? ' active' : ''}`}
               onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
-              title="Knoten nach Domäne statt Seitentyp färben"
+              title="Color nodes by domain instead of page type"
             >
-              <Icon name="palette" /> nach Domäne färben
+              <Icon name="palette" /> color by domain
             </button>
             {domains.map(([d, count]) => (
               <button
                 key={d || '∅'}
                 className={`chip${hiddenDomains.has(d) ? '' : ' active'}`}
                 onClick={() => toggleDomain(d)}
-                title={hiddenDomains.has(d) ? 'Einblenden' : 'Ausblenden'}
+                title={hiddenDomains.has(d) ? 'Show' : 'Hide'}
               >
                 <span
                   className="chip-dot"
                   style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
                   aria-hidden
                 />
-                {d === NO_DOMAIN ? 'ohne Domäne' : d} ({count})
+                {d === NO_DOMAIN ? 'no domain' : d} ({count})
               </button>
             ))}
           </div>
@@ -293,17 +293,17 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         {focusNode && (
           <div className="graph-focus">
             <span>
-              Fokus: <strong>{focusNode.title}</strong>
+              Focus: <strong>{focusNode.title}</strong>
             </span>
             {([1, 2] as const).map((d) => (
               <button key={d} className={`chip${localDepth === d ? ' active' : ''}`} onClick={() => setLocalDepth(d)}>
-                Tiefe {d}
+                Depth {d}
               </button>
             ))}
             <button className={`chip${localDepth === 0 ? ' active' : ''}`} onClick={() => setLocalDepth(0)}>
-              Ganzer Graph
+              Whole graph
             </button>
-            <button className="chip" onClick={() => navigate('/vault')} title="Fokus aufheben">
+            <button className="chip" onClick={() => navigate('/vault')} title="Clear focus">
               <Icon name="x" />
             </button>
           </div>
@@ -320,8 +320,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       />
 
       <div className="graph-footer">
-        {nodes.length} von {graph.nodes.length} Seiten · {edges.length} Links
-        {graph.unresolved > 0 ? ` · ${graph.unresolved} offene Links` : ''}
+        {nodes.length} of {graph.nodes.length} pages · {edges.length} links
+        {graph.unresolved > 0 ? ` · ${graph.unresolved} unresolved links` : ''}
       </div>
     </div>
   )
@@ -426,7 +426,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
         {label}
       </a>
     ) : (
-      <span key={key} className="wikilink unresolved" title="Seite existiert (noch) nicht">
+      <span key={key} className="wikilink unresolved" title="This page doesn't exist (yet)">
         {label}
       </span>
     )
@@ -439,7 +439,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   return (
     <div className="vault-page">
       <div className="page-head">
-        <button className="btn ghost" onClick={() => window.history.back()} title="Zurück">
+        <button className="btn ghost" onClick={() => window.history.back()} title="Back">
           <Icon name="back" />
         </button>
         <h1>{pageQ.data?.title ?? node?.title ?? path.split('/').pop()?.replace(/\.md$/, '')}</h1>
@@ -448,13 +448,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
         <button
           className="btn"
           onClick={() => navigate(`/vault?focus=${encodeURIComponent(path)}`)}
-          title="Diese Seite im Graph fokussieren"
+          title="Focus this page in the graph"
         >
-          <Icon name="graph" /> Im Graph
+          <Icon name="graph" /> In graph
         </button>
         {!editing && pageQ.data && (
-          <button className="btn" onClick={startEdit} title="Seite bearbeiten (jede Änderung wird ein Git-Commit)">
-            <Icon name="edit" /> Bearbeiten
+          <button className="btn" onClick={startEdit} title="Edit page (every change becomes a git commit)">
+            <Icon name="edit" /> Edit
           </button>
         )}
         {!editing && pageQ.data && (
@@ -462,18 +462,18 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
             className={`btn${confirmDelete ? ' danger' : ''}`}
             onClick={requestDelete}
             disabled={del.isPending}
-            title={confirmDelete ? 'Wirklich löschen? (als Git-Commit, rückholbar)' : 'Seite löschen'}
+            title={confirmDelete ? 'Really delete? (as a git commit — recoverable)' : 'Delete page'}
           >
-            {del.isPending ? 'Lösche…' : confirmDelete ? 'Wirklich löschen?' : <Icon name="x" />}
+            {del.isPending ? 'Deleting…' : confirmDelete ? 'Really delete?' : <Icon name="x" />}
           </button>
         )}
-        <a className="btn" href={obsidianUri(vaultName, path)} title="In Obsidian öffnen">
+        <a className="btn" href={obsidianUri(vaultName, path)} title="Open in Obsidian">
           <Icon name="link" /> Obsidian
         </a>
       </div>
 
       <StaleLinksBanner />
-      {del.isError && <div className="toast err">Löschen fehlgeschlagen: {(del.error as Error).message}</div>}
+      {del.isError && <div className="toast err">Delete failed: {(del.error as Error).message}</div>}
 
       {editing ? (
         <div className="page-editor">
@@ -481,18 +481,18 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             spellCheck={false}
-            aria-label="Seiteninhalt (Markdown)"
+            aria-label="Page content (markdown)"
           />
           <div className="editor-actions">
             <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending}>
-              {save.isPending ? 'Speichere…' : 'Speichern (Commit)'}
+              {save.isPending ? 'Saving…' : 'Save (commit)'}
             </button>
             <button className="btn" onClick={() => setEditing(false)} disabled={save.isPending}>
-              Abbrechen
+              Cancel
             </button>
             {saveConflict && (
               <span className="toast err">
-                Die Seite wurde zwischenzeitlich geändert (z. B. durch einen Agent-Run).{' '}
+                The page changed in the meantime (e.g. through an agent run).{' '}
                 <button
                   className="btn ghost"
                   onClick={() => {
@@ -501,21 +501,21 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                     void qc.invalidateQueries({ queryKey: ['page-full', path] })
                   }}
                 >
-                  Neu laden
+                  Reload
                 </button>
               </span>
             )}
             {save.isError && !saveConflict && (
-              <span className="toast err">Speichern fehlgeschlagen: {(save.error as Error).message}</span>
+              <span className="toast err">Save failed: {(save.error as Error).message}</span>
             )}
           </div>
         </div>
       ) : (
       <div className="page-columns">
         <article className="page-body">
-          {pageQ.isLoading && <div className="empty">Lade Seite…</div>}
+          {pageQ.isLoading && <div className="empty">Loading page…</div>}
           {pageQ.isError && (
-            <div className="empty">Seite konnte nicht geladen werden: {(pageQ.error as Error)?.message}</div>
+            <div className="empty">Failed to load the page: {(pageQ.error as Error)?.message}</div>
           )}
           {parsed.fields.length > 0 && (
             <dl className="page-meta">
@@ -532,13 +532,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
           {pageQ.data && (
             <Markdown source={parsed.body} renderWikilink={linkTo} />
           )}
-          {pageQ.data?.mtime && <div className="page-mtime">Zuletzt geändert {timeAgo(pageQ.data.mtime)}</div>}
+          {pageQ.data?.mtime && <div className="page-mtime">Last changed {timeAgo(pageQ.data.mtime)}</div>}
         </article>
 
         <aside className="page-side">
           <h3>Backlinks ({backlinks.length})</h3>
           {backlinks.length === 0 ? (
-            <p className="dim">Keine Seite verlinkt hierher.</p>
+            <p className="dim">No page links here.</p>
           ) : (
             <ul className="linklist">
               {backlinks.map((n) => (
@@ -556,9 +556,9 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
               ))}
             </ul>
           )}
-          <h3>Ausgehend ({outgoing.length})</h3>
+          <h3>Outgoing ({outgoing.length})</h3>
           {outgoing.length === 0 ? (
-            <p className="dim">Keine ausgehenden Links.</p>
+            <p className="dim">No outgoing links.</p>
           ) : (
             <ul className="linklist">
               {outgoing.map((n) => (
@@ -596,21 +596,20 @@ function StaleLinksBanner(): React.ReactElement | null {
     <div className="stale-banner" role="status">
       <Icon name="graph" />
       <span>
-        Durch das Löschen von <strong>{pages}</strong> {state.count === 1 ? 'ist' : 'sind'}{' '}
-        <strong>{state.count}</strong> Link{state.count === 1 ? '' : 's'} verwaist. Ein Lint-Lauf findet und
-        bereinigt die Verweise.
+        Deleting <strong>{pages}</strong> left <strong>{state.count}</strong> link
+        {state.count === 1 ? '' : 's'} dangling. A lint run finds and cleans up the references.
       </span>
       <span className="spacer" />
       <button
         className="btn primary"
         onClick={() => {
           staleLinks.clear()
-          navigate('/wartung')
+          navigate('/maintenance')
         }}
       >
-        Zur Wartung
+        Go to maintenance
       </button>
-      <button className="btn ghost" onClick={() => staleLinks.clear()} title="Ausblenden" aria-label="Banner ausblenden">
+      <button className="btn ghost" onClick={() => staleLinks.clear()} title="Dismiss" aria-label="Dismiss banner">
         <Icon name="x" />
       </button>
     </div>
