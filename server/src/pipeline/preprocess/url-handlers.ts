@@ -338,8 +338,49 @@ export const youtubeHandler: UrlHandler = {
 }
 
 // ---------------------------------------------------------------------------
+// Notion — fail fast with guidance instead of a redirect-loop error. App pages
+// (app.notion.com, notion.so page ids) bounce through a cookie-based
+// session-sync redirect chain (/p/… → sessionSync → sessionSyncCallback →
+// /p/…), which our cookie-less fetch reports as "too many redirects"; and even
+// a cookie-carrying fetch only receives an ~18 KB JavaScript shell with zero
+// page content (verified 2026-07-19). There is no anonymous content channel,
+// so the handler's job is a clear, actionable error — not a fetch.
+// ---------------------------------------------------------------------------
 
-export const URL_HANDLERS: readonly UrlHandler[] = [twitterHandler, youtubeHandler]
+const NOTION_SO_HOSTS = new Set(['notion.so', 'www.notion.so'])
+/** 32-hex Notion page id somewhere in the path (dashed or not). */
+const NOTION_PAGE_ID = /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}(?:$|[/?#])/i
+
+/**
+ * True for Notion APP pages: all of app.notion.com, and notion.so paths that carry a page id
+ * or the /p/ share prefix. notion.so marketing pages (e.g. /blog/…) stay on the generic
+ * fetch path — those are ordinary server-rendered articles and ingest fine.
+ */
+export function matchNotionAppUrl(url: URL): boolean {
+  const host = url.hostname.toLowerCase()
+  if (host === 'app.notion.com') return true
+  if (!NOTION_SO_HOSTS.has(host)) return false
+  return url.pathname.startsWith('/p/') || NOTION_PAGE_ID.test(url.pathname)
+}
+
+export const notionHandler: UrlHandler = {
+  name: 'notion',
+  matches: matchNotionAppUrl,
+  handle(ctx) {
+    return Promise.reject(
+      new PreprocessError(
+        `Notion app pages cannot be ingested from a URL (${ctx.url.href}): Notion serves a ` +
+          'JavaScript-only shell — the HTML contains no page content, even for public pages. ' +
+          'Export the page instead (Notion: ••• → Export → Markdown & CSV) and drop the file here, ' +
+          'or paste the content as text.',
+      ),
+    )
+  },
+}
+
+// ---------------------------------------------------------------------------
+
+export const URL_HANDLERS: readonly UrlHandler[] = [twitterHandler, youtubeHandler, notionHandler]
 
 export function findUrlHandler(url: URL): UrlHandler | undefined {
   return URL_HANDLERS.find((h) => h.matches(url))

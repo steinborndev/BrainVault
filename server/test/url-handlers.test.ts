@@ -7,7 +7,9 @@ import {
   findUrlHandler,
   formatTweetMarkdown,
   matchTweetUrl,
+  matchNotionAppUrl,
   matchYoutubeUrl,
+  notionHandler,
   pickSubtitleLang,
   twitterHandler,
   youtubeHandler,
@@ -231,10 +233,41 @@ describe('vttToText', () => {
   })
 })
 
+describe('matchNotionAppUrl', () => {
+  it('matches app.notion.com always and notion.so app-page paths', () => {
+    expect(matchNotionAppUrl(new URL('https://app.notion.com/p/Cooking-280006f7aa9880edbbaec5eb6649eccc'))).toBe(true)
+    expect(matchNotionAppUrl(new URL('https://app.notion.com/anything'))).toBe(true)
+    expect(matchNotionAppUrl(new URL('https://www.notion.so/p/some-share-link'))).toBe(true)
+    expect(matchNotionAppUrl(new URL('https://www.notion.so/ws/My-Page-280006f7aa9880edbbaec5eb6649eccc'))).toBe(true)
+    expect(
+      matchNotionAppUrl(new URL('https://www.notion.so/My-Page-280006f7-aa98-80ed-bbae-c5eb6649eccc')),
+    ).toBe(true)
+  })
+
+  it('leaves notion.so marketing pages and other hosts to the generic path', () => {
+    expect(matchNotionAppUrl(new URL('https://www.notion.so/blog/some-article'))).toBe(false)
+    expect(matchNotionAppUrl(new URL('https://www.notion.so/pricing'))).toBe(false)
+    expect(matchNotionAppUrl(new URL('https://example.com/280006f7aa9880edbbaec5eb6649eccc'))).toBe(false)
+  })
+})
+
+describe('notionHandler', () => {
+  it('fails fast with an actionable message instead of a redirect-loop error', async () => {
+    const url = new URL('https://app.notion.com/p/Cooking-280006f7aa9880edbbaec5eb6649eccc')
+    await expect(
+      notionHandler.handle({ url, jobDir: tmpDir(), tools: NO_TOOLS, fetchText: () => Promise.reject(new Error('no fetch')) }),
+    ).rejects.toThrowError(/Export the page instead/)
+    await expect(
+      notionHandler.handle({ url, jobDir: tmpDir(), tools: NO_TOOLS, fetchText: () => Promise.reject(new Error('no fetch')) }),
+    ).rejects.toBeInstanceOf(PreprocessError)
+  })
+})
+
 describe('findUrlHandler', () => {
-  it('routes tweets and videos, leaves ordinary pages to the generic path', () => {
+  it('routes tweets, videos and Notion app pages, leaves ordinary pages to the generic path', () => {
     expect(findUrlHandler(new URL('https://x.com/a/status/1'))?.name).toBe('fxtwitter')
     expect(findUrlHandler(new URL('https://youtu.be/dQw4w9WgXcQ'))?.name).toBe('yt-dlp')
+    expect(findUrlHandler(new URL('https://app.notion.com/p/X-280006f7aa9880edbbaec5eb6649eccc'))?.name).toBe('notion')
     expect(findUrlHandler(new URL('https://example.com/article'))).toBeUndefined()
   })
 })
