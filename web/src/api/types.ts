@@ -136,7 +136,6 @@ export interface Stats {
 
 export interface Health {
   status: string
-  vaultRoot: string
   queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
   /** Server-side caps the client pre-checks against (dropzone size warning). */

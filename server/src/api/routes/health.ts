@@ -10,7 +10,9 @@ export function registerHealthRoute(app: FastifyInstance, ctx: AppContext): void
   app.get('/api/v1/health', async () => {
     return {
       status: 'ok',
-      vaultRoot: ctx.config.vaultRoot,
+      // No vaultRoot here: this route is public (PUBLIC_PATHS), and once the token-mode
+      // remote-bind seam is used it must not leak filesystem layout to the unauthenticated.
+      // The authenticated settings route exposes it for the UI.
       queue: ctx.queue.stats(),
       jobs: ctx.store.counts(),
       // Client-side pre-checks (the dropzone warns before uploading a file the server

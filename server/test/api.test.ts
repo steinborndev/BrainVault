@@ -151,6 +151,8 @@ describe('GET /api/v1/health', () => {
     expect(body.status).toBe('ok')
     expect(body.queue.concurrency).toBe(2)
     expect(body.jobs).toBeDefined()
+    // Public route: must not leak filesystem layout.
+    expect(body).not.toHaveProperty('vaultRoot')
   })
 })
 
