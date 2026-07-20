@@ -10,10 +10,10 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 
 ## 1. Config & wiring
 
-- [ ] `config.ts`: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) in the zod schema, read from the merged env (file + process, same precedence as everything else). New optional `Config.telegram: { token, allowedUserIds }`.
-- [ ] **Fail-closed guard (§4.3/§9):** token set but allowlist empty/unparsable ⇒ `ConfigError` at startup (mirror the double-credential guard). Neither value may ever appear in logs; `describeConfig` reports the token as `<redacted, N chars>` and the allowlist as a count.
-- [ ] `db/jobs.ts`: extend `JobSource` with `'telegram'`. Migration **v7**: nullable `jobs.notify_channel` (`'telegram:<chat_id>'`). Losing the DB still cannot damage the vault — the column is operational state only (hard rule 1).
-- [ ] `main.ts`: start the bot iff `config.telegram` is set, symmetric to the watcher; graceful shutdown stops the polling loop before the queue closes. The bot also starts in **setup mode** (reduced behavior, §4 below).
+- [x] `config.ts`: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) in the zod schema, read from the merged env (file + process, same precedence as everything else). New `Config.telegram: TelegramConfig | null` (`{ botToken, allowedUserIds }`).
+- [x] **Fail-closed guard (§4.3/§9):** token set but allowlist empty/unparsable ⇒ `ConfigError` at startup (mirror the double-credential guard); non-numeric entries (usernames) rejected explicitly. `describeConfig` reports `<token redacted, N chars>` + allowlist count; allowlist WITHOUT token is inert (bot off, no error). `config.test.ts`.
+- [x] `db/jobs.ts`: `JobSource` + `'telegram'` (also `web/src/api/types.ts`); `CreateJobInput.notifyChannel` persisted at create. Migration **v7**: nullable `jobs.notify_channel` — a full `jobs` TABLE REBUILD, because the v1 `source` CHECK constraint lists the allowed values and SQLite cannot alter a CHECK in place (see F1 below). Verified against a copy of the live DB: v6→v7, all rows + 238 job_logs preserved, `foreign_key_check` clean. `db.test.ts`.
+- [ ] `main.ts`: start the bot iff `config.telegram` is set, symmetric to the watcher; graceful shutdown stops the polling loop before the queue closes. The bot also starts in **setup mode** (reduced behavior, §4 below). *Deferred to §3 — `startTelegramBot` does not exist until the module lands; wiring an import to nothing would be scaffolding.*
 
 ## 2. Bot API client (`telegram/client.ts`)
 
@@ -56,4 +56,4 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 
 ## Findings
 
-*(none yet)*
+**F1 — better-sqlite3 v12 enables `foreign_keys` at connection open; the v7 table rebuild cascade-wiped `job_logs`. Found via dry run, fixed.** Migration v7 must rebuild `jobs` (CHECK constraint change), and under FK enforcement `DROP TABLE` performs an implicit DELETE that fires `job_logs`' `ON DELETE CASCADE`. The planned mitigation — run migrations before `openDb` switches FK on — silently did nothing, because better-sqlite3 v12 (12.11.1) turns `foreign_keys` ON **at open**, not off as raw SQLite defaults; and the unit test masked it by setting the pragma itself. A dry run against a COPY of the live DB caught it: 238 `job_logs` rows gone. Fix: `openDb` explicitly sets `foreign_keys = OFF` before migrating and ON after; regression test now goes through `openDb`'s own path on a file DB. Lesson for future migrations: any migration that drops/rebuilds a referenced table MUST be dry-run against a live-DB copy before deploy — the in-memory fixtures don't reproduce the driver's connection defaults unless the test uses `openDb` end-to-end.

@@ -50,6 +50,7 @@ beforeEach(async () => {
     vaultRoot,
     obsidianVaultName: 'vault',
     auth: { mode: 'oauth', credential: 'x', envVar: 'CLAUDE_CODE_OAUTH_TOKEN' },
+      telegram: null,
     server: {
       host: '127.0.0.1',
       port: 0,

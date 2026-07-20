@@ -199,6 +199,64 @@ describe('loadConfig — VAULT_ROOT validation', () => {
   })
 })
 
+describe('loadConfig — telegram bot (SPEC.md §4.3)', () => {
+  it('is off (null) when no token is configured', () => {
+    const config = loadConfig({ envFile: false, env: { VAULT_ROOT: vault } })
+    expect(config.telegram).toBeNull()
+  })
+
+  it('parses token + allowlist, tolerating spaces around ids', () => {
+    const config = loadConfig({
+      envFile: false,
+      env: {
+        VAULT_ROOT: vault,
+        TELEGRAM_BOT_TOKEN: '12345:abc',
+        TELEGRAM_ALLOWED_USER_IDS: ' 111, 222 ,333 ',
+      },
+    })
+    expect(config.telegram).toEqual({ botToken: '12345:abc', allowedUserIds: [111, 222, 333] })
+  })
+
+  it('refuses to start when the token is set WITHOUT an allowlist (fail-closed, §9)', () => {
+    expect(() =>
+      loadConfig({
+        envFile: false,
+        env: { VAULT_ROOT: vault, TELEGRAM_BOT_TOKEN: '12345:abc' },
+      }),
+    ).toThrow(/TELEGRAM_ALLOWED_USER_IDS/)
+  })
+
+  it('refuses an allowlist that is only whitespace/commas', () => {
+    expect(() =>
+      loadConfig({
+        envFile: false,
+        env: { VAULT_ROOT: vault, TELEGRAM_BOT_TOKEN: '12345:abc', TELEGRAM_ALLOWED_USER_IDS: ' , ' },
+      }),
+    ).toThrow(ConfigError)
+  })
+
+  it('refuses non-numeric allowlist entries (usernames are not identities)', () => {
+    expect(() =>
+      loadConfig({
+        envFile: false,
+        env: {
+          VAULT_ROOT: vault,
+          TELEGRAM_BOT_TOKEN: '12345:abc',
+          TELEGRAM_ALLOWED_USER_IDS: '111,@benjamin',
+        },
+      }),
+    ).toThrow(/non-numeric/)
+  })
+
+  it('an allowlist without a token is inert — bot stays off, no error', () => {
+    const config = loadConfig({
+      envFile: false,
+      env: { VAULT_ROOT: vault, TELEGRAM_ALLOWED_USER_IDS: '111' },
+    })
+    expect(config.telegram).toBeNull()
+  })
+})
+
 describe('describeConfig', () => {
   it('never exposes the credential value', () => {
     const config = loadConfig({
@@ -209,5 +267,24 @@ describe('describeConfig', () => {
     expect(JSON.stringify(described)).not.toContain('super-secret-token')
     expect(described['credential']).toBe('<redacted, 18 chars>')
     expect(described['authMode']).toBe('oauth')
+  })
+
+  it('never exposes the telegram bot token (SPEC.md §9)', () => {
+    const config = loadConfig({
+      envFile: false,
+      env: {
+        VAULT_ROOT: vault,
+        TELEGRAM_BOT_TOKEN: '99887766:telegram-secret',
+        TELEGRAM_ALLOWED_USER_IDS: '111,222',
+      },
+    })
+    const described = describeConfig(config)
+    expect(JSON.stringify(described)).not.toContain('telegram-secret')
+    expect(described['telegram']).toBe('on <token redacted, 24 chars>, 2 allowlisted user(s)')
+  })
+
+  it('reports the bot as off when unconfigured', () => {
+    const config = loadConfig({ envFile: false, env: { VAULT_ROOT: vault } })
+    expect(describeConfig(config)['telegram']).toBe('off')
   })
 })

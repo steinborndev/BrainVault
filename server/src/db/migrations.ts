@@ -164,6 +164,62 @@ ALTER TABLE messages ADD COLUMN tokens_out INTEGER;
 ALTER TABLE messages ADD COLUMN cost_usd REAL;
 `
 
+/**
+ * v7 — Telegram channel (SPEC.md §4.3): `source` gains 'telegram', and `notify_channel`
+ * ('telegram:<chat_id>') records where to send the completion message, restart-safe.
+ *
+ * A full table rebuild, not ALTER ADD COLUMN: `source`'s CHECK constraint lists the
+ * allowed values and SQLite cannot modify a CHECK in place. The rebuild follows the
+ * documented procedure (create new, copy, drop old, rename) and RELIES on foreign keys
+ * being OFF while migrations run (see openDb): with FK enforcement on, DROP TABLE jobs
+ * would cascade-delete every job_logs row, and the RENAME would rewrite job_logs' FK to
+ * point at the doomed old table. The indexes die with the old table — recreate all four.
+ */
+const V7 = `
+CREATE TABLE jobs_v7 (
+  id            TEXT PRIMARY KEY,                 -- ulid
+  user_id       TEXT NOT NULL DEFAULT 'local' REFERENCES users(id),
+  batch_id      TEXT,                             -- shared batches (SPEC.md §4.1)
+  source        TEXT NOT NULL CHECK (source IN ('drop','watch','url','telegram')),
+  type          TEXT NOT NULL CHECK (type IN ('pdf','office','web','image','text','av','other')),
+  original_name TEXT,
+  url           TEXT,
+  sha256        TEXT UNIQUE,                      -- dedupe (SPEC.md §3.2)
+  status        TEXT NOT NULL CHECK (status IN (
+                  'queued','preprocessing','ingesting','done',
+                  'failed','deferred','duplicate','cancelled')),
+  raw_path      TEXT,                             -- .raw/<job-id>/
+  created_pages TEXT,                             -- JSON array of wiki pages created/updated
+  error         TEXT,
+  attempts      INTEGER NOT NULL DEFAULT 0,
+  tokens_in     INTEGER,
+  tokens_out    INTEGER,
+  cost_usd      REAL,
+  created_at    TEXT NOT NULL,
+  started_at    TEXT,
+  finished_at   TEXT,
+  notify_channel TEXT                             -- e.g. 'telegram:<chat_id>' (SPEC.md §4.3)
+);
+
+INSERT INTO jobs_v7
+  (id, user_id, batch_id, source, type, original_name, url, sha256, status,
+   raw_path, created_pages, error, attempts, tokens_in, tokens_out, cost_usd,
+   created_at, started_at, finished_at)
+SELECT
+   id, user_id, batch_id, source, type, original_name, url, sha256, status,
+   raw_path, created_pages, error, attempts, tokens_in, tokens_out, cost_usd,
+   created_at, started_at, finished_at
+FROM jobs;
+
+DROP TABLE jobs;
+ALTER TABLE jobs_v7 RENAME TO jobs;
+
+CREATE INDEX idx_jobs_status   ON jobs(status);
+CREATE INDEX idx_jobs_batch    ON jobs(batch_id);
+CREATE INDEX idx_jobs_created  ON jobs(created_at);
+CREATE INDEX idx_jobs_finished ON jobs(finished_at);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -171,4 +227,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, up: V4 },
   { version: 5, up: V5 },
   { version: 6, up: V6 },
+  { version: 7, up: V7 },
 ]

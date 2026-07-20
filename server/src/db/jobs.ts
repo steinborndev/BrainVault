@@ -27,7 +27,7 @@ export type JobStatus =
   | 'duplicate'
   | 'cancelled'
 
-export type JobSource = 'drop' | 'watch' | 'url'
+export type JobSource = 'drop' | 'watch' | 'url' | 'telegram'
 export type JobType = 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -97,6 +97,7 @@ export interface JobRow {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  notify_channel: string | null
 }
 
 export interface CreateJobInput {
@@ -109,6 +110,8 @@ export interface CreateJobInput {
   readonly batchId?: string
   readonly userId?: string
   readonly rawPath?: string
+  /** Where to report the job's terminal state, e.g. 'telegram:<chat_id>' (SPEC.md §4.3). */
+  readonly notifyChannel?: string
 }
 
 export interface CreateJobResult {
@@ -172,10 +175,10 @@ export class JobStore {
         .prepare(
           `INSERT INTO jobs
              (id, user_id, batch_id, source, type, original_name, url, sha256, status,
-              raw_path, attempts, created_at, finished_at)
+              raw_path, attempts, created_at, finished_at, notify_channel)
            VALUES
              (@id, @user_id, @batch_id, @source, @type, @original_name, @url, @sha256, @status,
-              @raw_path, 0, @created_at, @finished_at)`,
+              @raw_path, 0, @created_at, @finished_at, @notify_channel)`,
         )
         .run({
           id,
@@ -192,6 +195,7 @@ export class JobStore {
           created_at: now,
           // Duplicates are terminal on arrival, so they get a finish time immediately.
           finished_at: isDuplicate ? now : null,
+          notify_channel: input.notifyChannel ?? null,
         })
 
       this.log(

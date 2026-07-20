@@ -14,7 +14,7 @@ export type JobStatus =
   | 'duplicate'
   | 'cancelled'
 
-export type JobSource = 'drop' | 'watch' | 'url'
+export type JobSource = 'drop' | 'watch' | 'url' | 'telegram'
 export type JobType = 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 

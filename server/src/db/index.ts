@@ -63,9 +63,16 @@ export function openDb(dbPath: string = defaultDbPath(), options: OpenDbOptions 
   }
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
-  db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 5000')
+  // Migrations run with foreign_keys OFF (SQLite's documented order for table rebuilds):
+  // v7 drops and recreates `jobs`, and under FK enforcement DROP TABLE performs an
+  // implicit DELETE that cascade-wipes job_logs (observed live on a DB copy). The OFF
+  // must be EXPLICIT — better-sqlite3 v12 turns foreign_keys on at connection open, so
+  // relying on "SQLite defaults to off" silently re-enables the cascade. The pragma is
+  // a no-op inside a transaction, so it cannot live in the migration SQL itself.
+  db.pragma('foreign_keys = OFF')
   if (!options.skipMigrations) migrate(db)
+  db.pragma('foreign_keys = ON')
   return db
 }
 

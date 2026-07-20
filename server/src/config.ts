@@ -60,6 +60,18 @@ export interface AuthConfig {
   readonly envVar: CredentialEnvVar
 }
 
+/**
+ * Telegram bot channel (SPEC.md §4.3). Present only when the bot is configured; the
+ * allowlist is guaranteed non-empty — a token without an allowlist refuses startup
+ * (fail-closed, §9), because a bot answering everyone must never arise from an omission.
+ */
+export interface TelegramConfig {
+  /** BotFather token — a secret of the same class as the Anthropic credential. Never log. */
+  readonly botToken: string
+  /** Numeric Telegram user ids allowed to talk to the bot. Never empty. */
+  readonly allowedUserIds: readonly number[]
+}
+
 export interface Config {
   readonly vaultRoot: string
   /**
@@ -77,6 +89,8 @@ export interface Config {
    */
   readonly auth: AuthConfig | null
   readonly server: ServerConfig
+  /** `null` = Telegram bot off (no TELEGRAM_BOT_TOKEN configured). */
+  readonly telegram: TelegramConfig | null
 }
 
 /** True for a loopback bind — the only bind allowed without an HTTP auth token (hard rule 2). */
@@ -163,7 +177,34 @@ const schema = z.object({
   HTTP_AUTH_TOKEN: z.string().min(1).optional(),
   WATCH_POLLING: z.enum(['true', 'false', '1', '0', 'yes', 'no']).optional(),
   OBSIDIAN_VAULT_NAME: z.string().min(1).optional(),
+  TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
+  TELEGRAM_ALLOWED_USER_IDS: z.string().min(1).optional(),
 })
+
+/**
+ * Fail-closed telegram parsing (SPEC.md §4.3/§9): a token whose allowlist is missing,
+ * empty, or unparsable refuses startup. An allowlist WITHOUT a token is inert (the bot
+ * simply stays off) — it forbids nothing and enables nothing, so it is not an error.
+ */
+function parseTelegram(token: string | undefined, allowlist: string | undefined): TelegramConfig | null {
+  if (token === undefined) return null
+  const entries = (allowlist ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '')
+  const invalid = entries.filter((s) => !/^\d+$/.test(s))
+  if (entries.length === 0 || invalid.length > 0) {
+    throw new ConfigError(
+      entries.length === 0
+        ? 'TELEGRAM_BOT_TOKEN is set but TELEGRAM_ALLOWED_USER_IDS is missing or empty. ' +
+          'The bot is allowlist-only (SPEC.md §4.3): set TELEGRAM_ALLOWED_USER_IDS to the ' +
+          'comma-separated numeric Telegram user ids that may use it, or unset the token.'
+        : `TELEGRAM_ALLOWED_USER_IDS contains non-numeric entries: ${invalid.join(', ')}. ` +
+          'Use the numeric Telegram user ids (not @usernames — usernames are mutable and spoofable).',
+    )
+  }
+  return { botToken: token, allowedUserIds: entries.map(Number) }
+}
 
 /** Verifies the path is a real claude-obsidian vault, not just any directory. */
 function validateVaultRoot(candidate: string): string {
@@ -226,6 +267,8 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
     HTTP_AUTH_TOKEN: presence(merged['HTTP_AUTH_TOKEN']),
     WATCH_POLLING: presence(merged['WATCH_POLLING']),
     OBSIDIAN_VAULT_NAME: presence(merged['OBSIDIAN_VAULT_NAME']),
+    TELEGRAM_BOT_TOKEN: presence(merged['TELEGRAM_BOT_TOKEN']),
+    TELEGRAM_ALLOWED_USER_IDS: presence(merged['TELEGRAM_ALLOWED_USER_IDS']),
   })
 
   if (!parsed.success) {
@@ -275,6 +318,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
         ? { mode: envVar === 'CLAUDE_CODE_OAUTH_TOKEN' ? 'oauth' : 'api-key', credential, envVar }
         : null,
     server,
+    telegram: parseTelegram(parsed.data.TELEGRAM_BOT_TOKEN, parsed.data.TELEGRAM_ALLOWED_USER_IDS),
   }
 }
 
@@ -306,5 +350,9 @@ export function describeConfig(config: Config): Record<string, string> {
     bind: `${config.server.host}:${config.server.port}`,
     watchFolder: config.server.watchFolder,
     httpAuth: config.server.authMode,
+    telegram: config.telegram
+      ? `on <token redacted, ${config.telegram.botToken.length} chars>, ` +
+        `${config.telegram.allowedUserIds.length} allowlisted user(s)`
+      : 'off',
   }
 }
