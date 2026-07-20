@@ -5,7 +5,7 @@
 # BrainVault
 
 Drop a PDF into a folder - a few minutes later it is a set of linked, cited wiki pages in your
-personal knowledge vault, written by an AI agent running entirely on your machine.
+personal knowledge vault.
 
 BrainVault is a local ingestion service and web dashboard on top of a
 [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) vault (v1.9.2, Generic mode).
