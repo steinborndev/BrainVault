@@ -7,6 +7,12 @@
 #
 set -euo pipefail
 
+# pip --user installs land in ~/.local/bin (yt-dlp). On a fresh account that dir is not
+# on PATH yet — Ubuntu's ~/.profile only adds it once it EXISTS, i.e. from the next login
+# on — so extend PATH here or the verification below reports a false MISS (fresh-WSL e2e
+# finding, 2026-07-20). The systemd unit template carries ~/.local/bin already.
+export PATH="$HOME/.local/bin:$PATH"
+
 echo "==> System packages (apt, needs sudo)"
 sudo apt-get update
 sudo apt-get install -y \
