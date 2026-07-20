@@ -26,27 +26,38 @@ function DroppedSenders(): React.ReactElement | null {
     queryFn: api.telegramStatus,
     refetchInterval: 30_000,
   })
-  if (!q.data || q.data.drops.length === 0) return null
+  // Always visible while the bot is configured — an operator looking for "the log" must be
+  // able to see that it exists and is empty, not wonder whether the feature is there at all.
+  if (!q.data) return null
   return (
     <div>
       <h4 className="settings-ro-title">Rejected senders</h4>
-      <p className="setting-hint">
-        Messages from these Telegram ids were dropped without a reply. If one of them is you,
-        the id in the allowlist is wrong.
-      </p>
-      <div className="settings-ro">
-        {q.data.drops.map((d) => (
-          <div className="settings-ro-row" key={d.senderId}>
-            <span className="settings-ro-label">
-              {d.senderId}
-              {d.username ? ` (@${d.username})` : ''}
-            </span>
-            <code>
-              {d.count} message{d.count === 1 ? '' : 's'}, last {timeAgo(d.lastAt)}
-            </code>
+      {q.data.drops.length === 0 ? (
+        <p className="setting-hint">
+          None so far. Messages from Telegram ids outside the allowlist are dropped without a
+          reply and show up here (the journal logs the first attempt per sender too).
+        </p>
+      ) : (
+        <>
+          <p className="setting-hint">
+            Messages from these Telegram ids were dropped without a reply. If one of them is you,
+            the id in the allowlist is wrong.
+          </p>
+          <div className="settings-ro">
+            {q.data.drops.map((d) => (
+              <div className="settings-ro-row" key={d.senderId}>
+                <span className="settings-ro-label">
+                  {d.senderId}
+                  {d.username ? ` (@${d.username})` : ''}
+                </span>
+                <code>
+                  {d.count} message{d.count === 1 ? '' : 's'}, last {timeAgo(d.lastAt)}
+                </code>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   )
 }
