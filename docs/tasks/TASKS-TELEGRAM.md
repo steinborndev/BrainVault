@@ -58,7 +58,7 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
   - [x] PDF from the phone → `done` + notification. Evidence: job `…DEPXBW` (source `telegram`, `notify_channel` persisted) → immediate "Queued …" reply, ingest → `done` with 21 created/updated pages (15 content + 6 maintenance), ONE vault commit (`e469a97`), ~6.3M/51k tokens (≈$3.56 est.), no send error in the log. *Observation: `created_pages` includes the vault maintenance pages (`_index`, `index`, `hot`, `log`), which showed up as noise "titles" in the message — FIXED same day (user-approved, commit `f72c591`): filtered in format.ts by PATH (message only, DB keeps the full list; a content page titled "Index"/"Log" still shows).*
   - [x] `/status` correct while a job runs — operator screenshot 09:07: `Queue: 1 running (concurrency 3)`, `Jobs: ingesting 1 · done 1`
   - [ ] Album of 2 photos → one batch, one combined run, one commit
-  - [ ] Message from a second (non-allowlisted) account → no reply to the sender; one warn line in the journal (behavior amended 2026-07-20, see §3)
+  - [x] Message from a second (non-allowlisted) account → no reply to the sender; log entry appears (journal warn + UI list, behavior amended 2026-07-20, see §3/§8). Operator-confirmed 2026-07-20.
   - [x] Oversize file (> 20 MB) → hint reply, no job. Operator-confirmed 2026-07-20 with a ~24 MB PDF; reply verbatim as designed ("…is ~24 MB — Telegram lets bots download at most 20 MB. Use the dashboard dropzone or the watch folder for large files."), no `getFile` call, no job row.
   - [ ] Dev-instance-next-to-systemd double-poll → 409 log line, service keeps serving
 

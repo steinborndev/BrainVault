@@ -316,8 +316,9 @@ Setup:
    TELEGRAM_ALLOWED_USER_IDS=111111111        # comma-separated for several people
    ```
 
-4. **Restart** (only needed after editing the file by hand):
-   `systemctl --user restart vault-service`, then send the bot `/status`.
+4. **Restart** - the dashboard path does this itself under systemd; after hand-editing the
+   file (or when running via `npm start`, where there is no supervisor to restart into) run
+   `systemctl --user restart vault-service` / re-run `npm start`. Then send the bot `/status`.
 
 Behavior and limits:
 
@@ -415,6 +416,11 @@ Four things to know:
 - **Pass the credential as an environment variable here.** The dashboard's first-run setup flow
   needs browser access, which token mode (below) denies - so in a container the credential comes
   from `-e CLAUDE_CODE_OAUTH_TOKEN=…` (or `-e ANTHROPIC_API_KEY=…`), as in the example above.
+  The same applies to the Telegram bot: pass `-e TELEGRAM_BOT_TOKEN=…` and
+  `-e TELEGRAM_ALLOWED_USER_IDS=…` (the settings endpoints deliberately refuse with `409` when
+  these come from the process environment, and the container-internal env file is not on a
+  volume anyway). The bot's outbound polling works from inside the container without extra
+  network configuration.
 - **In token mode the browser UI is not reachable, only the API.** The auth middleware protects
   everything except `/api/v1/health`, including the SPA itself, so a browser gets a `401` before it
   can load the page that would ask for a token. `curl -H "Authorization: Bearer <token>"` works
@@ -448,6 +454,7 @@ Layout:
 server/   Fastify backend, TypeScript ESM
   src/api/        routes under /api/v1, auth middleware
   src/pipeline/   watcher, queue, preprocessing plugins, agent runner, permissions
+  src/telegram/   bot api client, long-poll loop, update router, message formatting
   src/db/         better-sqlite3 schema + migrations
 web/      React + Vite frontend (responsive, PWA-ready)
 scripts/  setup helpers, systemd unit template
@@ -498,6 +505,11 @@ POST   /settings/credential      first-run onboarding: {kind: oauth|api-key, val
                                  the service env file (0600) and restarts; never echoes the
                                  value, 409 if the credential comes from the process env or
                                  runs are in flight
+GET    /settings/telegram        bot status + rejected non-allowlisted senders (ids/counts,
+                                 never message content, never the token)
+POST   /settings/telegram        {botToken, allowedUserIds} → writes BOTH env vars together
+                                 and restarts; same rules as /settings/credential
+DELETE /settings/telegram        disables the bot: removes both env vars, restarts
 ```
 
 Every vault-mutating agent run (lint, autoresearch, hot-cache, and saving a chat session) is
