@@ -58,9 +58,12 @@ WSL2 + Ubuntu, runs the setup above inside it, and puts a BrainVault shortcut on
 git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
 
 # 2. The vault this service writes into (a separate repo, OUTSIDE this one).
-#    Cloned from our fork, pinned to the tested version.
+#    Cloned from our fork, pinned to the tested version. Push is disabled:
+#    the vault fills with private content, and origin is a public repo.
 git clone https://github.com/steinborndev/claude-obsidian ~/vault
-(cd ~/vault && git checkout -B vault-main v1.9.2 && bash bin/setup-vault.sh)
+(cd ~/vault && git checkout -B vault-main v1.9.2 \
+  && git remote set-url --push origin PUSH_DISABLED_vault_is_private \
+  && bash bin/setup-vault.sh)
 
 # 3. Sandbox + preprocessing toolchain
 sudo apt-get install -y bubblewrap socat
@@ -100,7 +103,9 @@ The vault lives **outside this repo** and its path is a configuration value - no
 
 ```bash
 git clone https://github.com/steinborndev/claude-obsidian ~/vault
-cd ~/vault && git checkout -B vault-main v1.9.2 && bash bin/setup-vault.sh
+cd ~/vault && git checkout -B vault-main v1.9.2
+git remote set-url --push origin PUSH_DISABLED_vault_is_private  # vault content is private; origin is public
+bash bin/setup-vault.sh
 ```
 
 The service checks at startup that `VAULT_ROOT` contains `wiki/` and `skills/`, so pointing it at

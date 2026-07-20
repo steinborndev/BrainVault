@@ -66,7 +66,11 @@ elif [ -e "$VAULT_ROOT" ]; then
 else
   git clone "$VAULT_REPO_URL" "$VAULT_ROOT"
   # Pin to the tested tag on a real branch (not a detached HEAD — ingest commits land here).
-  ( cd "$VAULT_ROOT" && git checkout -B vault-main "$VAULT_REPO_REF" && bash bin/setup-vault.sh )
+  # Then disable push: the vault fills with private content, and origin is a public repo.
+  ( cd "$VAULT_ROOT" \
+    && git checkout -B vault-main "$VAULT_REPO_REF" \
+    && git remote set-url --push origin PUSH_DISABLED_vault_is_private \
+    && bash bin/setup-vault.sh )
 fi
 
 step 5 "Domain registry seed (non-destructive)"
