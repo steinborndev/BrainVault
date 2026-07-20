@@ -17,7 +17,11 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VAULT_ROOT="${1:-$HOME/vault}"
-VAULT_REPO_URL="https://github.com/AgriciDaniel/claude-obsidian"
+# Our fork of AgriciDaniel/claude-obsidian, pinned to the version the service is
+# built and tested against (SPEC.md §11 risk 4). Upgrades are a deliberate act:
+# merge the upstream tag into the fork, test, re-run permprobe, then bump the ref.
+VAULT_REPO_URL="https://github.com/steinborndev/claude-obsidian"
+VAULT_REPO_REF="v1.9.2"
 NODE_MAJOR_REQUIRED=20
 
 step() { printf '\n\033[1m==> [%s/7] %s\033[0m\n' "$1" "$2"; }
@@ -61,7 +65,8 @@ elif [ -e "$VAULT_ROOT" ]; then
   die "$VAULT_ROOT exists but does not look like a claude-obsidian vault (no wiki/ + skills/). Move it aside or pass a different path."
 else
   git clone "$VAULT_REPO_URL" "$VAULT_ROOT"
-  ( cd "$VAULT_ROOT" && bash bin/setup-vault.sh )
+  # Pin to the tested tag on a real branch (not a detached HEAD — ingest commits land here).
+  ( cd "$VAULT_ROOT" && git checkout -B vault-main "$VAULT_REPO_REF" && bash bin/setup-vault.sh )
 fi
 
 step 5 "Domain registry seed (non-destructive)"

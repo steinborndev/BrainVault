@@ -57,9 +57,10 @@ WSL2 + Ubuntu, runs the setup above inside it, and puts a BrainVault shortcut on
 #    and finds the vault via VAULT_ROOT (step 4).
 git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
 
-# 2. The vault this service writes into (a separate repo, OUTSIDE this one)
-git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
-(cd ~/vault && bash bin/setup-vault.sh)
+# 2. The vault this service writes into (a separate repo, OUTSIDE this one).
+#    Cloned from our fork, pinned to the tested version.
+git clone https://github.com/steinborndev/claude-obsidian ~/vault
+(cd ~/vault && git checkout -B vault-main v1.9.2 && bash bin/setup-vault.sh)
 
 # 3. Sandbox + preprocessing toolchain
 sudo apt-get install -y bubblewrap socat
@@ -87,7 +88,7 @@ except the OS; the manual path below installs each row explicitly. `git` and `cu
 |---|---|
 | OS | Debian/Ubuntu-family Linux (the toolchain installs via `apt`), or Windows + WSL2 (Ubuntu 24.04 is what this was built and e2e-tested on) |
 | Node | ≥ 20 LTS - `setup-all.sh` installs it via [nvm](https://github.com/nvm-sh/nvm); manual: `curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh \| bash`, then `nvm install 20`. Already-loaded shells: `. ~/.nvm/nvm.sh` |
-| Vault | a claude-obsidian clone (**built and tested against v1.9.2**, Generic mode), by default at `~/vault`. The clone takes upstream's current state - if upstream has moved on and something breaks, check out the tested version |
+| Vault | a claude-obsidian clone (**built and tested against v1.9.2**, Generic mode), by default at `~/vault`. Cloned from [our fork](https://github.com/steinborndev/claude-obsidian) and pinned to the tested tag, so upstream changes can never break a fresh install |
 | Credential | a Claude subscription token **or** an Anthropic API key (exactly one) - entered in the dashboard on first run, not needed to start |
 | Claude Code CLI | only for the subscription path, to run `claude setup-token` once - install with `npm install -g @anthropic-ai/claude-code` |
 | Sandbox | `bubblewrap` + `socat` - **required**, agent runs fail without them |
@@ -98,8 +99,8 @@ except the OS; the manual path below installs each row explicitly. `git` and `cu
 The vault lives **outside this repo** and its path is a configuration value - nothing hardcodes it.
 
 ```bash
-git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
-cd ~/vault && bash bin/setup-vault.sh
+git clone https://github.com/steinborndev/claude-obsidian ~/vault
+cd ~/vault && git checkout -B vault-main v1.9.2 && bash bin/setup-vault.sh
 ```
 
 The service checks at startup that `VAULT_ROOT` contains `wiki/` and `skills/`, so pointing it at
