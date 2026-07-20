@@ -15,12 +15,12 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 - [x] `db/jobs.ts`: `JobSource` + `'telegram'` (also `web/src/api/types.ts`); `CreateJobInput.notifyChannel` persisted at create. Migration **v7**: nullable `jobs.notify_channel` — a full `jobs` TABLE REBUILD, because the v1 `source` CHECK constraint lists the allowed values and SQLite cannot alter a CHECK in place (see F1 below). Verified against a copy of the live DB: v6→v7, all rows + 238 job_logs preserved, `foreign_key_check` clean. `db.test.ts`.
 - [ ] `main.ts`: start the bot iff `config.telegram` is set, symmetric to the watcher; graceful shutdown stops the polling loop before the queue closes. The bot also starts in **setup mode** (reduced behavior, §4 below). *Deferred to §3 — `startTelegramBot` does not exist until the module lands; wiring an import to nothing would be scaffolding.*
 
-## 2. Bot API client (`telegram/client.ts`)
+## 2. Bot API client (`telegram/client.ts`) — DONE
 
-- [ ] Minimal hand-rolled client, `fetch`-based, no framework (decision recorded in §4.3): `getUpdates` (long poll, `timeout=50`, `allowed_updates=['message']`), `sendMessage`, `getFile` + file download. Typed results for exactly the fields we consume.
-- [ ] Polling loop with error backoff (network errors: exponential, capped; resume automatically). **`409 Conflict` (second poller on the same token) stops the loop permanently** with a clear log line naming the likely cause (dev instance next to systemd) — the service itself keeps running.
-- [ ] Download guard: check `file_size` from the message BEFORE `getFile`; > 20 MB (Bot API hard limit) ⇒ no download, reply with a hint pointing at dropzone/watch folder (§4.3). Downloads stream to the upload staging dir (`os.tmpdir()/vault-service-uploads`, same as the jobs route), never into the vault.
-- [ ] The token appears in URLs (`/bot<token>/…`) — ensure no request URL is ever logged; log method names only.
+- [x] Minimal hand-rolled client, `fetch`-based, no framework (decision recorded in §4.3): `getUpdates` (long poll, `timeout=50`, `allowed_updates=['message']`), `sendMessage` (link previews disabled), `getFile` + file download. Typed wire objects carry exactly the fields we consume. `fetchImpl`/`apiBase` injectable for tests.
+- [x] Polling loop (`startPolling`) with exponential backoff (1 s → 60 s cap, resets on success), `retry_after` honoured on 429. **`409 Conflict` stops the loop permanently** with a log line naming the likely cause (dev instance next to systemd); same for `401` (bad token). The service keeps running. A throwing update handler is logged and the offset still advances — one poisonous update cannot wedge the loop. `stop()` aborts a hanging long poll promptly (abort-aware sleep + AbortController through fetch).
+- [x] Download cap: `downloadFile` enforces the 20 MB Bot API limit twice — on `Content-Length` when present, and on actually received bytes (Telegram serves without the header too); an oversize download leaves no partial file (bounded in-memory buffering, write-on-complete). *The polite pre-check against `message.document.file_size` + the hint reply is router work (§3), where the message context lives.* `destDir` is a parameter; the router passes the upload staging dir.
+- [x] Token never in logs/errors: all errors carry the METHOD NAME only, never a URL; explicit test asserts no token/URL leak across api/network/non-JSON failure paths. `telegram-client.test.ts` (15 tests).
 
 ## 3. Update router (`telegram/bot.ts`)
 
