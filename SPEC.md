@@ -103,6 +103,18 @@ Windows 11
 - Sonderfall `.md`-Dateien aus dem Obsidian Web Clipper: werden als Web-Quelle behandelt (Frontmatter-URL wird ausgewertet).
 - Nicht unterstützte Typen (v1: Audio/Video, Archive): Verschieben nach `.raw/deferred/`, Job-Status `deferred`, sichtbare Markierung im Dashboard. Archive (`.zip`) werden **nicht** automatisch entpackt (Sicherheitsentscheidung v1). **Getarnte ausführbare Dateien** (Magic-Byte-Befund widerspricht der Endung) sind dagegen ein Sicherheitsbefund, kein „wartet auf Feature": Job-Status `failed` mit klarer Fehlermeldung, kein Verschieben nach deferred (Entscheidung 2026-07-18, ersetzt die frühere Einordnung unter deferred).
 
+### 4.3 Telegram-Bot (ergänzt 2026-07-20)
+
+Dritter Eingangskanal plus Statuskanal, primär fürs Handy („PDF vom Telefon queuen"). Bewusste Ergänzung zum §12.5-Pfad (Tailnet + PWA-Share-Target): Der Bot deckt *nur* Status + Ingest ab, dafür ohne jede Netz-Infrastruktur und plattformunabhängig (auch iOS, wo das Web-Share-Target nicht existiert); das PWA-Share-Target bleibt der privatere Vollzugriffspfad.
+
+- **Opt-in per Konfiguration:** `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` (kommagetrennte numerische Telegram-User-IDs) in der Service-Env-Datei. Ohne Token: Bot aus, Verhalten wie bisher. Token **ohne** Allowlist ⇒ Startabbruch mit klarer Fehlermeldung (fail-closed, analog Doppel-Credential-Guard §7.1) — ein Bot, der jedem antwortet, darf nie aus einem Vergessen entstehen.
+- **Transport: Long Polling** (`getUpdates`, ausgehende HTTPS-Verbindung zu `api.telegram.org`), **kein Webhook**. Es wird kein Port geöffnet, kein Bind geändert; der Localhost-Guard (§9) bleibt unberührt. Der Client ist ein minimaler eigener Bot-API-Client (`getUpdates`, `sendMessage`, `getFile` + Download), kein Framework. `getUpdates` erlaubt genau einen Consumer pro Token; antwortet die API `409 Conflict` (zweite Instanz, z. B. Dev neben systemd), beendet der Bot das Polling mit klarer Log-Meldung, statt zu konkurrieren — der Service selbst läuft weiter.
+- **Interaktion:** `/status` (Setup-Modus, Queue-/Job-Zähler, Budget — die Daten von Health/Stats), `/jobs` (letzte Jobs mit Status). Gesendete Dokumente/Fotos werden per `getFile` heruntergeladen, wie ein Dashboard-Upload gestaged und mit `source: 'telegram'` in die reguläre Queue eingereiht; gesendete URLs/Texte werden URL-/Text-Jobs. Alben (Telegram `media_group_id`) werden zu **einem Batch** gebündelt (Analogie zum Mehrfach-Drop §4.1). Der Bot bestätigt die Einreihung sofort mit der Job-ID.
+- **Limit:** Die Bot-API erlaubt Bots Downloads nur bis **20 MB** (User dürfen bis 2 GB senden; `getFile` verweigert dann). Größere Dateien ⇒ sofortige Antwort mit Hinweis auf Dropzone/Watch-Ordner, kein Job.
+- **Abschluss-Meldung:** Erreicht ein Telegram-Job `done`/`failed`/`deferred`/`duplicate`, meldet der Bot das in den Ursprungs-Chat — bei `done` mit den Titeln der erzeugten Seiten, **ohne Inhaltsauszüge** (§9). Die Chat-Zuordnung wird als `notify_channel` am Job persistiert (§8), damit sie einen Service-Neustart überlebt.
+- **Setup-Modus (§7.1):** Der Bot startet auch ohne Anthropic-Credential, meldet auf `/status` den Setup-Modus und lehnt Ingest-Versuche mit Hinweis ab — spiegelbildlich zum `503` der Upload-Route.
+- Nachrichten von Absendern außerhalb der Allowlist werden **kommentarlos verworfen** (§9).
+
 ---
 
 ## 5. Materialtypen und Preprocessing
@@ -205,13 +217,14 @@ jobs(
   id TEXT PRIMARY KEY,            -- ulid
   user_id TEXT DEFAULT 'local',   -- Multi-User-Vorbereitung (Abschnitt 12.1)
   batch_id TEXT,                  -- gemeinsame Batches
-  source TEXT NOT NULL,           -- 'drop' | 'watch' | 'url'
+  source TEXT NOT NULL,           -- 'drop' | 'watch' | 'url' | 'telegram' (4.3)
   type TEXT NOT NULL,             -- 'pdf' | 'office' | 'web' | 'image' | 'text' | 'av' | 'other'
   original_name TEXT, url TEXT,
   sha256 TEXT UNIQUE,             -- Dedupe
   status TEXT NOT NULL,           -- queued|preprocessing|ingesting|done|failed|deferred|duplicate|cancelled
   raw_path TEXT,                  -- .raw/<job-id>/
   created_pages TEXT,             -- JSON-Liste erzeugter/aktualisierter Wiki-Seiten
+  notify_channel TEXT,            -- z. B. 'telegram:<chat_id>' — Abschluss-Meldung an den Eingangskanal (4.3; Migration v7)
   error TEXT, attempts INTEGER DEFAULT 0,
   tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL,
   created_at TEXT, started_at TEXT, finished_at TEXT
@@ -234,6 +247,7 @@ Der Vault selbst bleibt die einzige Wahrheit für Wissen; SQLite hält ausschlie
 - Eingehende Dateien werden nie ausgeführt; Magic-Byte-Prüfung gegen getarnte Executables; Archive nicht auto-entpackt.
 - Credentials (OAuth-Token bzw. API-Key) nur in der Service-Umgebung, nie im Frontend, nie in Logs, nie im Repo. Die Env-Datei `~/.config/vault-service/env` (0600) gilt als diese Umgebung; sie darf durch den Credential-Endpunkt aus Abschnitt 7.1 beschrieben, aber niemals ausgelesen und zurückgegeben werden. Ohne konfiguriertes Credential läuft der Service im Setup-Modus (ebenfalls 7.1) statt zu terminieren.
 - **Schutz gegen Drive-by-Zugriffe aus dem Browser (ergänzt 2026-07-19):** Zustandsändernde Requests (`POST`/`PUT`/`PATCH`/`DELETE`) mit fremdem `Origin`-Header werden mit `403` abgelehnt. Der Modus "local-single-user" kennt kein Credential, und ein Multipart-Upload ist ein CORS-"simple request" ohne Preflight — ohne diese Prüfung könnte jede beliebige besuchte Webseite Uploads und damit kostenpflichtige Agent-Runs gegen `127.0.0.1` auslösen. Loopback-Origins (beliebiger Port, für den Vite-Dev-Proxy) und Requests ohne `Origin` (curl, systemd-Probe) passieren.
+- **Telegram-Bot (ergänzt 2026-07-20, Abschnitt 4.3):** Der Bot-Token ist ein Secret derselben Klasse wie das Anthropic-Credential — nur in der Service-Env-Datei, nie in Logs, Frontend, SQLite oder API-Antworten; in Konfigurations-Ausgaben redigiert. Autorisierung ausschließlich über die User-ID-Allowlist, fail-closed: Token ohne Allowlist ⇒ Startabbruch; Nachrichten nicht gelisteter Absender werden ohne jede Antwort verworfen (eine Antwort würde die Bot-Existenz bestätigen — Bot-Usernamen sind enumerierbar, und jeder angenommene Befehl kann einen kostenpflichtigen Agent-Run auslösen; dieselbe Bedrohungsklasse wie der Origin-Check oben). Der ausgehende HTTPS-Verkehr zu `api.telegram.org` ist **Service-Egress, nicht Agent-Egress** — die Regel „kein Web-Egress in Ingest-Runs" betrifft Agent-Runs und gilt unverändert. Dateien aus Telegram durchlaufen dieselbe Pipeline wie alle Eingänge (Basename-Reduktion, Magic-Byte-Prüfung, keine Ausführung, kein Auto-Entpacken). Abschluss-Meldungen nennen nur Seitentitel, nie Inhaltsauszüge — Vault-Inhalt soll nicht in der Telegram-Cloud liegen (die gesendete Datei selbst liegt dort ohnehin; das ist die bewusste Entscheidung des Nutzers beim Senden).
 - **Dateinamen aus Uploads werden auf den reinen Basename reduziert**, bevor sie unter `.raw/<job-id>/` abgelegt werden; ein `../`-haltiger Name aus dem Multipart-Header könnte sonst *außerhalb* von `VAULT_ROOT` schreiben — an der Sandbox vorbei, da diese nur Agent-Runs umschließt, nicht den HTTP-Pfad.
 - Git-History als Undo-Mechanismus: Jeder Ingest ist ein Commit, fehlerhafte Läufe sind per `git revert` rückholbar (Button "Ingest rückgängig" im Verlauf, v1.1).
 
@@ -286,6 +300,8 @@ Diese drei Anforderungen hängen architektonisch zusammen und werden deshalb gem
 **v1-Vorkehrungen (bereits umgesetzt):** Frontend responsiv für schmale Viewports, PWA-Manifest (installierbar auf dem Homescreen), SSE statt WebSockets (robuster über Proxies/Mobilnetze).
 
 **Ausbaustufe:** Sobald der Server per Tailnet erreichbar ist (12.2), funktioniert das Dashboard auf dem Smartphone ohne weiteren Code. Mobile-spezifische Ergänzungen danach: Share-Target im PWA-Manifest, damit "Teilen → Vault" aus jeder App heraus einen URL- oder Datei-Job anlegt (das mobile Gegenstück zum Watch-Ordner); Kamera-Upload in der Dropzone (Foto eines Dokuments → Bild-Ingest); optional Push-Benachrichtigung bei fehlgeschlagenen Jobs (Web Push). Eine native App ist nicht geplant — die PWA deckt die Anforderungen ab.
+
+**Teilabdeckung durch den Telegram-Bot (2026-07-20):** Der in Abschnitt 4.3 ergänzte Bot deckt den mobilen Ingest- und Status-Anwendungsfall bereits ohne Tailnet ab, inklusive Abschluss-Meldung als Ersatz für Web Push — auf jeder Plattform (iOS unterstützt das Web-Share-Target nicht). Die Ausbaustufe oben bleibt der privatere Pfad (Inhalte verlassen die eigenen Geräte nicht) und der einzige mit vollem Dashboard-Zugriff (Chat, Graph, Wartung); beide ergänzen sich. Für 12.2 gilt seitdem als bevorzugte Variante `tailscale serve` (TLS-Terminierung am MagicDNS-Namen, Proxy auf `127.0.0.1:8420`): der Service bleibt loopback-gebunden, der Guard aus Abschnitt 9 wird gar nicht erst berührt, HTTPS für PWA-Installation/Share-Target kommt gratis mit, und das Frontend braucht kein Token-Handling (Zugriffsschutz = Tailnet-Mitgliedschaft; der Token-Modus bleibt als Härtungsoption bestehen).
 
 ### 12.4 In-Dashboard Vault-Viewer (Seiten + Graph)
 
