@@ -400,6 +400,13 @@ export class JobStore {
     return recovered
   }
 
+  /** All members of one batch, creation order — the completion notification needs the full set (SPEC.md §4.3). */
+  byBatch(batchId: string): JobRow[] {
+    return this.db
+      .prepare('SELECT * FROM jobs WHERE batch_id = ? ORDER BY created_at')
+      .all(batchId) as JobRow[]
+  }
+
   /** Queued batch members grouped by batch_id — for reconstructing pending batches after a restart. */
   queuedBatches(): Array<{ batchId: string; memberIds: string[] }> {
     const rows = this.db

@@ -34,21 +34,21 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 - [x] **Setup mode:** `/status` reports it; every ingest path is gated with the guidance reply BEFORE any download — nothing is enqueued (the queue would never claim it).
 - [x] Queue plumbing: `enqueueFile`/`enqueueBatch`/`enqueueUrl` accept and persist `notifyChannel` (opt-in, NULL otherwise). `queue.test.ts`; router covered by `telegram-bot.test.ts` (15 tests).
 
-## 4. Completion notifications (`telegram/bot.ts` + `format.ts`)
+## 4. Completion notifications (`telegram/bot.ts` + `format.ts`) — DONE
 
-- [ ] Subscribe to the EventBus job events; on a terminal transition (`done|failed|deferred|duplicate`) of a job with a `telegram:` notify_channel, send the outcome to that chat. `done` includes the `created_pages` **titles only — never content excerpts** (§9). `failed` includes the error line.
-- [ ] Batch members notify once per batch (one message listing members + pages), not once per member.
-- [ ] Restart safety: notify_channel is in the DB, so jobs that finish after a service restart still notify (the EventBus emits on transition; no catch-up scan for transitions missed WHILE down — accepted gap, note in Findings if it bites).
-- [ ] `telegram/format.ts`: MarkdownV2 escaping (Telegram's escaping rules are strict — every `.`/`-`/`(` etc.), message length cap 4096 with truncation.
+- [x] EventBus subscription (`events` option, wired in main.ts): a `job` event with a `telegram:` notify_channel and status `done|failed|deferred` schedules a notification **one tick deferred, then re-reads the row** — the queue transitions `failed→queued` synchronously on auto-retry, so only the FINAL failure (retries exhausted) reaches the chat. `done` includes `created_pages` **titles only** (basename sans `.md`, deduped) — never paths, never content (§9); `failed` includes the error line + retry hint. *Two states from the original plan intentionally don't notify: `duplicate` never transitions (decided at creation — the router already answered it synchronously in §3), and `cancelled` is the user's own dashboard action.*
+- [x] Batches notify ONCE, when the LAST member settles (`store.byBatch` — new — checked against `FINISHED_STATES`; straggler events deduped via a notified-set). One message: member lines with per-member status/error + union of page titles.
+- [x] Restart safety: notify_channel is in the DB, so jobs finishing after a restart still notify. Accepted gaps, documented in code: no catch-up scan for transitions missed WHILE down, and `stop()` drops not-yet-fired notification timers.
+- [x] `telegram/format.ts`: full MarkdownV2 escaping (all reserved chars, round-trip-tested), 4096 cap with truncation marker, title extraction. Sends use MarkdownV2 **with a plain-text fallback** — a notification lost to a formatting edge case is worse than an unformatted one.
 
-## 5. Tests (client mocked, like agent runs)
+## 5. Tests (client mocked, like agent runs) — DONE (landed with each module)
 
-- [ ] Router: allowlist drop (no reply calls at all), command dispatch, setup-mode refusal, oversize refusal, duplicate reply, album batching window, URL/text classification.
-- [ ] Config: fail-closed guard (token without allowlist), redaction in `describeConfig`, allowlist parsing.
-- [ ] Notifications: terminal-transition → sendMessage with titles only; batch → single message; non-telegram jobs → no send.
-- [ ] Format: MarkdownV2 escaping property cases, 4096 truncation.
-- [ ] Client: backoff on network error, permanent stop on 409 (fake fetch).
-- [ ] `npm test` green before calling this done.
+- [x] Router: allowlist drop (no reply calls at all), command dispatch, setup-mode refusal, oversize refusal, duplicate reply, album batching window + stop-flush, URL/text classification, staging cleanup. `telegram-bot.test.ts`.
+- [x] Config: fail-closed guard (token without allowlist), non-numeric rejection, redaction in `describeConfig`, allowlist parsing. `config.test.ts` (§1).
+- [x] Notifications: done → MarkdownV2 with titles only; final-failure vs auto-retry suppression; batch → single message on last-member settle with straggler dedupe; channel-less jobs silent. `telegram-bot.test.ts`.
+- [x] Format: all reserved chars escaped (round-trip), 4096 truncation, outcome/batch messages. `telegram-format.test.ts`.
+- [x] Client: backoff + resume, retry_after, permanent stop on 409/401, abort-prompt stop, offset acknowledgement, poisonous-update advance, download caps, token-leak guard. `telegram-client.test.ts` (§2).
+- [x] `npm test` green: 411 tests across 33 files (was 336 pre-telegram).
 
 ## 6. Docs & live acceptance
 

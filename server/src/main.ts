@@ -147,6 +147,8 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
         queue,
         store,
         setupMode,
+        // Completion notifications ride the same bus as the dashboard's SSE stream.
+        events,
         // Same provider pattern (and the same budget module) as the queue and the stats
         // route, so all three always agree (SPEC.md §11.3).
         budget: () => budgetStatus(config, settings.effective(config), store),

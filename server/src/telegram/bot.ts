@@ -16,9 +16,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { ulid } from 'ulid'
 import type { IngestQueue, BatchItem } from '../pipeline/queue.js'
-import type { JobStore } from '../db/jobs.js'
+import { FINISHED_STATES, type JobRow, type JobStore } from '../db/jobs.js'
 import type { TelegramConfig } from '../config.js'
 import type { BudgetStatus } from '../pipeline/budget.js'
+import type { EventBus, BusEvent } from '../pipeline/events.js'
+import { formatJobOutcome, formatBatchOutcome } from './format.js'
 import {
   TelegramClient,
   startPolling,
@@ -64,6 +66,8 @@ export interface StartTelegramBotOptions {
   readonly store: JobStore
   /** True when no Anthropic credential is configured: status still answers, ingests refuse. */
   readonly setupMode: boolean
+  /** Live-update bus; when passed, terminal telegram jobs notify their chat (SPEC.md §4.3). */
+  readonly events?: EventBus
   /** Budget provider for /status; a provider so settings changes apply live (like the queue's). */
   readonly budget?: () => BudgetStatus
   readonly log?: LogFn
@@ -96,6 +100,15 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
       await client.sendMessage({ chatId, text })
     } catch (err) {
       log('warn', `could not send reply: ${(err as Error).message}`)
+    }
+  }
+
+  /** MarkdownV2 send with a plain-text fallback — a lost notification is worse than a plain one. */
+  const notify = async (chatId: number, text: string): Promise<void> => {
+    try {
+      await client.sendMessage({ chatId, text, parseMode: 'MarkdownV2' })
+    } catch {
+      await reply(chatId, text.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1'))
     }
   }
 
@@ -284,6 +297,59 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
     }
   }
 
+  /* -------------------------- completion notifications --------------------------- */
+
+  // `duplicate` is terminal but never transitions (decided at creation), so it can't fire
+  // here — the router already answered it synchronously. `cancelled` is the user's own
+  // dashboard action and deliberately not echoed (SPEC.md §4.3 lists done/failed/deferred).
+  const TERMINAL_NOTIFY: ReadonlySet<string> = new Set(['done', 'failed', 'deferred'])
+  const notifiedBatches = new Set<string>()
+  const pendingNotifies = new Set<NodeJS.Timeout>()
+
+  const chatIdOf = (channel: string | null): number | undefined => {
+    if (channel === null || !channel.startsWith('telegram:')) return undefined
+    const id = Number(channel.slice('telegram:'.length))
+    return Number.isFinite(id) ? id : undefined
+  }
+
+  const notifyOutcome = async (jobId: string, batchId: string | null): Promise<void> => {
+    if (batchId !== null) {
+      // Batches notify ONCE, when the LAST member settles (SPEC.md §4.3).
+      if (notifiedBatches.has(batchId)) return
+      const members = options.store.byBatch(batchId)
+      if (members.length === 0 || !members.every((m) => FINISHED_STATES.includes(m.status))) return
+      const chatId = chatIdOf(members.find((m) => m.notify_channel !== null)?.notify_channel ?? null)
+      if (chatId === undefined) return
+      notifiedBatches.add(batchId)
+      await notify(chatId, formatBatchOutcome(members))
+      return
+    }
+    const job = options.store.get(jobId)
+    if (job === undefined) return
+    // Re-read the CURRENT status: an auto-retry transitions failed→queued synchronously
+    // right after the failed event — the deferred check sees the requeue and stays quiet,
+    // so only the FINAL failure (retries exhausted) reaches the chat.
+    if (!TERMINAL_NOTIFY.has(job.status)) return
+    const chatId = chatIdOf(job.notify_channel)
+    if (chatId === undefined) return
+    await notify(chatId, formatJobOutcome(job))
+  }
+
+  const onBusEvent = (event: BusEvent): void => {
+    if (event.kind !== 'job') return
+    const job: JobRow = event.job
+    if (job.notify_channel === null || !job.notify_channel.startsWith('telegram:')) return
+    if (!TERMINAL_NOTIFY.has(job.status)) return
+    // One tick later — see notifyOutcome. Tracked so stop() can drop what hasn't fired.
+    const timer = setTimeout(() => {
+      pendingNotifies.delete(timer)
+      void runSafely(() => notifyOutcome(job.id, job.batch_id))
+    }, 0)
+    pendingNotifies.add(timer)
+  }
+
+  const unsubscribe = options.events?.subscribe(onBusEvent)
+
   const dispatch = async (message: TgMessage): Promise<void> => {
     const chatId = message.chat.id
 
@@ -344,6 +410,11 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
 
   return {
     stop: async (): Promise<void> => {
+      // Notifications first: unhook the bus and drop un-fired timers. A notification lost
+      // to shutdown is the accepted gap (SPEC.md §4.3) — the job row keeps the truth.
+      unsubscribe?.()
+      for (const timer of pendingNotifies) clearTimeout(timer)
+      pendingNotifies.clear()
       await poller.stop()
       // Flush pending albums instead of dropping already-downloaded members. Their quiet
       // window is moot now — nothing more can arrive once polling has stopped.
