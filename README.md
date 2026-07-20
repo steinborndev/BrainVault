@@ -46,9 +46,9 @@ one step for the browser: the dashboard opens in **setup mode** and walks you th
 connecting your Anthropic account (Claude subscription or API key) under
 Maintenance → Settings.
 
-**Windows without WSL yet:** download the repo and run `scripts\install.ps1` in
-PowerShell - it installs WSL2 + Ubuntu, runs the setup above inside it, and puts a
-BrainVault shortcut on your desktop.
+**Windows without WSL yet:** download the repo as a ZIP (GitHub: Code → Download ZIP - no
+git needed on Windows), unpack it, and run `scripts\install.ps1` in PowerShell - it installs
+WSL2 + Ubuntu, runs the setup above inside it, and puts a BrainVault shortcut on your desktop.
 
 **Manually instead:**
 
@@ -65,7 +65,8 @@ git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
 sudo apt-get install -y bubblewrap socat
 ./scripts/install-preprocessing-tools.sh
 
-# 4. Build + run - then open http://127.0.0.1:8420 and add the credential in the UI
+# 4. Build + run (needs Node >= 20 on PATH - see Requirements for the nvm one-liner),
+#    then open http://127.0.0.1:8420 and add the credential in the UI
 npm ci && npm run build
 VAULT_ROOT=~/vault npm start
 ```
@@ -77,13 +78,18 @@ Each step is explained below; for an always-on setup see
 
 ## Requirements
 
+What the **machine** needs - the BrainVault repo itself is not listed because acquiring it is
+step 1 of the quick start, not a prerequisite. `setup-all.sh` installs everything in this table
+except the OS; the manual path below installs each row explicitly. `git` and `curl` are assumed
+(both ship with the stock Ubuntu WSL image).
+
 | | |
 |---|---|
-| OS | Linux, or Windows + WSL2 (Ubuntu 24.04 is what this was built on) |
-| Node | ≥ 20 LTS - via [nvm](https://github.com/nvm-sh/nvm): `. ~/.nvm/nvm.sh` |
-| Vault | a claude-obsidian clone (v1.9.2, Generic mode), by default at `~/vault` |
+| OS | Debian/Ubuntu-family Linux (the toolchain installs via `apt`), or Windows + WSL2 (Ubuntu 24.04 is what this was built and e2e-tested on) |
+| Node | ≥ 20 LTS - `setup-all.sh` installs it via [nvm](https://github.com/nvm-sh/nvm); manual: `curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh \| bash`, then `nvm install 20`. Already-loaded shells: `. ~/.nvm/nvm.sh` |
+| Vault | a claude-obsidian clone (**built and tested against v1.9.2**, Generic mode), by default at `~/vault`. The clone takes upstream's current state - if upstream has moved on and something breaks, check out the tested version |
 | Credential | a Claude subscription token **or** an Anthropic API key (exactly one) - entered in the dashboard on first run, not needed to start |
-| Claude Code CLI | only for the subscription path, to run `claude setup-token` once |
+| Claude Code CLI | only for the subscription path, to run `claude setup-token` once - install with `npm install -g @anthropic-ai/claude-code` |
 | Sandbox | `bubblewrap` + `socat` - **required**, agent runs fail without them |
 | Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube URLs: metadata + subtitles) |
 
@@ -117,6 +123,7 @@ Exactly one credential may be configured - if both are set the service refuses t
 `ANTHROPIC_API_KEY` silently overrides the OAuth token and you would not know which one was billed.
 
 ```bash
+npm install -g @anthropic-ai/claude-code        # once, for the setup-token command below
 mkdir -p ~/.config/vault-service
 claude setup-token                              # subscription path (recommended)
 printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "<token>" > ~/.config/vault-service/env
@@ -128,8 +135,11 @@ repo, the database, the logs, or the API.
 
 ### 4. Install and build
 
+Needs Node ≥ 20 on the PATH - see the Requirements row if you don't have it yet
+(`setup-all.sh` installs it via nvm automatically).
+
 ```bash
-. ~/.nvm/nvm.sh
+. ~/.nvm/nvm.sh          # load nvm's node in this shell (skip if node ≥ 20 is already there)
 npm ci
 npm run build            # web/dist (SPA) + server/dist (runnable JS)
 ```
