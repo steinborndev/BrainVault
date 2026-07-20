@@ -336,6 +336,9 @@ Behavior and limits:
   the conflict and stops - the service itself keeps running.
 - **Setup mode:** `/status` answers (and says so); ingests are refused with guidance until a
   credential is configured.
+- **Disabling:** Maintenance → Settings → "Disable" removes both variables from the env file
+  (and restarts the service under systemd); the token itself is never displayed anywhere after
+  saving - revoke it via BotFather if it may have leaked.
 
 ---
 
