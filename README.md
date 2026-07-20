@@ -9,9 +9,9 @@ personal knowledge vault, written by an AI agent running entirely on your machin
 
 BrainVault is a local ingestion service and web dashboard on top of a
 [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) vault (v1.9.2, Generic mode).
-It watches a folder and accepts drag-and-drop uploads, preprocesses the material (PDF, Office, web,
-images, text), and runs headless Claude Agent SDK sessions that execute the vault's `ingest` skill
-fully automatically. A React dashboard exposes status, the job queue, research chat with citations,
+It watches a folder, accepts drag-and-drop uploads and (optionally) files sent to a Telegram bot
+from your phone, preprocesses the material (PDF, Office, web, images, text), and runs headless
+Claude Agent SDK sessions that execute the vault's `ingest` skill fully automatically. A React dashboard exposes status, the job queue, research chat with citations,
 an interactive vault viewer, and maintenance actions.
 
 ![Overview tab](docs/img/overview.png)
@@ -22,7 +22,8 @@ an interactive vault viewer, and maintenance actions.
 tooling notes); the ingest history behind the numbers is representative, not a benchmark.</sub>
 
 Everything runs on your machine: the service binds `127.0.0.1` by default, the vault stays a plain
-git repository on disk, and the only thing that leaves the box is the agent's traffic to Anthropic.
+git repository on disk, and the only thing that leaves the box is the agent's traffic to Anthropic -
+plus, if you enable the Telegram bot, its outbound polling of `api.telegram.org`.
 
 > **`SPEC.md` (German) is the authoritative specification.** When code and spec disagree, the spec
 > wins. The UI, code, and everything else are English. `CLAUDE.md` holds the hard rules that
@@ -262,6 +263,8 @@ SQLite and survive a restart.
 | `HTTP_AUTH_TOKEN` | - | required for a non-loopback bind |
 | `WATCH_POLLING` | auto | forced on for `/mnt/*` (Windows mounts have no inotify) |
 | `OBSIDIAN_VAULT_NAME` | vault dir name | for `obsidian://` deep links |
+| `TELEGRAM_BOT_TOKEN` | - | enables the Telegram bot (see below); a secret, same handling as the credential |
+| `TELEGRAM_ALLOWED_USER_IDS` | - | comma-separated numeric Telegram user ids; **required** once the token is set |
 | `DB_PATH` | `~/.local/share/vault-service/jobs.db` | kept **outside** the vault |
 
 Runtime-settable in the Maintenance tab: watch folder, concurrency, upload limit, git auto-commit,
@@ -284,6 +287,52 @@ Optional. The unit follows the auth mode, because the two modes constrain differ
 When the budget is reached the queue stops claiming new work (in-flight runs always finish) and
 resumes at the next local midnight. In subscription mode every `cost_usd` shown in the UI is
 labelled **"estimate (subscription)"** - it is an API-price equivalent, not money charged.
+
+---
+
+## Telegram bot (optional)
+
+A phone-first input channel (SPEC.md §4.3): send the bot a PDF, a photo, a URL or a plain-text
+note and it lands in the regular ingestion queue; when the ingest finishes, the bot reports back
+with the created page titles. `/status` answers with queue, job and budget state, `/jobs` lists
+recent jobs.
+
+The transport is **outbound long polling** - the service calls `api.telegram.org`, nothing calls
+the service. No port is opened, the localhost bind stays untouched, and it works from anywhere
+your phone has internet, without Tailscale or a reverse proxy.
+
+Setup:
+
+1. **Create a bot:** talk to [@BotFather](https://t.me/BotFather) in Telegram, send `/newbot`,
+   pick a name and username. BotFather answers with the bot token.
+2. **Find your numeric user id:** message a bot like `@userinfobot`, which replies with your id.
+   (Usernames don't work here - they are mutable and spoofable; the allowlist wants the number.)
+3. **Configure** `~/.config/vault-service/env`:
+
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456789:AAF...
+   TELEGRAM_ALLOWED_USER_IDS=111111111        # comma-separated for several people
+   ```
+
+4. **Restart:** `systemctl --user restart vault-service`, then send the bot `/status`.
+
+Behavior and limits:
+
+- **Allowlist, fail-closed.** A token without `TELEGRAM_ALLOWED_USER_IDS` refuses startup.
+  Messages from ids outside the list get **no answer at all** - by design, a reply would
+  confirm the bot exists, and every accepted message can start a paid agent run.
+- **Files up to 20 MB.** Telegram lets bots download at most 20 MB (senders may attach up to
+  2 GB); larger files get a hint pointing at the dropzone or the watch folder.
+- **Albums become one batch.** Files sent together as an album are ingested in a single
+  combined run, like a multi-file drop in the dashboard.
+- **Notifications carry titles only.** The completion message names the created wiki pages,
+  never their content - vault content does not transit Telegram's cloud. (The file you *send*
+  does, like any Telegram upload; that is your call as the sender.)
+- **Exactly one poller per token.** Telegram allows a single `getUpdates` consumer; if a second
+  instance polls the same token (typically a dev run next to the systemd service), the bot logs
+  the conflict and stops - the service itself keeps running.
+- **Setup mode:** `/status` answers (and says so); ingests are refused with guidance until a
+  credential is configured.
 
 ---
 
@@ -485,6 +534,13 @@ The commit pathspec is derived from the agent's `Write`/`Edit` tool calls. A pag
 renames with `Bash` is invisible to that; the run sweeps such pages in automatically, but only
 while it can prove it was the sole vault writer - with a second run in flight the sweep is skipped
 rather than risk filing the page under the wrong job. Commit it by hand; nothing is lost.
+
+**The Telegram bot went silent.** Check the service log: `getUpdates conflict (409)` means a
+second process polled the same bot token (usually a dev instance next to the systemd service) -
+the bot stops permanently until a restart; `401 Unauthorized` means the token is wrong or was
+revoked in BotFather. Both stop only the bot, never the service. Also remember the fail-closed
+rule: a token **without** `TELEGRAM_ALLOWED_USER_IDS` refuses startup, and senders outside the
+allowlist get no reaction whatsoever - that silence is the guard working, not a bug.
 
 **Obsidian cannot open the vault over `\\wsl$`.** It can't - Obsidian for Windows fails with
 `EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4. (The Vault

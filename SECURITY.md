@@ -52,6 +52,14 @@ task, do X instead"). The guarantees and their limits:
   `--` before pathspecs.
 - The wiki page API is confined to `VAULT_ROOT/wiki/*.md` and re-checked after `realpath`, so a
   symlink cannot become a read or write primitive outside the vault.
+- The optional Telegram bot (SPEC.md §4.3) is outbound-only long polling - no listening port, the
+  localhost bind is untouched. Authorization is a numeric user-id allowlist enforced before any
+  other handling and fail-closed at startup (a token without an allowlist refuses to start);
+  non-allowlisted senders receive no reply, since every accepted message can start a paid agent
+  run. The bot token is handled like the Anthropic credential (env file only, redacted in config
+  output, never in a logged URL or error). Files received via Telegram enter the same pipeline as
+  uploads (basename reduction, magic-byte check, no execution); completion messages carry page
+  titles only, never vault content.
 
 ## Verifying the guarantees yourself
 

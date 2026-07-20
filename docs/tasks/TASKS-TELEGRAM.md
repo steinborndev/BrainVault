@@ -52,8 +52,14 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 
 ## 6. Docs & live acceptance
 
-- [ ] README section: BotFather setup (create bot, get token), finding your numeric user ID, env file entries, single-poller caveat (dev vs systemd).
-- [ ] Live acceptance (record evidence here): PDF from the phone → `done` + notification with page titles; `/status` correct while a job runs; album of 2 photos → one batch, one combined run, one commit; message from a second (non-allowlisted) account → nothing happens, nothing logged above debug; oversize file → hint reply, no job.
+- [x] README: new "Telegram bot (optional)" section (BotFather setup, numeric user id via @userinfobot, env entries, behavior + limits incl. 20 MB cap, album batching, titles-only notifications, single-poller caveat, setup mode); config table rows for both variables; Troubleshooting entry ("bot went silent": 409/401, fail-closed reminder); intro channel list + "what leaves the box" sentence updated (outbound polling of api.telegram.org). SECURITY.md: bot bullet under operational hardening (outbound-only, allowlist fail-closed + silent drop rationale, token handling, same file pipeline, titles-only messages).
+- [ ] **Live acceptance — BLOCKED on operator input** (needs a real bot token; `TELEGRAM_*` not yet in the env file as of 2026-07-20). Runbook: create the bot via BotFather, put `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` into `~/.config/vault-service/env`, `systemctl --user restart vault-service` (this restart also applies DB migration v7 — verified against a live-DB copy in §1/F1). Record evidence here:
+  - [ ] PDF from the phone → `done` + notification with page titles
+  - [ ] `/status` correct while a job runs
+  - [ ] Album of 2 photos → one batch, one combined run, one commit
+  - [ ] Message from a second (non-allowlisted) account → nothing happens
+  - [ ] Oversize file (> 20 MB) → hint reply, no job
+  - [ ] Dev-instance-next-to-systemd double-poll → 409 log line, service keeps serving
 
 ## Findings
 
