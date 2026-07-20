@@ -53,15 +53,19 @@ BrainVault shortcut on your desktop.
 **Manually instead:**
 
 ```bash
-# 1. The vault this service writes into (lives OUTSIDE this repo)
+# 1. This repo - the service itself. It lives NEXT TO the vault, never inside it,
+#    and finds the vault via VAULT_ROOT (step 4).
+git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
+
+# 2. The vault this service writes into (a separate repo, OUTSIDE this one)
 git clone https://github.com/AgriciDaniel/claude-obsidian ~/vault
 (cd ~/vault && bash bin/setup-vault.sh)
 
-# 2. Sandbox + preprocessing toolchain
+# 3. Sandbox + preprocessing toolchain
 sudo apt-get install -y bubblewrap socat
 ./scripts/install-preprocessing-tools.sh
 
-# 3. Build + run - then open http://127.0.0.1:8420 and add the credential in the UI
+# 4. Build + run - then open http://127.0.0.1:8420 and add the credential in the UI
 npm ci && npm run build
 VAULT_ROOT=~/vault npm start
 ```
