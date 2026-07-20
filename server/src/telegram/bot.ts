@@ -392,11 +392,30 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
     return handleText(chatId, text)
   }
 
+  // Operator visibility for the drop (user decision 2026-07-20): the SENDER still gets no
+  // reaction, but the journal records the FIRST attempt per sender id — id and username
+  // only, never the message content. One line per id guards the journal against flooding.
+  const loggedStrangers = new Set<number>()
+
   const onUpdate = async (update: TgUpdate): Promise<void> => {
     const message = update.message
-    // THE guard (SPEC.md §9): no sender id, or one outside the allowlist → drop silently.
+    // THE guard (SPEC.md §9): no sender id, or one outside the allowlist → drop, no reply.
     if (message?.from === undefined) return
-    if (!allowed.has(message.from.id)) return
+    if (!allowed.has(message.from.id)) {
+      if (!loggedStrangers.has(message.from.id)) {
+        loggedStrangers.add(message.from.id)
+        const who = message.from.username
+          ? `${message.from.id} (@${message.from.username})`
+          : `${message.from.id}`
+        log(
+          'warn',
+          `dropped message from non-allowlisted telegram user ${who} — the sender gets no reply ` +
+            `(SPEC.md §9); add the id to TELEGRAM_ALLOWED_USER_IDS to allow it. Further messages ` +
+            `from this id are dropped without logging.`,
+        )
+      }
+      return
+    }
     await runSafely(() => dispatch(message))
   }
 

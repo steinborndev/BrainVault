@@ -323,7 +323,9 @@ Behavior and limits:
 
 - **Allowlist, fail-closed.** A token without `TELEGRAM_ALLOWED_USER_IDS` refuses startup.
   Messages from ids outside the list get **no answer at all** - by design, a reply would
-  confirm the bot exists, and every accepted message can start a paid agent run.
+  confirm the bot exists, and every accepted message can start a paid agent run. The service
+  journal still records the first attempt per sender id (id and username, never the message
+  content), so probing - or your own mistyped id - is visible to you.
 - **Files up to 20 MB.** Telegram lets bots download at most 20 MB (senders may attach up to
   2 GB); larger files get a hint pointing at the dropzone or the watch folder.
 - **Albums become one batch.** Files sent together as an album are ingested in a single
@@ -546,7 +548,9 @@ second process polled the same bot token (usually a dev instance next to the sys
 the bot stops permanently until a restart; `401 Unauthorized` means the token is wrong or was
 revoked in BotFather. Both stop only the bot, never the service. Also remember the fail-closed
 rule: a token **without** `TELEGRAM_ALLOWED_USER_IDS` refuses startup, and senders outside the
-allowlist get no reaction whatsoever - that silence is the guard working, not a bug.
+allowlist never get a reply - that silence toward the sender is the guard working, not a bug.
+The journal logs the first attempt per sender id (`dropped message from non-allowlisted telegram
+user …`), which is also how you spot your own mistyped id.
 
 **Obsidian cannot open the vault over `\\wsl$`.** It can't - Obsidian for Windows fails with
 `EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4. (The Vault

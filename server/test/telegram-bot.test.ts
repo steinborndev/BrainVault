@@ -86,6 +86,7 @@ function makeBot(over: {
   const fake = makeFakeClient(over.batches ?? [])
   const q = makeFakeQueue()
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-test-'))
+  const logs: Array<{ level: string; message: string }> = []
   const bot = startTelegramBot({
     telegram: { botToken: 't', allowedUserIds: [ALLOWED_USER] },
     queue: q.queue,
@@ -94,11 +95,13 @@ function makeBot(over: {
     ...(over.budget ? { budget: over.budget } : {}),
     ...(over.events ? { events: over.events } : {}),
     client: fake.client,
-    log: () => {},
+    log: (level, message) => {
+      logs.push({ level, message })
+    },
     albumWindowMs: over.albumWindowMs ?? 30,
     stagingDir,
   })
-  return { bot, ...fake, ...q, stagingDir }
+  return { bot, ...fake, ...q, stagingDir, logs }
 }
 
 /** A full JobRow for notification tests. */
@@ -142,11 +145,12 @@ function makeRowStore(rows: JobRow[]) {
 }
 
 describe('telegram bot — allowlist (SPEC.md §9)', () => {
-  it('drops messages from strangers silently: no reply, no queue call', async () => {
+  it('drops messages from strangers: no reply, no queue call, ONE journal line per sender', async () => {
     const b = makeBot({
       batches: [
-        [update({ text: '/status', from: { id: 999 } })],
-        [update({ document: { file_id: 'f1' }, from: { id: 999 } })],
+        [update({ text: '/secret probe', from: { id: 999, username: 'stranger' } })],
+        [update({ document: { file_id: 'f1' }, from: { id: 999, username: 'stranger' } })],
+        [update({ text: 'hello?', from: { id: 888 } })],
         [update({ text: '/status' })], // sentinel from the allowlisted user
       ],
     })
@@ -154,6 +158,13 @@ describe('telegram bot — allowlist (SPEC.md §9)', () => {
     await b.bot.stop()
     expect(b.enqueueFile).not.toHaveBeenCalled()
     expect(b.getFile).not.toHaveBeenCalled()
+    // Operator visibility: one warn per sender id (999 sent twice → one line), never content.
+    const dropped = b.logs.filter((l) => l.message.includes('non-allowlisted'))
+    expect(dropped).toHaveLength(2)
+    expect(dropped[0]!.level).toBe('warn')
+    expect(dropped[0]!.message).toContain('999 (@stranger)')
+    expect(dropped[1]!.message).toContain('888')
+    expect(dropped.map((l) => l.message).join('\n')).not.toContain('probe')
   })
 
   it('drops updates without a sender', async () => {

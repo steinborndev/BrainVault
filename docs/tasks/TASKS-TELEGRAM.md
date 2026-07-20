@@ -24,7 +24,7 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 
 ## 3. Update router (`telegram/bot.ts`) — DONE
 
-- [x] **Allowlist guard first:** any update without a `from.id`, or with one outside the allowlist, is dropped silently — no reply, no log (§9). Everything else is unreachable before this check.
+- [x] **Allowlist guard first:** any update without a `from.id`, or with one outside the allowlist, is dropped without a reply (§9). Everything else is unreachable before this check. *Amended 2026-07-20 (user decision): originally fully silent; now the FIRST attempt per sender id is logged as a warn (id + username, never content), further attempts from the same id stay unlogged — operator visibility without a journal-flooding vector.*
 - [x] `/status`: setup-mode flag, queue stats, job counts, budget (provider injected from main — same `budgetStatus` module as queue/stats route). `/start`+`/help`+unknown commands → help text. Replies are deliberately PLAIN TEXT (no parse_mode): job/file names are user content, and without MarkdownV2 there is nothing to escape — MarkdownV2 + escaping arrive with `format.ts` in §4 where page titles appear.
 - [x] `/jobs`: last 8 jobs (status, name/url, id suffix).
 - [x] Document/photo: polite pre-check on DECLARED `file_size` (> 20 MB ⇒ hint reply naming dropzone/watch folder, no `getFile` call; client cap stays the hard backstop) → download to the shared upload staging dir → `enqueueFile({ source: 'telegram', notifyChannel: 'telegram:<chat_id>' })` (existing `sanitizeOriginalName` + magic-byte classification untouched) → reply with job id; `duplicateOf` gets its own reply. Staging file removed after enqueue (queue copies into `.raw/`), mirroring the jobs route.
@@ -58,7 +58,7 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
   - [x] PDF from the phone → `done` + notification. Evidence: job `…DEPXBW` (source `telegram`, `notify_channel` persisted) → immediate "Queued …" reply, ingest → `done` with 21 created/updated pages (15 content + 6 maintenance), ONE vault commit (`e469a97`), ~6.3M/51k tokens (≈$3.56 est.), no send error in the log. *Observation: `created_pages` includes the vault maintenance pages (`_index`, `index`, `hot`, `log`), which showed up as noise "titles" in the message — FIXED same day (user-approved, commit `f72c591`): filtered in format.ts by PATH (message only, DB keeps the full list; a content page titled "Index"/"Log" still shows).*
   - [x] `/status` correct while a job runs — operator screenshot 09:07: `Queue: 1 running (concurrency 3)`, `Jobs: ingesting 1 · done 1`
   - [ ] Album of 2 photos → one batch, one combined run, one commit
-  - [ ] Message from a second (non-allowlisted) account → nothing happens
+  - [ ] Message from a second (non-allowlisted) account → no reply to the sender; one warn line in the journal (behavior amended 2026-07-20, see §3)
   - [ ] Oversize file (> 20 MB) → hint reply, no job
   - [ ] Dev-instance-next-to-systemd double-poll → 409 log line, service keeps serving
 
