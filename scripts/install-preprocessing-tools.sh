@@ -18,16 +18,27 @@ sudo apt-get install -y \
 
 echo "==> Python extractors (pip)"
 # python-pptx / openpyxl / odfpy back scripts/extract-office.py for pptx/xlsx/odf.
+# Two fresh-Ubuntu realities (found in the fresh-WSL e2e test, 2026-07-20):
+#  - a stock 24.04 ships python3 WITHOUT pip → install it via apt first;
+#  - PEP 668 marks the system python "externally managed" and refuses plain --user
+#    installs. python-pptx is not packaged by Ubuntu, so pip stays the only path for
+#    the libraries; user-site installs with --break-system-packages are the sanctioned
+#    non-venv escape for pure-python packages like these.
 # `--user` is invalid inside a virtualenv (pyenv/venv/conda), so only add it when we are
 # NOT in one — otherwise install into the active environment directly.
-PIP_USER_FLAG="--user"
-if python3 -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)' 2>/dev/null; then
-  PIP_USER_FLAG=""  # inside a virtualenv
+if ! python3 -m pip --version >/dev/null 2>&1; then
+  sudo apt-get install -y python3-pip
 fi
-python3 -m pip install ${PIP_USER_FLAG} --upgrade python-pptx openpyxl odfpy
+PIP_FLAGS="--user"
+if python3 -c 'import sys; sys.exit(0 if sys.prefix != sys.base_prefix else 1)' 2>/dev/null; then
+  PIP_FLAGS=""  # inside a virtualenv
+elif python3 -m pip install --help 2>/dev/null | grep -q break-system-packages; then
+  PIP_FLAGS="--user --break-system-packages"
+fi
+python3 -m pip install ${PIP_FLAGS} --upgrade python-pptx openpyxl odfpy
 
 echo "==> yt-dlp (pip, for YouTube URL ingestion: metadata + subtitles)"
-python3 -m pip install ${PIP_USER_FLAG} --upgrade yt-dlp
+python3 -m pip install ${PIP_FLAGS} --upgrade yt-dlp
 
 echo "==> defuddle (npm, for URL/web extraction)"
 # Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
