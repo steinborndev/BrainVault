@@ -20,6 +20,7 @@ import type {
   SettingsResponse,
   SettingsPatch,
   CredentialResponse,
+  TelegramSettingsResponse,
   PagePreview,
   PageFull,
   VaultGraph,
@@ -237,6 +238,17 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).then(json<CredentialResponse>),
+
+  /** Telegram bot on/off (SPEC.md §4.3). The token goes out once and never comes back. */
+  setTelegram: (body: { botToken: string; allowedUserIds: string }): Promise<TelegramSettingsResponse> =>
+    fetch(`${BASE}/settings/telegram`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(json<TelegramSettingsResponse>),
+
+  disableTelegram: (): Promise<TelegramSettingsResponse> =>
+    fetch(`${BASE}/settings/telegram`, { method: 'DELETE' }).then(json<TelegramSettingsResponse>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

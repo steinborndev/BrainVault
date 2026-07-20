@@ -385,6 +385,12 @@ export interface CredentialResponse {
   restart: 'auto' | 'manual'
 }
 
+/** Response of the telegram bot configuration (SPEC.md §4.3). Never carries the token. */
+export interface TelegramSettingsResponse {
+  ok: boolean
+  restart: 'auto' | 'manual'
+}
+
 /** A settings write. `null` clears an override, falling back to the baseline. */
 export type SettingsPatch = Partial<{
   [K in keyof EffectiveSettings]: EffectiveSettings[K] | null

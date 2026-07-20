@@ -310,6 +310,128 @@ describe('POST /api/v1/settings/credential', () => {
   })
 })
 
+describe('telegram settings endpoint (SPEC.md §4.3)', () => {
+  let envFile: string
+  let restarts: number
+  let tgApp: FastifyInstance
+
+  const buildTgApp = async (telegram: Config['telegram'] = null): Promise<FastifyInstance> =>
+    buildServer({
+      config: { ...makeConfig(), telegram },
+      store,
+      chat,
+      queue,
+      events,
+      maintenance,
+      settings: new SettingsStore(db),
+      runQuery: (input) => queryImpl(input),
+      autoCommit: () => false,
+      logger: false,
+      credentialFile: envFile,
+      scheduleRestart: () => {
+        restarts++
+      },
+    })
+
+  beforeEach(async () => {
+    envFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tg-env-')), 'env')
+    restarts = 0
+    tgApp = await buildTgApp()
+  })
+  afterEach(async () => {
+    await tgApp.close()
+    fs.rmSync(path.dirname(envFile), { recursive: true, force: true })
+  })
+
+  const post = (payload: object) =>
+    tgApp.inject({
+      method: 'POST',
+      url: '/api/v1/settings/telegram',
+      headers: { 'content-type': 'application/json' },
+      payload,
+    })
+
+  const TOKEN = `123456789:${'A'.repeat(34)}`
+
+  it('writes BOTH variables into the env file (0600), preserving other keys, echoing nothing', async () => {
+    fs.writeFileSync(envFile, 'PORT=9999\n')
+    const res = await post({ botToken: TOKEN, allowedUserIds: ' 111 , 222 ' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ ok: true, restart: 'manual' })
+    expect(res.body).not.toContain(TOKEN)
+
+    const written = fs.readFileSync(envFile, 'utf8')
+    expect(written).toContain(`TELEGRAM_BOT_TOKEN=${TOKEN}`)
+    expect(written).toContain('TELEGRAM_ALLOWED_USER_IDS=111,222') // normalized spacing
+    expect(written).toContain('PORT=9999')
+    expect(fs.statSync(envFile).mode & 0o777).toBe(0o600)
+  })
+
+  it('rejects a malformed token and username allowlists, without echoing the token', async () => {
+    const bad = await post({ botToken: 'not-a-token', allowedUserIds: '111' })
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().issues.join(' ')).toMatch(/BotFather/)
+
+    const usernames = await post({ botToken: TOKEN, allowedUserIds: '@benjamin' })
+    expect(usernames.statusCode).toBe(400)
+    expect(usernames.json().issues.join(' ')).toMatch(/not @usernames/)
+    expect(usernames.body).not.toContain(TOKEN)
+    expect(fs.existsSync(envFile)).toBe(false)
+  })
+
+  it('never produces the fail-closed startup state: token cannot be written without ids', async () => {
+    const res = await post({ botToken: TOKEN })
+    expect(res.statusCode).toBe(400)
+    expect(fs.existsSync(envFile)).toBe(false)
+  })
+
+  it('409s when the variables come from the process environment', async () => {
+    process.env['TELEGRAM_BOT_TOKEN'] = 'from-shell'
+    try {
+      const res = await post({ botToken: TOKEN, allowedUserIds: '111' })
+      expect(res.statusCode).toBe(409)
+      expect(res.json().error).toMatch(/process environment/)
+    } finally {
+      delete process.env['TELEGRAM_BOT_TOKEN']
+    }
+  })
+
+  it('DELETE removes both variables and keeps the rest of the file', async () => {
+    fs.writeFileSync(envFile, `PORT=9999\nTELEGRAM_BOT_TOKEN=${TOKEN}\nTELEGRAM_ALLOWED_USER_IDS=111\n`)
+    const res = await tgApp.inject({ method: 'DELETE', url: '/api/v1/settings/telegram' })
+    expect(res.statusCode).toBe(200)
+    const written = fs.readFileSync(envFile, 'utf8')
+    expect(written).not.toContain('TELEGRAM_BOT_TOKEN')
+    expect(written).not.toContain('TELEGRAM_ALLOWED_USER_IDS')
+    expect(written).toContain('PORT=9999')
+  })
+
+  it('schedules the systemd restart and reports restart:auto', async () => {
+    process.env['INVOCATION_ID'] = 'test-invocation'
+    try {
+      const res = await post({ botToken: TOKEN, allowedUserIds: '111' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ restart: 'auto' })
+      expect(restarts).toBe(1)
+    } finally {
+      delete process.env['INVOCATION_ID']
+    }
+  })
+
+  it('GET /settings reports bot status without ever carrying the token', async () => {
+    const configured = await buildTgApp({ botToken: TOKEN, allowedUserIds: [111, 222] })
+    try {
+      const res = await configured.inject({ method: 'GET', url: '/api/v1/settings' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json().readOnly.telegram).toBe('on (2 allowlisted users)')
+      expect(res.body).not.toContain(TOKEN)
+    } finally {
+      await configured.close()
+    }
+    expect((await tgApp.inject({ method: 'GET', url: '/api/v1/settings' })).json().readOnly.telegram).toBe('off')
+  })
+})
+
 describe('cross-origin guard', () => {
   it('rejects a state-changing request with a foreign Origin (drive-by CSRF)', async () => {
     const res = await fetch(`${baseUrl}/api/v1/jobs`, {

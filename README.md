@@ -307,14 +307,17 @@ Setup:
    pick a name and username. BotFather answers with the bot token.
 2. **Find your numeric user id:** message a bot like `@userinfobot`, which replies with your id.
    (Usernames don't work here - they are mutable and spoofable; the allowlist wants the number.)
-3. **Configure** `~/.config/vault-service/env`:
+3. **Configure** - either in the dashboard under **Maintenance → Settings → "Set up Telegram
+   bot…"** (writes the env file for you and restarts the service under systemd), or by editing
+   `~/.config/vault-service/env` directly:
 
    ```bash
    TELEGRAM_BOT_TOKEN=123456789:AAF...
    TELEGRAM_ALLOWED_USER_IDS=111111111        # comma-separated for several people
    ```
 
-4. **Restart:** `systemctl --user restart vault-service`, then send the bot `/status`.
+4. **Restart** (only needed after editing the file by hand):
+   `systemctl --user restart vault-service`, then send the bot `/status`.
 
 Behavior and limits:
 

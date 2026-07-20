@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { CredentialSetup } from './CredentialSetup.tsx'
+import { TelegramSetup } from './TelegramSetup.tsx'
 import type { EffectiveSettings, SettingsPatch, SettingsResponse } from '../api/types.ts'
 
 const MB = 1024 * 1024
@@ -23,6 +24,7 @@ const READ_ONLY_LABELS: Record<string, string> = {
   httpAuthMode: 'HTTP auth',
   authMode: 'Anthropic mode',
   credentialSource: 'Credential source',
+  telegram: 'Telegram bot',
 }
 
 export function SettingsEditor(): React.ReactElement {
@@ -206,6 +208,7 @@ export function SettingsEditor(): React.ReactElement {
         deliberately not changeable through the UI.
       </p>
       <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
+      <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
     </div>
   )
 }

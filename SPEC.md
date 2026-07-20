@@ -114,6 +114,7 @@ Dritter Eingangskanal plus Statuskanal, primär fürs Handy („PDF vom Telefon 
 - **Abschluss-Meldung:** Erreicht ein Telegram-Job `done`/`failed`/`deferred`/`duplicate`, meldet der Bot das in den Ursprungs-Chat — bei `done` mit den Titeln der erzeugten Seiten, **ohne Inhaltsauszüge** (§9). Die Chat-Zuordnung wird als `notify_channel` am Job persistiert (§8), damit sie einen Service-Neustart überlebt.
 - **Setup-Modus (§7.1):** Der Bot startet auch ohne Anthropic-Credential, meldet auf `/status` den Setup-Modus und lehnt Ingest-Versuche mit Hinweis ab — spiegelbildlich zum `503` der Upload-Route.
 - Nachrichten von Absendern außerhalb der Allowlist werden **kommentarlos verworfen** (§9).
+- **Konfiguration über das Dashboard (ergänzt 2026-07-20, User-Entscheidung):** Token und Allowlist sind unter Wartung → Einstellungen eintragbar. `POST /api/v1/settings/telegram` schreibt **beide Variablen gemeinsam** in die Service-Env-Datei (der Fail-closed-Guard oben darf durch diesen Weg nicht erzeugbar sein), `DELETE` entfernt beide (Bot aus). Es gelten dieselben Regeln wie für den Credential-Endpunkt aus §7.1: Werte werden nie zurückgegeben oder geloggt (die Einstellungsansicht zeigt nur den Status „on/off + Allowlist-Größe"), Aktivierung per Neustart (unter systemd Selbst-Neustart), `409` bei Werten aus der Prozess-Umgebung (die Datei würde überlagert) oder bei laufenden Agent-Runs (der Neustart würde sie abbrechen).
 
 ---
 
