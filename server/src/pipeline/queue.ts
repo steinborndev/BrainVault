@@ -342,6 +342,8 @@ export class IngestQueue {
     readonly source: JobSource
     readonly originalName?: string
     readonly batchId?: string
+    /** Where to report the terminal state, e.g. 'telegram:<chat_id>' (SPEC.md §4.3). */
+    readonly notifyChannel?: string
   }): Promise<CreateJobResult> {
     const originalName = sanitizeOriginalName(input.originalName ?? path.basename(input.sourcePath))
     const sha256 = await sha256File(input.sourcePath)
@@ -351,6 +353,7 @@ export class IngestQueue {
       originalName,
       sha256,
       ...(input.batchId ? { batchId: input.batchId } : {}),
+      ...(input.notifyChannel ? { notifyChannel: input.notifyChannel } : {}),
     })
     if (created.duplicateOf === undefined) {
       try {
@@ -393,12 +396,14 @@ export class IngestQueue {
   async enqueueBatch(
     items: readonly BatchItem[],
     source: JobSource,
+    opts: { readonly notifyChannel?: string } = {},
   ): Promise<{ batchId: string; jobs: CreateJobResult[] }> {
     const batchId = ulid()
+    const notify = opts.notifyChannel ? { notifyChannel: opts.notifyChannel } : {}
     const jobs: CreateJobResult[] = []
     for (const item of items) {
       if (item.kind === 'url') {
-        jobs.push(this.store.create({ source, type: 'web', url: item.url, batchId }))
+        jobs.push(this.store.create({ source, type: 'web', url: item.url, batchId, ...notify }))
         continue
       }
       const originalName = sanitizeOriginalName(item.originalName ?? path.basename(item.sourcePath))
@@ -408,11 +413,11 @@ export class IngestQueue {
       let created: CreateJobResult | undefined
       try {
         const sha256 = await sha256File(item.sourcePath)
-        created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId })
+        created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId, ...notify })
         if (created.duplicateOf === undefined) this.stageFile(created.job.id, item.sourcePath, originalName)
         jobs.push(created)
       } catch (err) {
-        created ??= this.store.create({ source, type: guessType(originalName), originalName, batchId })
+        created ??= this.store.create({ source, type: guessType(originalName), originalName, batchId, ...notify })
         const job = this.store.transition(created.job.id, 'failed', {
           patch: { error: `could not read/stage the file: ${(err as Error).message}` },
           log: `batch member failed before preprocessing: ${(err as Error).message}`,
@@ -459,12 +464,18 @@ export class IngestQueue {
   }
 
   /** Enqueues a URL job (not content-addressed, so not deduped). */
-  enqueueUrl(input: { readonly url: string; readonly source?: JobSource; readonly batchId?: string }): CreateJobResult {
+  enqueueUrl(input: {
+    readonly url: string
+    readonly source?: JobSource
+    readonly batchId?: string
+    readonly notifyChannel?: string
+  }): CreateJobResult {
     const created = this.store.create({
       source: input.source ?? 'url',
       type: 'web',
       url: input.url,
       ...(input.batchId ? { batchId: input.batchId } : {}),
+      ...(input.notifyChannel ? { notifyChannel: input.notifyChannel } : {}),
     })
     this.pump()
     return created

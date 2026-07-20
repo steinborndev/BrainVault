@@ -146,6 +146,35 @@ describe('upload name traversal (security regression)', () => {
   })
 })
 
+describe('notify_channel forwarding (SPEC.md §4.3)', () => {
+  it('enqueueFile, enqueueUrl and every enqueueBatch member persist the channel', async () => {
+    const q = makeQueue()
+    const { job: fileJob } = await q.enqueueFile({
+      sourcePath: writeSource('n1.txt'),
+      source: 'telegram',
+      notifyChannel: 'telegram:42',
+    })
+    expect(store.getOrThrow(fileJob.id).notify_channel).toBe('telegram:42')
+
+    const { job: urlJob } = q.enqueueUrl({ url: 'https://example.org', source: 'telegram', notifyChannel: 'telegram:42' })
+    expect(store.getOrThrow(urlJob.id).notify_channel).toBe('telegram:42')
+
+    const { jobs } = await q.enqueueBatch(
+      [
+        { kind: 'file', sourcePath: writeSource('n2.txt'), originalName: 'n2.txt' },
+        { kind: 'url', url: 'https://example.org/b' },
+      ],
+      'telegram',
+      { notifyChannel: 'telegram:42' },
+    )
+    for (const r of jobs) expect(store.getOrThrow(r.job.id).notify_channel).toBe('telegram:42')
+
+    // Channels stay opt-in: without one, the column remains NULL.
+    const { job: plain } = await q.enqueueFile({ sourcePath: writeSource('n3.txt'), source: 'drop' })
+    expect(store.getOrThrow(plain.id).notify_channel).toBeNull()
+  })
+})
+
 describe('happy path', () => {
   it('drives a text file to done, commits, records pages/tokens, and persists the stream', async () => {
     const messages: SDKMessage[] = []

@@ -13,7 +13,7 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 - [x] `config.ts`: `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOWED_USER_IDS` (comma-separated numeric IDs) in the zod schema, read from the merged env (file + process, same precedence as everything else). New `Config.telegram: TelegramConfig | null` (`{ botToken, allowedUserIds }`).
 - [x] **Fail-closed guard (§4.3/§9):** token set but allowlist empty/unparsable ⇒ `ConfigError` at startup (mirror the double-credential guard); non-numeric entries (usernames) rejected explicitly. `describeConfig` reports `<token redacted, N chars>` + allowlist count; allowlist WITHOUT token is inert (bot off, no error). `config.test.ts`.
 - [x] `db/jobs.ts`: `JobSource` + `'telegram'` (also `web/src/api/types.ts`); `CreateJobInput.notifyChannel` persisted at create. Migration **v7**: nullable `jobs.notify_channel` — a full `jobs` TABLE REBUILD, because the v1 `source` CHECK constraint lists the allowed values and SQLite cannot alter a CHECK in place (see F1 below). Verified against a copy of the live DB: v6→v7, all rows + 238 job_logs preserved, `foreign_key_check` clean. `db.test.ts`.
-- [ ] `main.ts`: start the bot iff `config.telegram` is set, symmetric to the watcher; graceful shutdown stops the polling loop before the queue closes. The bot also starts in **setup mode** (reduced behavior, §4 below). *Deferred to §3 — `startTelegramBot` does not exist until the module lands; wiring an import to nothing would be scaffolding.*
+- [x] `main.ts`: bot starts iff `config.telegram` is set (also in setup mode — `/status` answers there, ingests refuse), after `listen` so it logs through the app logger; budget provider shares the same `budgetStatus` module as queue + stats route. Shutdown stops the bot FIRST so no new updates reach a draining queue. `RunningService.telegram` exposed. *(Landed with §3.)*
 
 ## 2. Bot API client (`telegram/client.ts`) — DONE
 
@@ -22,16 +22,17 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 - [x] Download cap: `downloadFile` enforces the 20 MB Bot API limit twice — on `Content-Length` when present, and on actually received bytes (Telegram serves without the header too); an oversize download leaves no partial file (bounded in-memory buffering, write-on-complete). *The polite pre-check against `message.document.file_size` + the hint reply is router work (§3), where the message context lives.* `destDir` is a parameter; the router passes the upload staging dir.
 - [x] Token never in logs/errors: all errors carry the METHOD NAME only, never a URL; explicit test asserts no token/URL leak across api/network/non-JSON failure paths. `telegram-client.test.ts` (15 tests).
 
-## 3. Update router (`telegram/bot.ts`)
+## 3. Update router (`telegram/bot.ts`) — DONE
 
-- [ ] **Allowlist guard first:** any update whose `from.id` is not allowlisted is dropped silently — no reply, no log above debug level (§9). Everything else is unreachable before this check.
-- [ ] `/status`: setup mode flag, queue stats (`queue.stats()`), job counts (`store.counts()`), budget status — the health/stats data, formatted (§5).
-- [ ] `/jobs`: last N jobs (id-prefix, name, status, relative time).
-- [ ] Document/photo message: download (§2) → `queue.enqueueFile({ source: 'telegram', originalName })` (existing `sanitizeOriginalName` + magic-byte classification apply untouched) → immediate reply with job id; `duplicateOf` gets its own reply text. Persist `notify_channel = 'telegram:<chat_id>'` on the created job.
-- [ ] Photos arrive as `photo` size arrays without filename — pick the largest size, synthesize a name (`photo-<ulid>.jpg`).
-- [ ] **Album batching:** messages sharing a `media_group_id` are collected (quiet window, ~2 s — Telegram delivers album parts as separate updates) and enqueued via `enqueueBatch` as ONE batch, mirroring multi-drop §4.1.
-- [ ] URL message → `enqueueUrl`; plain text → text job (same treatment as dropzone paste in `routes/jobs.ts`).
-- [ ] **Setup mode:** `/status` answers with a "setup mode, no credential" notice; ingest attempts are rejected with the same hint (mirror of the jobs route's 503) — nothing is enqueued, because the queue would never claim it.
+- [x] **Allowlist guard first:** any update without a `from.id`, or with one outside the allowlist, is dropped silently — no reply, no log (§9). Everything else is unreachable before this check.
+- [x] `/status`: setup-mode flag, queue stats, job counts, budget (provider injected from main — same `budgetStatus` module as queue/stats route). `/start`+`/help`+unknown commands → help text. Replies are deliberately PLAIN TEXT (no parse_mode): job/file names are user content, and without MarkdownV2 there is nothing to escape — MarkdownV2 + escaping arrive with `format.ts` in §4 where page titles appear.
+- [x] `/jobs`: last 8 jobs (status, name/url, id suffix).
+- [x] Document/photo: polite pre-check on DECLARED `file_size` (> 20 MB ⇒ hint reply naming dropzone/watch folder, no `getFile` call; client cap stays the hard backstop) → download to the shared upload staging dir → `enqueueFile({ source: 'telegram', notifyChannel: 'telegram:<chat_id>' })` (existing `sanitizeOriginalName` + magic-byte classification untouched) → reply with job id; `duplicateOf` gets its own reply. Staging file removed after enqueue (queue copies into `.raw/`), mirroring the jobs route.
+- [x] Photos: largest `photo` size wins, name synthesized (`photo-<suffix>.jpg`).
+- [x] **Album batching:** members sharing a `media_group_id` are downloaded on arrival and collected per `(chat, group)`; the quiet window (default 2 s) resets per member; flush → ONE `enqueueBatch(…, 'telegram', { notifyChannel })` + ONE reply. `stop()` flushes pending albums instead of dropping already-downloaded members.
+- [x] Lone URL → `enqueueUrl`; plain text → staged `telegram-note-*.md` file job (same treatment as dropzone paste).
+- [x] **Setup mode:** `/status` reports it; every ingest path is gated with the guidance reply BEFORE any download — nothing is enqueued (the queue would never claim it).
+- [x] Queue plumbing: `enqueueFile`/`enqueueBatch`/`enqueueUrl` accept and persist `notifyChannel` (opt-in, NULL otherwise). `queue.test.ts`; router covered by `telegram-bot.test.ts` (15 tests).
 
 ## 4. Completion notifications (`telegram/bot.ts` + `format.ts`)
 

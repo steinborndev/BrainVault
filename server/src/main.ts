@@ -21,6 +21,7 @@ import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
 import { startVaultWatcher, type VaultWatcher } from './pipeline/vault-watcher.js'
+import { startTelegramBot, type TelegramBot } from './telegram/bot.js'
 import type { FastifyInstance } from 'fastify'
 
 export interface RunningService {
@@ -29,6 +30,8 @@ export interface RunningService {
   readonly store: JobStore
   readonly watcher: Watcher
   readonly vaultWatcher: VaultWatcher
+  /** `null` unless TELEGRAM_BOT_TOKEN is configured (SPEC.md §4.3). */
+  readonly telegram: TelegramBot | null
   readonly url: string
   stop(): Promise<void>
 }
@@ -135,7 +138,25 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     )
   }
 
+  // Telegram channel (SPEC.md §4.3), symmetric to the watcher but ALSO alive in setup mode:
+  // /status still answers there (reporting setup mode) while ingests are refused — the bot
+  // gates them itself. Started after listen so its log lines go through the app logger.
+  const telegram: TelegramBot | null = config.telegram
+    ? startTelegramBot({
+        telegram: config.telegram,
+        queue,
+        store,
+        setupMode,
+        // Same provider pattern (and the same budget module) as the queue and the stats
+        // route, so all three always agree (SPEC.md §11.3).
+        budget: () => budgetStatus(config, settings.effective(config), store),
+        log: (level, message) => app.log[level](`[telegram] ${message}`),
+      })
+    : null
+
   const stop = async (): Promise<void> => {
+    // Bot first: no new updates may reach the queue while it is draining/stopping.
+    if (telegram) await telegram.stop()
     await watcher.close()
     await vaultWatcher.close()
     queue.stop()
@@ -143,7 +164,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     db.close()
   }
 
-  return { app, queue, store, watcher, vaultWatcher, url, stop }
+  return { app, queue, store, watcher, vaultWatcher, telegram, url, stop }
 }
 
 const isDirectRun =
