@@ -45,9 +45,20 @@ function jobName(job: JobRow): string {
   return job.original_name ?? job.url ?? job.id
 }
 
+/**
+ * Vault maintenance pages the ingest touches on every run (indexes, hot cache, log). They are
+ * real entries in `created_pages`, but as notification "titles" they are pure noise — filtered
+ * HERE only (live acceptance observation, 2026-07-20); the DB keeps the full list. Matched by
+ * PATH, not title, so a genuine content page named "Index" or "Log" still shows.
+ */
+const MAINTENANCE_PATHS = new Set(['wiki/index.md', 'wiki/hot.md', 'wiki/log.md'])
+const isMaintenancePage = (pagePath: string): boolean =>
+  MAINTENANCE_PATHS.has(pagePath) || path.basename(pagePath) === '_index.md'
+
 function pagesBlock(pages: readonly string[]): string {
-  if (pages.length === 0) return ''
-  const titles = [...new Set(pages.map(pageTitle))]
+  const content = pages.filter((p) => !isMaintenancePage(p))
+  if (content.length === 0) return ''
+  const titles = [...new Set(content.map(pageTitle))]
   return `\nPages:\n${titles.map((t) => `• ${escapeMd(t)}`).join('\n')}`
 }
 

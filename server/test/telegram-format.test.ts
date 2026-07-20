@@ -76,6 +76,30 @@ describe('formatJobOutcome', () => {
     expect(text).not.toContain('wiki/')
   })
 
+  it('filters vault maintenance pages from the title list — by path, not title', () => {
+    const text = formatJobOutcome(
+      makeJob({
+        created_pages: JSON.stringify([
+          'wiki/concepts/Espresso.md',
+          'wiki/concepts/_index.md',
+          'wiki/index.md',
+          'wiki/hot.md',
+          'wiki/log.md',
+          'wiki/concepts/Log.md', // a REAL page that happens to be titled "Log" stays
+        ]),
+      }),
+    )
+    expect(text).toContain('Espresso')
+    expect(text).toContain('Log')
+    expect(text).not.toContain('_index')
+    expect(text).not.toContain('hot')
+    // Only maintenance pages touched → no Pages block at all.
+    const onlyMaintenance = formatJobOutcome(
+      makeJob({ created_pages: JSON.stringify(['wiki/hot.md', 'wiki/sources/_index.md']) }),
+    )
+    expect(onlyMaintenance).not.toContain('Pages:')
+  })
+
   it('failed: carries the error line and the retry hint', () => {
     const text = formatJobOutcome(makeJob({ status: 'failed', error: 'pdftotext missing (install poppler)' }))
     expect(text).toContain('❌')
