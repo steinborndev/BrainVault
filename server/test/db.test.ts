@@ -5,6 +5,7 @@ import path from 'node:path'
 import { openDb, migrate, defaultDbPath, nowIso, MEMORY_DB } from '../src/db/index.js'
 import { MIGRATIONS } from '../src/db/migrations.js'
 import { JobStore } from '../src/db/jobs.js'
+import { TelegramDropStore } from '../src/db/telegram-drops.js'
 
 const LATEST = MIGRATIONS[MIGRATIONS.length - 1]!.version
 
@@ -136,6 +137,20 @@ describe('v7 — telegram channel (SPEC.md §4.3)', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('v8: telegram_drops aggregates per sender — count, last_at, mutable username', () => {
+    const db = openDb(MEMORY_DB)
+    const drops = new TelegramDropStore(db)
+    drops.record(999)
+    drops.record(999, 'stranger')
+    drops.record(888, 'other')
+    const rows = drops.list()
+    expect(rows).toHaveLength(2)
+    const big = rows.find((r) => r.sender_id === 999)!
+    expect(big.count).toBe(2)
+    expect(big.username).toBe('stranger') // later username wins (usernames are mutable)
+    expect(big.first_at <= big.last_at).toBe(true)
   })
 
   it('recreates all four jobs indexes after the rebuild', () => {

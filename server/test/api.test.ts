@@ -8,6 +8,7 @@ import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { ChatStore } from '../src/db/chat.js'
 import { SettingsStore } from '../src/db/settings.js'
+import { TelegramDropStore } from '../src/db/telegram-drops.js'
 import { IngestQueue } from '../src/pipeline/queue.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
@@ -416,6 +417,38 @@ describe('telegram settings endpoint (SPEC.md §4.3)', () => {
     } finally {
       delete process.env['INVOCATION_ID']
     }
+  })
+
+  it('GET /settings/telegram serves the dropped-sender counters (never content, never the token)', async () => {
+    const dropStore = new TelegramDropStore(db)
+    dropStore.record(999, 'stranger')
+    dropStore.record(999, 'stranger')
+    const withDrops = await buildServer({
+      config: makeConfig(),
+      store,
+      chat,
+      queue,
+      events,
+      maintenance,
+      settings: new SettingsStore(db),
+      runQuery: (input) => queryImpl(input),
+      autoCommit: () => false,
+      logger: false,
+      telegramDrops: dropStore,
+    })
+    try {
+      const res = await withDrops.inject({ method: 'GET', url: '/api/v1/settings/telegram' })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({
+        configured: false,
+        drops: [{ senderId: 999, username: 'stranger', count: 2 }],
+      })
+    } finally {
+      await withDrops.close()
+    }
+    // Without an injected store the endpoint degrades to an empty list, not an error.
+    const bare = await tgApp.inject({ method: 'GET', url: '/api/v1/settings/telegram' })
+    expect(bare.json()).toEqual({ configured: false, drops: [] })
   })
 
   it('GET /settings reports bot status without ever carrying the token', async () => {

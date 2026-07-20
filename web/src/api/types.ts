@@ -391,6 +391,20 @@ export interface TelegramSettingsResponse {
   restart: 'auto' | 'manual'
 }
 
+/** One non-allowlisted sender the bot dropped (aggregated; never message content). */
+export interface TelegramDrop {
+  senderId: number
+  username: string | null
+  firstAt: string
+  lastAt: string
+  count: number
+}
+
+export interface TelegramStatusResponse {
+  configured: boolean
+  drops: TelegramDrop[]
+}
+
 /** A settings write. `null` clears an override, falling back to the baseline. */
 export type SettingsPatch = Partial<{
   [K in keyof EffectiveSettings]: EffectiveSettings[K] | null

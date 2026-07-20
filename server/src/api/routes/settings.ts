@@ -247,6 +247,22 @@ export function registerSettingsRoute(app: FastifyInstance, ctx: AppContext): vo
     return reply.send({ ok: true, restart: scheduleRestartIfSystemd() })
   })
 
+  /**
+   * Telegram status for the Maintenance card: the dropped-sender counters (SPEC.md §9 —
+   * the journal warns once per sender, this is the live aggregate). Ids + usernames only,
+   * never message content, never the token.
+   */
+  app.get('/api/v1/settings/telegram', async (_req, reply) => {
+    const drops = (ctx.telegramDrops?.list() ?? []).map((d) => ({
+      senderId: d.sender_id,
+      username: d.username,
+      firstAt: d.first_at,
+      lastAt: d.last_at,
+      count: d.count,
+    }))
+    return reply.send({ configured: config.telegram !== null, drops })
+  })
+
   /** Disables the bot: removes both variables from the env file. */
   app.delete('/api/v1/settings/telegram', async (_req, reply) => {
     const blocked = envFileWriteBlocked(TELEGRAM_ENV_VARS)

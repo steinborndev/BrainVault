@@ -87,6 +87,7 @@ function makeBot(over: {
   const q = makeFakeQueue()
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-test-'))
   const logs: Array<{ level: string; message: string }> = []
+  const dropCalls: Array<[number, string | undefined]> = []
   const bot = startTelegramBot({
     telegram: { botToken: 't', allowedUserIds: [ALLOWED_USER] },
     queue: q.queue,
@@ -98,10 +99,15 @@ function makeBot(over: {
     log: (level, message) => {
       logs.push({ level, message })
     },
+    drops: {
+      record: (senderId, username) => {
+        dropCalls.push([senderId, username])
+      },
+    },
     albumWindowMs: over.albumWindowMs ?? 30,
     stagingDir,
   })
-  return { bot, ...fake, ...q, stagingDir, logs }
+  return { bot, ...fake, ...q, stagingDir, logs, dropCalls }
 }
 
 /** A full JobRow for notification tests. */
@@ -165,6 +171,12 @@ describe('telegram bot — allowlist (SPEC.md §9)', () => {
     expect(dropped[0]!.message).toContain('999 (@stranger)')
     expect(dropped[1]!.message).toContain('888')
     expect(dropped.map((l) => l.message).join('\n')).not.toContain('probe')
+    // The counter store sees EVERY attempt, not just the first (Maintenance card data).
+    expect(b.dropCalls).toEqual([
+      [999, 'stranger'],
+      [999, 'stranger'],
+      [888, undefined],
+    ])
   })
 
   it('drops updates without a sender', async () => {

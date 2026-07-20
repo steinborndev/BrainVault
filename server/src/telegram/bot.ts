@@ -20,6 +20,7 @@ import { FINISHED_STATES, type JobRow, type JobStore } from '../db/jobs.js'
 import type { TelegramConfig } from '../config.js'
 import type { BudgetStatus } from '../pipeline/budget.js'
 import type { EventBus, BusEvent } from '../pipeline/events.js'
+import type { TelegramDropStore } from '../db/telegram-drops.js'
 import { formatJobOutcome, formatBatchOutcome } from './format.js'
 import {
   TelegramClient,
@@ -68,6 +69,8 @@ export interface StartTelegramBotOptions {
   readonly setupMode: boolean
   /** Live-update bus; when passed, terminal telegram jobs notify their chat (SPEC.md §4.3). */
   readonly events?: EventBus
+  /** Dropped-sender counters for the Maintenance card (migration v8); optional in tests/CLIs. */
+  readonly drops?: Pick<TelegramDropStore, 'record'>
   /** Budget provider for /status; a provider so settings changes apply live (like the queue's). */
   readonly budget?: () => BudgetStatus
   readonly log?: LogFn
@@ -402,6 +405,13 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
     // THE guard (SPEC.md §9): no sender id, or one outside the allowlist → drop, no reply.
     if (message?.from === undefined) return
     if (!allowed.has(message.from.id)) {
+      // The DB counts EVERY attempt (the Maintenance card shows the live picture); the
+      // journal keeps its one-line-per-id flood guard.
+      try {
+        options.drops?.record(message.from.id, message.from.username)
+      } catch (err) {
+        log('warn', `could not record dropped sender: ${(err as Error).message}`)
+      }
       if (!loggedStrangers.has(message.from.id)) {
         loggedStrangers.add(message.from.id)
         const who = message.from.username

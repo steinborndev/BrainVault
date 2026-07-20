@@ -59,7 +59,7 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
   - [x] `/status` correct while a job runs — operator screenshot 09:07: `Queue: 1 running (concurrency 3)`, `Jobs: ingesting 1 · done 1`
   - [ ] Album of 2 photos → one batch, one combined run, one commit
   - [ ] Message from a second (non-allowlisted) account → no reply to the sender; one warn line in the journal (behavior amended 2026-07-20, see §3)
-  - [ ] Oversize file (> 20 MB) → hint reply, no job
+  - [x] Oversize file (> 20 MB) → hint reply, no job. Operator-confirmed 2026-07-20 with a ~24 MB PDF; reply verbatim as designed ("…is ~24 MB — Telegram lets bots download at most 20 MB. Use the dashboard dropzone or the watch folder for large files."), no `getFile` call, no job row.
   - [ ] Dev-instance-next-to-systemd double-poll → 409 log line, service keeps serving
 
 ## 7. Settings UI (added 2026-07-20, user request) — DONE
@@ -67,6 +67,13 @@ Post-M5 extension — the milestone gate does not apply, but the working agreeme
 - [x] Spec: §4.3 amended — token + allowlist settable via dashboard, same rules as the §7.1 credential endpoint (write-only, restart activates, 409 on process-env shadowing / in-flight runs); both variables always written TOGETHER so the endpoint cannot produce the fail-closed startup state.
 - [x] Server: `updateEnvFile` generalized from `writeCredentialFile` (set/remove keys, 0600, write-then-rename); `POST /api/v1/settings/telegram` (zod: token shape `\d+:[A-Za-z0-9_-]{20,}`, comma-separated numeric ids with a "not @usernames" message; normalizes id spacing) + `DELETE` (removes both = bot off); shared guard helper (process-env 409, in-flight 409) + shared systemd self-restart helper reused by the credential route; `GET /settings` readOnly gains `telegram: 'on (N allowlisted users)' | 'off'` — never the token. `api.test.ts` (7 new tests incl. token-echo and fail-closed-state checks).
 - [x] Web: `TelegramSetup` card under Maintenance → Settings below the credential card (token as password field + ids field, save→restart toast→poll `/settings` until the restarted process reports the expected on/off status→reload; "Disable" with confirm); read-only status row "Telegram bot". Token cleared from component state after submit.
+
+## 8. Dropped-sender visibility in the UI (added 2026-07-20, user request) — DONE
+
+- [x] Journal warn for non-allowlisted senders (first attempt per id, id+username only, never content; further attempts unlogged as a flood guard) — amends the original fully-silent §9 behavior, spec updated.
+- [x] **Migration v8** `telegram_drops`: every attempt counted, aggregated per sender (count, first/last seen, mutable username — later one wins). Persistent because a settings change routinely restarts the service, which would wipe an in-memory buffer exactly when the operator is looking.
+- [x] `GET /api/v1/settings/telegram` → `{ configured, drops }`; degrades to an empty list without a store (tests). Bot records via an injected `drops` recorder; a store failure is logged, never breaks message handling.
+- [x] Web: "Rejected senders" list in the Telegram card (id, @username, count, last-seen; 30 s refetch; hidden when empty or unconfigured) — explicitly framed as the way to spot your own mistyped id.
 
 ## Findings
 

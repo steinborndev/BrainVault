@@ -220,6 +220,25 @@ CREATE INDEX idx_jobs_created  ON jobs(created_at);
 CREATE INDEX idx_jobs_finished ON jobs(finished_at);
 `
 
+/**
+ * v8 — non-allowlisted Telegram senders, aggregated per sender id (SPEC.md §4.3/§9). The
+ * journal logs only the FIRST attempt per sender (flood guard); this table keeps the live
+ * count so the dashboard can show the full picture, surviving the restarts that a settings
+ * change routinely triggers. Operational state only (hard rule 1) — losing it costs nothing
+ * but the counters.
+ */
+const V8 = `
+CREATE TABLE telegram_drops (
+  user_id   TEXT NOT NULL DEFAULT 'local',
+  sender_id INTEGER NOT NULL,
+  username  TEXT,
+  first_at  TEXT NOT NULL,
+  last_at   TEXT NOT NULL,
+  count     INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, sender_id)
+);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -228,4 +247,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 5, up: V5 },
   { version: 6, up: V6 },
   { version: 7, up: V7 },
+  { version: 8, up: V8 },
 ]

@@ -11,6 +11,7 @@ import { JobStore } from './db/jobs.js'
 import { ChatStore } from './db/chat.js'
 import { SettingsStore } from './db/settings.js'
 import { DomainDismissalStore } from './db/domain-dismissals.js'
+import { TelegramDropStore } from './db/telegram-drops.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
@@ -80,6 +81,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   const setupMode = config.auth === null
   if (!setupMode) queue.start()
 
+  // Dropped-sender counters (SPEC.md §9): written by the bot, read by the settings route.
+  const telegramDrops = new TelegramDropStore(db)
+
   const maintenance = new MaintenanceRunner({
     vaultRoot: config.vaultRoot,
     auth: config.auth,
@@ -125,6 +129,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     autoCommit: () => settings.effective(config).gitAutoCommit,
     // Persistent, so a rejected domain candidate stays rejected across restarts.
     domainDismissals: new DomainDismissalStore(db),
+    telegramDrops,
   })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
@@ -149,6 +154,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
         setupMode,
         // Completion notifications ride the same bus as the dashboard's SSE stream.
         events,
+        drops: telegramDrops,
         // Same provider pattern (and the same budget module) as the queue and the stats
         // route, so all three always agree (SPEC.md §11.3).
         budget: () => budgetStatus(config, settings.effective(config), store),

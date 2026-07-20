@@ -21,6 +21,7 @@ import type {
   SettingsPatch,
   CredentialResponse,
   TelegramSettingsResponse,
+  TelegramStatusResponse,
   PagePreview,
   PageFull,
   VaultGraph,
@@ -249,6 +250,10 @@ export const api = {
 
   disableTelegram: (): Promise<TelegramSettingsResponse> =>
     fetch(`${BASE}/settings/telegram`, { method: 'DELETE' }).then(json<TelegramSettingsResponse>),
+
+  /** Dropped-sender counters for the Maintenance card. Ids only, never content or token. */
+  telegramStatus: (): Promise<TelegramStatusResponse> =>
+    fetch(`${BASE}/settings/telegram`).then(json<TelegramStatusResponse>),
 }
 
 /** Parse the stored `citations` JSON string on a message into a typed array. */

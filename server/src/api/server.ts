@@ -21,6 +21,7 @@ import type { EventBus } from '../pipeline/events.js'
 import type { QueryRunner } from '../pipeline/query-runner.js'
 import type { MaintenanceRunner } from '../pipeline/maintenance.js'
 import type { SettingsStore } from '../db/settings.js'
+import type { TelegramDropStore } from '../db/telegram-drops.js'
 import type { Mutex } from '../util/mutex.js'
 import { GraphBuilder } from '../pipeline/graph.js'
 import { registerAuth } from './auth.js'
@@ -66,6 +67,8 @@ export interface AppContext {
   readonly credentialFile?: string
   /** Restart trigger after a credential write under systemd. Injectable so tests observe it. */
   readonly scheduleRestart?: () => void
+  /** Dropped-sender counters for the telegram status endpoint (migration v8). Optional in tests. */
+  readonly telegramDrops?: TelegramDropStore
 }
 
 /** Location of the built frontend (`web/dist`), resolved relative to this source file. */

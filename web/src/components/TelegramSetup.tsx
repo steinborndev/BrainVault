@@ -10,9 +10,46 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { timeAgo } from '../lib/format.ts'
 import type { TelegramSettingsResponse } from '../api/types.ts'
+
+/**
+ * Non-allowlisted senders the bot dropped (SPEC.md §9): the journal warns once per sender,
+ * this list shows the live counts — including the operator's own mistyped id. Rendered only
+ * while the bot is configured; ids and usernames only, never message content.
+ */
+function DroppedSenders(): React.ReactElement | null {
+  const q = useQuery({
+    queryKey: ['telegram-status'],
+    queryFn: api.telegramStatus,
+    refetchInterval: 30_000,
+  })
+  if (!q.data || q.data.drops.length === 0) return null
+  return (
+    <div>
+      <h4 className="settings-ro-title">Rejected senders</h4>
+      <p className="setting-hint">
+        Messages from these Telegram ids were dropped without a reply. If one of them is you,
+        the id in the allowlist is wrong.
+      </p>
+      <div className="settings-ro">
+        {q.data.drops.map((d) => (
+          <div className="settings-ro-row" key={d.senderId}>
+            <span className="settings-ro-label">
+              {d.senderId}
+              {d.username ? ` (@${d.username})` : ''}
+            </span>
+            <code>
+              {d.count} message{d.count === 1 ? '' : 's'}, last {timeAgo(d.lastAt)}
+            </code>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function TelegramSetup({ status }: { status: string }): React.ReactElement {
   const configured = status !== 'off'
@@ -69,24 +106,27 @@ export function TelegramSetup({ status }: { status: string }): React.ReactElemen
 
   if (!open) {
     return (
-      <div className="setting-control">
-        <button className="btn ghost" onClick={() => setOpen(true)}>
-          {configured ? 'Replace Telegram settings…' : 'Set up Telegram bot…'}
-        </button>
-        {configured && (
-          <button
-            className="btn ghost"
-            disabled={disable.isPending}
-            onClick={() => {
-              if (window.confirm('Disable the Telegram bot? The token is removed from the env file.')) {
-                disable.mutate()
-              }
-            }}
-          >
-            {disable.isPending ? 'Disabling…' : 'Disable'}
+      <div>
+        <div className="setting-control">
+          <button className="btn ghost" onClick={() => setOpen(true)}>
+            {configured ? 'Replace Telegram settings…' : 'Set up Telegram bot…'}
           </button>
-        )}
+          {configured && (
+            <button
+              className="btn ghost"
+              disabled={disable.isPending}
+              onClick={() => {
+                if (window.confirm('Disable the Telegram bot? The token is removed from the env file.')) {
+                  disable.mutate()
+                }
+              }}
+            >
+              {disable.isPending ? 'Disabling…' : 'Disable'}
+            </button>
+          )}
+        </div>
         {disable.isError && <div className="toast err">{(disable.error as Error).message}</div>}
+        {configured && <DroppedSenders />}
       </div>
     )
   }
