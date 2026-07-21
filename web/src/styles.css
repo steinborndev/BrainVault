@@ -1965,23 +1965,298 @@ details.hot-cache[open] .hc-summary::before {
   flex-direction: column;
   gap: 10px;
 }
-.graph-toolbar {
+/* ═══ Vault toolbar, two tiers (mockup 2026-07-21): a stable VIEW bar for how the graph
+   is drawn, and the growing DOMAIN filter band for what is in it. Splitting by intent is
+   what keeps a filter change from ever reflowing the render controls. ═══ */
+.viewbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.graph-toolbar .filters {
-  margin-bottom: 0;
-}
-/* The right-hand view controls as one unit: pushed right, wrapping together rather than
-   letting a single control (e.g. the lens button) break off to the next line alone. */
-.vtool-right {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  margin-left: auto;
+  flex-wrap: wrap;
+}
+.vb-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-right: 2px;
+}
+.vb-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+.vb-spacer {
+  flex: 1 1 40px;
+}
+.overlays {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.overlays .grp-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+/* View-bar control: dropdown trigger or toggle. Rectangular (radius-sm), unlike the round
+   filter chips — the shape difference IS the filter-vs-view distinction. */
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ctl:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.ctl.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ctl svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.ctl-val {
+  color: var(--text);
+  font-weight: 600;
+}
+.ctl.on .ctl-val {
+  color: var(--accent);
+}
+/* View-bar dropdowns sit at the LEFT of the row now — anchor their menus left so they
+   can't extend past the viewport edge (the generic .dropdown-menu anchors right). */
+.viewbar .dropdown-menu {
+  left: 0;
+  right: auto;
+}
+
+/* ── The domain filter band ── */
+.domainband {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.db-head {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+.db-head .lab {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.db-head .sel {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.db-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+.db-scroll {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow-x: scroll;
+  scrollbar-width: thin;
+  /* the horizontal scrollbar (~6px) sits below the content — mirrored as top padding so
+     the chips' visual center equals the band's center and the actions never sit lower */
+  padding: 8px 4px 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+}
+.db-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.db-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+.db-scroll .chip {
+  flex: 0 0 auto;
+}
+/* With a selection active, the unselected chips recede instead of losing their accent. */
+.chip.dimmed {
+  opacity: 0.45;
+}
+.db-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+.db-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.db-clear:hover {
+  color: var(--text);
+  border-color: var(--err);
+}
+.db-more {
+  position: relative;
+}
+.db-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.db-more-btn:hover,
+.db-more-btn.on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+/* The scalability story: every domain, searchable, in a two-column grid. */
+.db-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: min(320px, 90vw);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+}
+.db-panel .p-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  color: var(--text-faint);
+}
+.db-panel .p-search input {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+  font-size: 13px;
+  width: 100%;
+}
+.db-panel .p-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.p-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  background: none;
+  text-align: left;
+}
+.p-row:hover {
+  background: var(--bg-elev-2);
+}
+.p-row.active {
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+}
+.p-row .nm {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p-row .n {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.p-row .chk {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-strong);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  color: #fff;
+}
+.p-row.active .chk {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.p-none {
+  grid-column: 1 / -1;
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.db-panel .p-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.db-panel .p-foot .count {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .vb-eyebrow,
+  .overlays .grp-label,
+  .db-head,
+  .db-divider {
+    display: none;
+  }
 }
 
 /* Generic dropdown (e.g. the page-type filters above the graph). */
@@ -2131,7 +2406,8 @@ details.hot-cache[open] .hc-summary::before {
   white-space: nowrap;
 }
 
-/* Focus mode: one row, one segmented control for the neighborhood depth. */
+/* Focus mode: one row, one segmented control for the neighborhood depth. Card-framed so
+   it reads as a sibling of the domain band, not a loose text line (mockup 2026-07-21). */
 .focusbar {
   display: flex;
   align-items: center;
@@ -2139,6 +2415,10 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 13px;
   color: var(--text-dim);
   flex-wrap: wrap;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 11px;
 }
 .focusbar strong {
   color: var(--text);

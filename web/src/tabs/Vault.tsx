@@ -493,62 +493,38 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   return (
     <div className="vault-graph">
       <StaleLinksBanner />
-      {/* Toolbar with clear zones: domain legend/filter left, view controls + stats right.
-          The chips ARE the legend — each wears its domain's node color. */}
-      <div className="graph-toolbar">
-        {hasDomains && (
-          <div className="filters">
-            {domains.map(([d, count]) => {
-              const visible = selectedDomains.size === 0 || selectedDomains.has(d)
-              return (
-                <button
-                  key={d || '∅'}
-                  className={`chip${visible ? ' active' : ''}`}
-                  onClick={() => toggleDomain(d)}
-                  title={selectedDomains.has(d) ? 'Deselect (back to all)' : 'Show only this domain'}
-                >
-                  <span
-                    className="chip-dot"
-                    style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }}
-                    aria-hidden
-                  />
-                  {d === NO_DOMAIN ? 'no domain' : d} <span className="chip-n">{count}</span>
-                </button>
-              )
-            })}
-            {selectedDomains.size > 0 && (
-              <button className="chip" onClick={() => setSelectedDomains(new Set())} title="Show all domains">
-                <Icon name="x" /> all
-              </button>
-            )}
-          </div>
-        )}
-        {/* The view controls travel together as one right-aligned group, so a widening
-            domain-filter row can never strand a single control (the lens button) alone on
-            the next line — the whole group wraps as a unit and stays right-aligned. */}
-        <div className="vtool-right">
-        <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
-        {graph.gaps.length > 0 && (
-          <button
-            className={`chip${showGaps ? ' active' : ''}`}
-            onClick={() => {
-              const next = !showGaps
-              setShowGaps(next)
-              if (!next && selection?.kind === 'gap') closeExplorer()
-            }}
-            title="Show unresolved links as ghost nodes — the pages your vault still wants written"
-          >
-            <Icon name="graph" /> Gaps
-          </button>
-        )}
-        <button
-          className={`chip${showClusters ? ' active' : ''}`}
-          onClick={() => setShowClusters((v) => !v)}
-          title="Outline auto-detected communities as tinted, tag-labelled clusters"
-        >
-          <Icon name="graph" /> Clusters
-        </button>
+      {/* ═══ Tier 1 — the VIEW bar: how the graph is drawn (color lens, type visibility,
+          overlays, stats). Deliberately stable: nothing in this row grows with the vault,
+          so a filter change can never reflow the render controls (mockup 2026-07-21). ═══ */}
+      <div className="viewbar">
+        <span className="vb-eyebrow">View</span>
         <LensDropdown lens={lens} onSelect={setLens} hasDomains={hasDomains} />
+        <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
+        <span className="vb-sep" aria-hidden />
+        <span className="overlays">
+          <span className="grp-label">Overlays</span>
+          {graph.gaps.length > 0 && (
+            <button
+              className={`ctl${showGaps ? ' on' : ''}`}
+              onClick={() => {
+                const next = !showGaps
+                setShowGaps(next)
+                if (!next && selection?.kind === 'gap') closeExplorer()
+              }}
+              title="Show unresolved links as ghost nodes — the pages your vault still wants written"
+            >
+              <Icon name="graph" /> Gaps
+            </button>
+          )}
+          <button
+            className={`ctl${showClusters ? ' on' : ''}`}
+            onClick={() => setShowClusters((v) => !v)}
+            title="Outline auto-detected communities as tinted, tag-labelled clusters"
+          >
+            <Icon name="graph" /> Clusters
+          </button>
+        </span>
+        <span className="vb-spacer" />
         <span className="vtool-stats">
           {realCount} of {graph.nodes.length} pages · {realEdgeCount} links
           {graph.unresolved > 0 && (
@@ -562,13 +538,26 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                 }}
                 title="Explore the unresolved links as knowledge gaps"
               >
-                {graph.unresolved} unresolved
+                {graph.unresolved} gaps
               </button>
             </>
           )}
         </span>
-        </div>
       </div>
+
+      {/* ═══ Tier 2 — the DOMAIN filter band: what is in the graph. The one zone that
+          grows with the vault, so it owns its own row: the chips (legend + filter + count
+          in one control) scroll horizontally, and the full set lives in the searchable
+          "All domains" panel. ═══ */}
+      {hasDomains && (
+        <DomainBand
+          domains={domains}
+          selected={selectedDomains}
+          onToggle={toggleDomain}
+          onClear={() => setSelectedDomains(new Set())}
+          onSelectAll={() => setSelectedDomains(new Set(domains.map(([d]) => d)))}
+        />
+      )}
 
       {/* Focus mode as its own row: the neighborhood depth is ONE state, so it reads as one
           segmented control (1 · 2 · whole graph), not four loose chips. */}
@@ -902,6 +891,128 @@ function LinkSection({
  * refinement (hide meta noise, isolate sources), not something worth a permanent row of
  * nine chips above the graph. Checkbox = visible.
  */
+/**
+ * Tier-2 filter band (mockup 2026-07-21): the domain chips — legend + filter + count in one
+ * control — in a horizontally scrolling strip with edge fades, plus the searchable
+ * "All domains" panel. This is the part of the toolbar that grows as the vault gains
+ * domains, isolated in its own row so it can never reflow the view controls above it.
+ * Solo-select semantics unchanged: empty selection = everything; clicks accumulate.
+ */
+function DomainBand({
+  domains,
+  selected,
+  onToggle,
+  onClear,
+  onSelectAll,
+}: {
+  domains: Array<[string, number]>
+  selected: ReadonlySet<string>
+  onToggle: (d: string) => void
+  onClear: () => void
+  onSelectAll: () => void
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('')
+  const moreRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
+  const dot = (d: string): string => (d === NO_DOMAIN ? 'var(--muted)' : domainColor(d))
+  const q = filter.trim().toLowerCase()
+  const panelRows = q === '' ? domains : domains.filter(([d]) => label(d).toLowerCase().includes(q))
+
+  return (
+    <div className="domainband">
+      <div className="db-head">
+        <span className="lab">Filter · Domain</span>
+        <span className="sel">{selected.size === 0 ? 'showing all' : `${selected.size} selected`}</span>
+      </div>
+      <span className="db-divider" aria-hidden />
+      <div className="db-scroll">
+        {domains.map(([d, count]) => {
+          const active = selected.has(d)
+          return (
+            <button
+              key={d || '∅'}
+              className={`chip${active ? ' active' : ''}${selected.size > 0 && !active ? ' dimmed' : ''}`}
+              onClick={() => onToggle(d)}
+              title={active ? 'Deselect (back to all)' : 'Show only this domain'}
+            >
+              <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
+              {label(d)} <span className="chip-n">{count}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div className="db-actions">
+        {selected.size > 0 && (
+          <button className="db-clear" onClick={onClear} title="Show all domains">
+            <Icon name="x" /> Clear
+          </button>
+        )}
+        <div className="db-more" ref={moreRef}>
+          <button
+            className={`db-more-btn${open ? ' on' : ''}`}
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-haspopup="true"
+          >
+            All domains ▾
+          </button>
+          {open && (
+            <div className="db-panel">
+              <div className="p-search">
+                <Icon name="search" />
+                <input
+                  type="search"
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Filter domains…"
+                  aria-label="Filter the domain list"
+                />
+              </div>
+              <div className="p-grid">
+                {panelRows.map(([d, count]) => {
+                  const active = selected.has(d)
+                  return (
+                    <button key={d || '∅'} className={`p-row${active ? ' active' : ''}`} onClick={() => onToggle(d)}>
+                      <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
+                      <span className="nm">{label(d)}</span>
+                      <span className="n">{count}</span>
+                      <span className="chk" aria-hidden>
+                        {active ? '✓' : ''}
+                      </span>
+                    </button>
+                  )
+                })}
+                {panelRows.length === 0 && <span className="p-none">No domain matches “{filter.trim()}”.</span>}
+              </div>
+              <div className="p-foot">
+                <button className="linklike" onClick={onSelectAll}>
+                  Select all
+                </button>
+                <span className="count">
+                  {selected.size || domains.length} of {domains.length}
+                </span>
+                <button className="linklike" onClick={onClear}>
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TypesDropdown({
   types,
   hidden,
@@ -926,12 +1037,13 @@ function TypesDropdown({
   return (
     <div className="dropdown" ref={ref}>
       <button
-        className={`chip${hidden.size > 0 ? ' active' : ''}`}
+        className={`ctl${hidden.size > 0 ? ' on' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="true"
       >
-        Page types{hidden.size > 0 ? ` (${hidden.size} hidden)` : ''} ▾
+        Types:{' '}
+        <span className="ctl-val">{hidden.size === 0 ? 'all' : `${types.length - hidden.size} of ${types.length}`}</span> ▾
       </button>
       {open && (
         <div className="dropdown-menu" role="menu">
@@ -986,13 +1098,13 @@ function LensDropdown({
   return (
     <div className="dropdown" ref={ref}>
       <button
-        className={`chip${lens !== 'domain' ? ' active' : ''}`}
+        className={`ctl${lens !== 'domain' ? ' on' : ''}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="true"
         title="Change how nodes are colored"
       >
-        <Icon name="palette" /> {current.label} ▾
+        <Icon name="palette" /> Color: <span className="ctl-val">{current.label}</span> ▾
       </button>
       {open && (
         <div className="dropdown-menu lens-menu" role="menu">
