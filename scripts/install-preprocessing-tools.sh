@@ -46,6 +46,18 @@ python3 -m pip install ${PIP_FLAGS} --upgrade python-pptx openpyxl odfpy
 echo "==> yt-dlp (pip, for YouTube URL ingestion: metadata + subtitles)"
 python3 -m pip install ${PIP_FLAGS} --upgrade yt-dlp
 
+echo "==> deno (JS runtime for yt-dlp's YouTube extraction)"
+# Since 2025 yt-dlp needs a JS runtime (EJS) to solve YouTube's player challenges; without
+# one, extraction is deprecated, degraded, and trips the "Sign in to confirm you're not a
+# bot" check far more often. deno is the runtime yt-dlp enables by default. The official
+# installer drops it in ~/.deno; symlink it into ~/.local/bin, which is already on PATH
+# here and in the systemd unit template.
+if ! command -v deno >/dev/null 2>&1; then
+  curl -fsSL https://deno.land/install.sh | DENO_INSTALL="$HOME/.deno" sh
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$HOME/.deno/bin/deno" "$HOME/.local/bin/deno"
+fi
+
 echo "==> defuddle (npm, for URL/web extraction)"
 # Installed globally under the user's npm prefix; no sudo if the prefix is user-owned.
 # Ships the `defuddle` binary (the old `defuddle-cli` package merged into it).
@@ -53,7 +65,7 @@ npm install -g defuddle
 
 echo "==> Verifying"
 missing=0
-for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle yt-dlp; do
+for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle yt-dlp deno; do
   if command -v "$tool" >/dev/null 2>&1; then
     printf '  ok   %s\n' "$tool"
   else

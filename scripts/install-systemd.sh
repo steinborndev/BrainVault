@@ -56,6 +56,20 @@ else
   echo "warning: yt-dlp not found on PATH — YouTube URL jobs will fail until it is installed" >&2
 fi
 
+# deno backs yt-dlp's YouTube extraction (EJS player challenges). Without it on the
+# service PATH, YouTube jobs trip the "Sign in to confirm you're not a bot" check far
+# more often. Same append-last rule as yt-dlp.
+DENO="$(command -v deno || true)"
+if [ -n "$DENO" ]; then
+  DENODIR="$(dirname "$DENO")"
+  case "$EXTRA_PATH" in
+    *":$DENODIR"*) ;;
+    *) EXTRA_PATH="$EXTRA_PATH:$DENODIR" ;;
+  esac
+else
+  echo "warning: deno not found on PATH — YouTube extraction is degraded and will hit bot checks; run scripts/install-preprocessing-tools.sh" >&2
+fi
+
 # Ensure a production build exists (single-process `node dist/main.js`).
 if [ ! -f "$REPO/server/dist/main.js" ]; then
   echo "building server + web (no dist yet)…"
