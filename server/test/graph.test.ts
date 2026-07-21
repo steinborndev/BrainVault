@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { GraphBuilder, parseFrontmatterMeta } from '../src/pipeline/graph.js'
+import { GraphBuilder, parseFrontmatterMeta, classifyKind } from '../src/pipeline/graph.js'
 
 let vaultRoot: string
 
@@ -74,11 +74,49 @@ describe('GraphBuilder', () => {
   })
 
   it('parseFrontmatterMeta handles absence and malformed frontmatter', () => {
-    expect(parseFrontmatterMeta('no frontmatter')).toEqual({ tags: [], domain: null })
-    expect(parseFrontmatterMeta('---\ntags:\n---\nbody')).toEqual({ tags: [], domain: null })
-    expect(parseFrontmatterMeta('---\ndomain:\n---\nbody')).toEqual({ tags: [], domain: null })
+    const empty = { tags: [], domain: null, fmType: null }
+    expect(parseFrontmatterMeta('no frontmatter')).toEqual(empty)
+    expect(parseFrontmatterMeta('---\ntags:\n---\nbody')).toEqual(empty)
+    expect(parseFrontmatterMeta('---\ndomain:\n---\nbody')).toEqual(empty)
     // tags mentioned mid-body must not count — only the leading frontmatter block parses.
-    expect(parseFrontmatterMeta('body first\n---\ntags:\n  - nope\n---')).toEqual({ tags: [], domain: null })
+    expect(parseFrontmatterMeta('body first\n---\ntags:\n  - nope\n---')).toEqual(empty)
+    // `type:` is lowercased — the classifier compares against lowercase sets.
+    expect(parseFrontmatterMeta('---\ntype: "Concept"\n---\nbody').fmType).toBe('concept')
+  })
+
+  it('classifies pages as knowledge, structural or artifact', () => {
+    // Frontmatter type leads.
+    expect(classifyKind('concept', 'concepts', 'Compound Interest')).toBe('knowledge')
+    expect(classifyKind('session', 'meta', '2026-04-15-release-report-session')).toBe('artifact')
+    expect(classifyKind('fold', 'folds', 'fold-k3-from-2026-04-23')).toBe('artifact')
+    // `type: meta` splits by name/location: registries and hubs are structure, reports are runs.
+    expect(classifyKind('meta', 'meta', 'domains')).toBe('structural')
+    expect(classifyKind('meta', 'root', 'index')).toBe('structural')
+    expect(classifyKind('meta', 'concepts', '_index')).toBe('structural') // MOC inside a knowledge folder
+    expect(classifyKind('meta', 'concepts', 'Hot Cache')).toBe('structural')
+    expect(classifyKind('meta', 'meta', 'lint-report-2026-07-19')).toBe('artifact')
+    expect(classifyKind('meta', 'meta', 'retrieval-benchmark-v1.7')).toBe('artifact')
+    expect(classifyKind('meta', 'meta', '2026-04-14-community-cta-rollout')).toBe('artifact')
+    // No frontmatter type at all: location decides, defaulting to knowledge.
+    expect(classifyKind(null, 'concepts', 'Osmosis')).toBe('knowledge')
+    expect(classifyKind(null, 'root', 'getting-started')).toBe('structural')
+    expect(classifyKind(null, 'meta', 'boundary-frontier-2026-04-24')).toBe('artifact')
+    // The artifact-name heuristic never touches ordinary knowledge pages.
+    expect(classifyKind('concept', 'concepts', 'Retrieval Benchmark')).toBe('knowledge')
+    expect(classifyKind(null, 'concepts', 'Security Audit')).toBe('knowledge')
+  })
+
+  it('carries kind on built nodes', () => {
+    page('wiki/concepts/Alpha.md', '---\ntype: concept\ndomain: finance\n---\nbody')
+    page('wiki/concepts/_index.md', '---\ntype: meta\ndomain: meta\n---\n[[Alpha]]')
+    page('wiki/meta/lint-report-2026-07-19.md', '---\ntype: meta\ndomain: meta\n---\nfindings')
+    page('wiki/index.md', '[[Alpha]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    const kind = (title: string): string => g.nodes.find((n) => n.title === title)!.kind
+    expect(kind('Alpha')).toBe('knowledge')
+    expect(kind('_index')).toBe('structural')
+    expect(kind('lint-report-2026-07-19')).toBe('artifact')
+    expect(kind('index')).toBe('structural')
   })
 
   it('resolves case-insensitively and counts dangling links as unresolved', () => {

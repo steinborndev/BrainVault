@@ -15,6 +15,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseWikilinks } from './citations.js'
 
+/**
+ * How a page participates in the vault (SPEC §12.4): `knowledge` is what the vault exists
+ * for; `structural` pages organize it (index hubs, `_index` MOCs, the domain registry);
+ * `artifact` pages document operations (lint/release reports, session logs, fold snapshots).
+ * The dashboard hides everything non-knowledge behind one "System" toggle by default.
+ */
+export type NodeKind = 'knowledge' | 'structural' | 'artifact'
+
 /** One wiki page. `type` is the top-level wiki directory (concepts, entities, sources, …). */
 export interface GraphNode {
   /** Vault-relative POSIX path, e.g. `wiki/concepts/Compound Interest.md`. */
@@ -27,6 +35,8 @@ export interface GraphNode {
   readonly tags: readonly string[]
   /** Frontmatter `domain:` — the meta-category (SPEC §12.4 Stufe 1), or null when unset. */
   readonly domain: string | null
+  /** Knowledge page, structural scaffolding, or operational artifact — see NodeKind. */
+  readonly kind: NodeKind
   /** Out-degree (links this page makes) and in-degree (backlinks) over RESOLVED edges. */
   readonly out: number
   readonly in: number
@@ -66,6 +76,8 @@ interface CacheEntry {
   readonly links: readonly string[]
   readonly tags: readonly string[]
   readonly domain: string | null
+  /** Frontmatter `type:` (lowercased), the primary signal for the kind classification. */
+  readonly fmType: string | null
 }
 
 const toPosix = (p: string): string => p.split(path.sep).join(path.posix.sep)
@@ -73,17 +85,24 @@ const toPosix = (p: string): string => p.split(path.sep).join(path.posix.sep)
 const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, '')
 
 /**
- * Extracts `tags:` (block or inline list) and `domain:` from a page's YAML frontmatter.
- * Deliberately a shallow parser, not a YAML library: the vault's frontmatter is
- * agent-written and flat, and this runs on every changed file of a growing vault.
+ * Extracts `tags:` (block or inline list), `domain:` and `type:` from a page's YAML
+ * frontmatter. Deliberately a shallow parser, not a YAML library: the vault's frontmatter
+ * is agent-written and flat, and this runs on every changed file of a growing vault.
  */
-export function parseFrontmatterMeta(markdown: string): { tags: string[]; domain: string | null } {
+export function parseFrontmatterMeta(markdown: string): {
+  tags: string[]
+  domain: string | null
+  fmType: string | null
+} {
   const fm = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-  if (!fm) return { tags: [], domain: null }
+  if (!fm) return { tags: [], domain: null, fmType: null }
   const body = fm[1]!
 
   const domainMatch = body.match(/^domain:[ \t]*(.+)$/m)
   const domain = domainMatch ? unquote(domainMatch[1]!) || null : null
+
+  const typeMatch = body.match(/^type:[ \t]*(.+)$/m)
+  const fmType = typeMatch ? unquote(typeMatch[1]!).toLowerCase() || null : null
 
   const tags: string[] = []
   // Block list:  tags:\n  - a\n  - b
@@ -103,7 +122,50 @@ export function parseFrontmatterMeta(markdown: string): { tags: string[]; domain
       }
     }
   }
-  return { tags: [...new Set(tags)], domain }
+  return { tags: [...new Set(tags)], domain, fmType }
+}
+
+/** Frontmatter `type:` values that mark a knowledge page wherever it lives. */
+const KNOWLEDGE_TYPES: ReadonlySet<string> = new Set([
+  'concept',
+  'entity',
+  'source',
+  'reference',
+  'comparison',
+  'question',
+  'synthesis',
+  'decision',
+])
+
+/** Frontmatter `type:` values that always mark an operational artifact. */
+const ARTIFACT_TYPES: ReadonlySet<string> = new Set(['session', 'fold', 'report', 'release'])
+
+/**
+ * System-page names that record a RUN rather than structure the vault. Only consulted for
+ * pages already classified as system territory (most artifacts just say `type: meta`, the
+ * same as the registry and the hubs), so a knowledge page named "Benchmark" is never caught.
+ */
+const ARTIFACT_NAME = /report|session|benchmark|snapshot|frontier|rollout|audit/i
+
+/**
+ * Classifies one page (see NodeKind). Directory alone is NOT enough — the `_index` MOCs
+ * live inside the knowledge folders and `wiki/meta/` mixes the domain registry with lint
+ * reports — so the frontmatter `type:` leads and the location/name break the ties.
+ */
+export function classifyKind(fmType: string | null, bucket: string, title: string): NodeKind {
+  if (fmType !== null && KNOWLEDGE_TYPES.has(fmType)) return 'knowledge'
+  if (fmType !== null && ARTIFACT_TYPES.has(fmType)) return 'artifact'
+  const system =
+    fmType === 'meta' ||
+    bucket === 'meta' ||
+    bucket === 'folds' ||
+    bucket === 'root' ||
+    title.startsWith('_')
+  if (!system) return 'knowledge'
+  if (bucket === 'folds' || /^\d{4}-\d{2}-\d{2}/.test(title) || ARTIFACT_NAME.test(title)) {
+    return 'artifact'
+  }
+  return 'structural'
 }
 
 export class GraphBuilder {
@@ -130,7 +192,11 @@ export class GraphBuilder {
       const hit = this.cache.get(f.abs)
       if (hit !== undefined && hit.mtimeMs === f.mtimeMs && hit.size === f.size) continue
       let links: string[] = []
-      let meta: { tags: string[]; domain: string | null } = { tags: [], domain: null }
+      let meta: { tags: string[]; domain: string | null; fmType: string | null } = {
+        tags: [],
+        domain: null,
+        fmType: null,
+      }
       try {
         const markdown = fs.readFileSync(f.abs, 'utf8')
         links = parseWikilinks(markdown)
@@ -138,7 +204,14 @@ export class GraphBuilder {
       } catch {
         // A page deleted mid-build or unreadable: an empty node beats a failed graph.
       }
-      this.cache.set(f.abs, { mtimeMs: f.mtimeMs, size: f.size, links, tags: meta.tags, domain: meta.domain })
+      this.cache.set(f.abs, {
+        mtimeMs: f.mtimeMs,
+        size: f.size,
+        links,
+        tags: meta.tags,
+        domain: meta.domain,
+        fmType: meta.fmType,
+      })
     }
 
     // Resolve: case-insensitive basename index, first occurrence wins (same rule the
@@ -192,6 +265,7 @@ export class GraphBuilder {
         type: f.type,
         tags: entry?.tags ?? [],
         domain: entry?.domain ?? null,
+        kind: classifyKind(entry?.fmType ?? null, f.type, f.title),
         out: outDeg[i]!,
         in: inDeg[i]!,
         mtimeMs: f.mtimeMs,

@@ -154,6 +154,12 @@ export interface GraphNode {
   tags: string[]
   /** Frontmatter `domain:` meta-category, or null when the page carries none. */
   domain: string | null
+  /**
+   * Server-side classification: real knowledge vs. structural scaffolding (index hubs,
+   * MOCs, the domain registry) vs. operational artifacts (lint/release reports, session
+   * logs). Absent on synthetic ghost nodes — treat missing as `knowledge`.
+   */
+  kind?: 'knowledge' | 'structural' | 'artifact'
   out: number
   in: number
   /** File mtime (epoch ms) — the "recency" color lens. Absent on hand-built fixtures. */

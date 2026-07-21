@@ -25,6 +25,7 @@ function graphOf(
     type: 'concepts',
     tags: p.tags,
     domain: p.domain === undefined ? UNASSIGNED : p.domain,
+    kind: 'knowledge',
     out: 0,
     in: 0,
   }))
