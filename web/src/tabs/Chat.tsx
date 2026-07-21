@@ -31,12 +31,18 @@ import { CitationChip } from '../components/CitationChip.tsx'
 import { JobLog } from '../components/JobLog.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
+import { navigate } from '../lib/router.ts'
 import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost } from '../components/Cost.tsx'
 
 type ComposerMode = 'ask' | 'research'
 
-export function Chat(): React.ReactElement {
+/**
+ * `researchPrefill` seeds the composer in Research mode from elsewhere in the app — the
+ * vault graph's knowledge-gap "Start research" button navigates here with the topic. It is
+ * consumed once and the query param is cleared, so a re-render never re-arms it.
+ */
+export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): React.ReactElement {
   const qc = useQueryClient()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -100,6 +106,17 @@ export function Chat(): React.ReactElement {
     io.observe(el)
     return () => io.disconnect()
   }, [])
+
+  // A gap's "Start research" landed us here with a topic: arm Research mode, drop it into the
+  // composer for review (not auto-sent — the user confirms), then strip the query param so
+  // this fires exactly once.
+  useEffect(() => {
+    if (researchPrefill === '') return
+    setDraft(researchPrefill)
+    setMode('research')
+    composerRef.current?.focus()
+    navigate('/research', { replace: true })
+  }, [researchPrefill])
 
   const send = (): void => {
     const text = draft.trim()

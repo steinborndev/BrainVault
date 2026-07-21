@@ -156,6 +156,17 @@ export interface GraphNode {
   domain: string | null
   out: number
   in: number
+  /** File mtime (epoch ms) — the "recency" color lens. Absent on hand-built fixtures. */
+  mtimeMs?: number
+  /** File size in bytes — the "stubs" lens threshold. */
+  size?: number
+}
+
+/** A missing page other pages already link to — the vault's own to-write list (SPEC.md §12.4). */
+export interface GraphGap {
+  title: string
+  /** Indices into `nodes` of the pages that link to this missing target. */
+  refBy: number[]
 }
 
 export interface VaultGraph {
@@ -163,6 +174,8 @@ export interface VaultGraph {
   /** Directed edges as [fromIndex, toIndex] into `nodes`. */
   edges: Array<[number, number]>
   unresolved: number
+  /** Distinct unresolved link targets, most-referenced first. */
+  gaps: GraphGap[]
   builtAt: string
 }
 

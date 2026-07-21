@@ -25,12 +25,34 @@ export interface GraphCanvasProps {
   nodes: GraphNode[]
   /** Directed [from, to] index pairs into `nodes`. */
   edges: Array<[number, number]>
-  /** Index of the focused/selected node, or null. */
+  /** Index of the focused node (URL ?focus=), or null. Drives the local-neighborhood mode. */
   focusIndex: number | null
+  /**
+   * Index of the node picked in the explorer panel, or null. Like a hover that persists: it
+   * spotlights the node's neighborhood and draws a selection ring, but is driven by clicks
+   * rather than the pointer. Independent of `focusIndex` (which is the URL-level focus).
+   */
+  selectedIndex?: number | null
+  /**
+   * Indices that are knowledge-gap ghost nodes (missing pages other pages link to), rendered
+   * hollow/dashed. Their `in` count is how many pages reference them; `out` is 0.
+   */
+  ghostIndices?: ReadonlySet<number>
   /** Indices matching the current search, highlighted. */
   matches: ReadonlySet<number>
-  /** Node coloring axis: wiki bucket (`type`, default) or frontmatter meta-category (`domain`). */
-  colorBy?: 'type' | 'domain'
+  /**
+   * The color lens — how nodes are tinted (SPEC §12.4). `domain`/`type` are categorical
+   * axes; `authority`/`orphans`/`stubs`/`recency` re-encode a metric so the same graph
+   * answers a different question ("where are the hubs / dead ends / thin pages / new pages").
+   */
+  lens?: Lens
+  /**
+   * Cluster id per node index (auto-detected communities), or null for no clustering. Nodes
+   * sharing an id get a tinted convex hull behind them; -1 means "unclustered" (no hull).
+   */
+  clusters?: readonly number[] | null
+  /** Cluster id → short label (its dominant shared tags), drawn at the hull centroid. */
+  clusterLabels?: ReadonlyMap<number, string>
   /**
    * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
    * depth) — each change re-fits the view so the filtered graph fills the canvas again.
@@ -62,6 +84,42 @@ export function domainColor(domain: string): string {
   let h = 0
   for (let i = 0; i < domain.length; i++) h = (h * 31 + domain.charCodeAt(i)) >>> 0
   return `hsl(${h % 360} 62% 52%)`
+}
+
+/** The available color lenses. `domain`/`type` are categorical; the rest re-encode a metric. */
+export type Lens = 'domain' | 'type' | 'authority' | 'orphans' | 'stubs' | 'recency'
+
+/** A page under ~this many bytes is treated as a stub by the "stubs" lens (frontmatter + a line). */
+export const STUB_BYTES = 1024
+/** Full green in the "recency" lens for pages edited within this window; older fades to neutral. */
+const RECENCY_WINDOW_MS = 21 * 24 * 3600_000
+
+/** Parses `#rgb` / `#rrggbb` / `rgb(...)` to [r,g,b]; null for anything else (e.g. hsl()). */
+function parseRgb(color: string): [number, number, number] | null {
+  const s = color.trim()
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s)
+  if (hex) {
+    const h = hex[1]!
+    const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h
+    const n = parseInt(full, 16)
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+  }
+  const rgb = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(s)
+  return rgb ? [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])] : null
+}
+
+/** Linear RGB interpolation between two CSS colors; falls back to `b` if either can't parse. */
+function mixColor(a: string, b: string, t: number): string {
+  const pa = parseRgb(a)
+  const pb = parseRgb(b)
+  if (!pa || !pb) return b
+  const c = pa.map((v, i) => Math.round(v + (pb[i]! - v) * t))
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`
+}
+
+/** Distinct, theme-agnostic hue per cluster id for the community hulls. */
+function clusterHue(id: number): number {
+  return (id * 47) % 360
 }
 
 /** A layout with at least this share of never-placed nodes restarts cold instead of reheating. */
@@ -110,7 +168,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type', fitKey, onSelect, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -157,12 +215,32 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
 
     const styles = getComputedStyle(document.documentElement)
     const cssVar = (name: string, fallback: string): string => styles.getPropertyValue(name).trim() || fallback
-    const colorFor = (n: GraphNode): string =>
-      colorBy === 'domain'
-        ? n.domain !== null
-          ? domainColor(n.domain)
-          : cssVar('--muted', '#888')
-        : cssVar(TYPE_VARS[n.type] ?? '--muted', '#888')
+    const muted = cssVar('--muted', '#888')
+    // Neutral floor for the metric-gradient lenses (a dim, low-contrast base the metric lifts from).
+    const dimBase = mixColor(cssVar('--bg-elev-2', '#1f2637'), muted, 0.55)
+    const maxIn = lens === 'authority' ? Math.max(1, ...nodes.map((n) => n.in)) : 1
+    const nowMs = Date.now()
+    const colorFor = (n: GraphNode): string => {
+      switch (lens) {
+        case 'domain':
+          return n.domain !== null ? domainColor(n.domain) : muted
+        case 'type':
+          return cssVar(TYPE_VARS[n.type] ?? '--muted', '#888')
+        case 'authority':
+          // Backlink count → dim-to-accent gradient: the vault's authorities light up.
+          return mixColor(dimBase, cssVar('--accent', '#5b8def'), Math.min(1, n.in / maxIn))
+        case 'orphans':
+          // No backlinks = unreachable except by search. Everything else recedes.
+          return n.in === 0 ? cssVar('--err', '#e0645b') : dimBase
+        case 'stubs':
+          return n.size !== undefined && n.size < STUB_BYTES ? cssVar('--warn', '#e0a43b') : dimBase
+        case 'recency': {
+          if (n.mtimeMs === undefined) return dimBase
+          const t = Math.max(0, 1 - (nowMs - n.mtimeMs) / RECENCY_WINDOW_MS)
+          return mixColor(dimBase, cssVar('--ok', '#3fb984'), t)
+        }
+      }
+    }
     const edgeColor = cssVar('--border', '#444')
     const textColor = cssVar('--text-dim', '#aaa')
 
@@ -173,9 +251,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
 
     if (pos.length < nodes.length * 2) return
 
+    // Spotlight source, in priority order: the transient hover, then the persistent explorer
+    // selection, then the URL-level focus. Whichever is active dims everything outside its
+    // neighborhood so the local structure reads out of a dense cluster.
     const hovered = hoverRef.current
-    const highlight =
-      hovered !== null ? new Set([hovered, ...(neighbors.get(hovered) ?? [])]) : focusIndex !== null ? new Set([focusIndex, ...(neighbors.get(focusIndex) ?? [])]) : null
+    const active = hovered ?? selectedIndex ?? focusIndex
+    const highlight = active !== null ? new Set([active, ...(neighbors.get(active) ?? [])]) : null
 
     // Visible world-rect for culling (small margin for radii/labels).
     const margin = 40 / t.k
@@ -184,6 +265,44 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     const minY = (-h / 2 - t.y) / t.k - margin
     const maxY = (h / 2 - t.y) / t.k + margin
     const visible = (x: number, y: number): boolean => x >= minX && x <= maxX && y >= minY && y <= maxY
+
+    // Cluster hulls, drawn FIRST so everything else sits on top. Each community becomes a
+    // tinted, tag-labelled convex blob — making the graph's implicit structure explicit.
+    if (clusters !== null) {
+      const members = new Map<number, Array<[number, number]>>()
+      for (let i = 0; i < nodes.length; i++) {
+        const cid = clusters[i]
+        if (cid === undefined || cid < 0) continue
+        const x = pos[i * 2]!
+        const y = pos[i * 2 + 1]!
+        if (Number.isNaN(x)) continue
+        ;(members.get(cid) ?? members.set(cid, []).get(cid)!).push([x, y])
+      }
+      ctx.lineWidth = 1.4 / t.k
+      for (const [cid, pts] of members) {
+        if (pts.length < 3) continue // 2 points make no area worth tinting
+        const hull = convexHull(pts)
+        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
+        const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
+        const padded = expandHull(hull, cx, cy, 26 / t.k)
+        ctx.beginPath()
+        traceSmooth(ctx, padded)
+        const hue = clusterHue(cid)
+        ctx.fillStyle = `hsl(${hue} 60% 55% / 0.09)`
+        ctx.strokeStyle = `hsl(${hue} 60% 60% / 0.4)`
+        ctx.fill()
+        ctx.stroke()
+        const label = clusterLabels?.get(cid)
+        if (label) {
+          ctx.font = `600 ${12 / t.k}px system-ui, sans-serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'bottom'
+          const top = Math.min(...padded.map((p) => p[1]))
+          ctx.fillStyle = `hsl(${hue} 55% 62%)`
+          ctx.fillText(label, cx, top - 4 / t.k)
+        }
+      }
+    }
 
     // Edges first, faint; highlighted edges stronger. NaN endpoints (a node the worker
     // hasn't placed yet, mid live-update) simply don't draw this frame.
@@ -196,13 +315,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       if (Number.isNaN(x1) || Number.isNaN(x2)) continue
       if (!visible(x1, y1) && !visible(x2, y2)) continue
       const lit = highlight !== null && highlight.has(a) && highlight.has(b)
+      // Links into a gap are drawn dashed — they point at a page that isn't there yet.
+      const toGhost = ghostIndices !== undefined && (ghostIndices.has(a) || ghostIndices.has(b))
+      ctx.setLineDash(toGhost ? [3 / t.k, 3 / t.k] : [])
       ctx.strokeStyle = edgeColor
-      ctx.globalAlpha = highlight === null ? 0.35 : lit ? 0.9 : 0.08
+      ctx.globalAlpha = highlight === null ? (toGhost ? 0.45 : 0.35) : lit ? 0.9 : 0.08
       ctx.beginPath()
       ctx.moveTo(x1, y1)
       ctx.lineTo(x2, y2)
       ctx.stroke()
     }
+    ctx.setLineDash([])
 
     // Nodes.
     const now = performance.now()
@@ -214,15 +337,32 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       if (!visible(x, y)) continue
       const r = radius(i)
       const dimmed = highlight !== null && !highlight.has(i)
+      const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
       ctx.globalAlpha = dimmed ? 0.18 : 1
-      ctx.fillStyle = colorFor(nodes[i]!)
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fill()
-      if (i === focusIndex || matches.has(i)) {
+      if (isGhost) {
+        // Hollow, dashed ring in a faint neutral: present enough to click and count, but
+        // visibly not a real page. A tiny fill keeps it hit-testable at its center.
+        ctx.fillStyle = cssVar('--muted-bg', '#232a3a')
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.setLineDash([2.5 / t.k, 2.5 / t.k])
+        ctx.strokeStyle = cssVar('--text-faint', '#6b7791')
+        ctx.lineWidth = 1.4 / t.k
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.setLineDash([])
+      } else {
+        ctx.fillStyle = colorFor(nodes[i]!)
+        ctx.beginPath()
+        ctx.arc(x, y, r, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      if (i === focusIndex || i === selectedIndex || matches.has(i)) {
         ctx.globalAlpha = 1
-        ctx.strokeStyle = cssVar('--text', '#fff')
-        ctx.lineWidth = 1.6 / t.k
+        ctx.strokeStyle = i === selectedIndex ? cssVar('--accent', '#5b8def') : cssVar('--text', '#fff')
+        ctx.lineWidth = (i === selectedIndex ? 2.2 : 1.6) / t.k
         ctx.beginPath()
         ctx.arc(x, y, r + 2.5 / t.k, 0, Math.PI * 2)
         ctx.stroke()
@@ -250,13 +390,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     // hovered/focused/matched always. Font size is screen-constant.
     const labelAll = t.k >= 1.4
     const hubDegree = labelAll ? 0 : hubThreshold(nodes)
-    ctx.font = `${11 / t.k}px system-ui, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i]!
+      const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
       const wanted =
-        labelAll || n.in + n.out >= hubDegree || i === hoverRef.current || i === focusIndex || matches.has(i)
+        // Ghost nodes are few and are the point of the gaps view — always label them.
+        labelAll || isGhost || n.in + n.out >= hubDegree || i === hoverRef.current || i === selectedIndex || i === focusIndex || matches.has(i)
       if (!wanted) continue
       const x = pos[i * 2]!
       const y = pos[i * 2 + 1]!
@@ -264,14 +405,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       if (!visible(x, y)) continue
       const dimmed = highlight !== null && !highlight.has(i)
       ctx.globalAlpha = dimmed ? 0.15 : 0.95
-      ctx.fillStyle = textColor
+      ctx.font = `${isGhost ? 'italic ' : ''}${11 / t.k}px system-ui, sans-serif`
+      ctx.fillStyle = isGhost ? cssVar('--text-faint', '#6b7791') : textColor
       ctx.fillText(n.title, x, y + radius(i) + 3 / t.k)
     }
     ctx.globalAlpha = 1
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, matches, colorBy, neighbors, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, neighbors, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
@@ -532,11 +674,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
     }
   }, [scheduleDraw, fitToView])
 
-  // Repaint when pure-presentation props change (search rings, focus, color axis) — these
-  // must not depend on a pointer move or a layout tick happening to come along.
+  // Repaint when pure-presentation props change (search rings, focus, selection, color axis)
+  // — these must not depend on a pointer move or a layout tick happening to come along.
   useEffect(() => {
     scheduleDraw()
-  }, [matches, focusIndex, colorBy, scheduleDraw])
+  }, [matches, focusIndex, selectedIndex, ghostIndices, lens, clusters, clusterLabels, scheduleDraw])
 
   /** Screen → world coordinates under the current transform. */
   const toWorld = useCallback((sx: number, sy: number): { x: number; y: number } => {
@@ -761,15 +903,69 @@ export function GraphCanvas({ nodes, edges, focusIndex, matches, colorBy = 'type
       {hover !== null && nodes[hover] && (
         <div className="graph-tooltip">
           <strong>{nodes[hover]!.title}</strong>
-          <span>
-            {nodes[hover]!.path}
-            {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
-            {nodes[hover]!.out} out
-          </span>
+          {ghostIndices?.has(hover) ? (
+            <span>
+              missing page · {nodes[hover]!.in} page{nodes[hover]!.in === 1 ? '' : 's'} link here
+            </span>
+          ) : (
+            <span>
+              {nodes[hover]!.path}
+              {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
+              {nodes[hover]!.out} out
+            </span>
+          )}
         </div>
       )}
     </div>
   )
+}
+
+type Pt = [number, number]
+
+/** Andrew's monotone-chain convex hull. Returns the hull points counter-clockwise. */
+function convexHull(points: Pt[]): Pt[] {
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const cross = (o: Pt, a: Pt, b: Pt): number => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+  const lower: Pt[] = []
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2]!, lower[lower.length - 1]!, p) <= 0) lower.pop()
+    lower.push(p)
+  }
+  const upper: Pt[] = []
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i]!
+    while (upper.length >= 2 && cross(upper[upper.length - 2]!, upper[upper.length - 1]!, p) <= 0) upper.pop()
+    upper.push(p)
+  }
+  lower.pop()
+  upper.pop()
+  return lower.concat(upper)
+}
+
+/** Pushes each hull point outward from the centroid by `pad` world units — breathing room. */
+function expandHull(hull: Pt[], cx: number, cy: number, pad: number): Pt[] {
+  return hull.map(([x, y]) => {
+    const dx = x - cx
+    const dy = y - cy
+    const d = Math.hypot(dx, dy) || 1
+    return [x + (dx / d) * pad, y + (dy / d) * pad] as Pt
+  })
+}
+
+/** Traces a closed, rounded blob through the points using midpoint quadratic curves. */
+function traceSmooth(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
+  if (pts.length < 3) return
+  const mid = (a: Pt, b: Pt): Pt => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  let prev = pts[pts.length - 1]!
+  let start = mid(prev, pts[0]!)
+  ctx.moveTo(start[0], start[1])
+  for (let i = 0; i < pts.length; i++) {
+    const cur = pts[i]!
+    const next = pts[(i + 1) % pts.length]!
+    const m = mid(cur, next)
+    ctx.quadraticCurveTo(cur[0], cur[1], m[0], m[1])
+  }
+  ctx.closePath()
 }
 
 /** Degree above which a node counts as a hub (labelled even when zoomed out): top ~8 %. */

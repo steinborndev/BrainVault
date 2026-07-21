@@ -90,6 +90,37 @@ describe('GraphBuilder', () => {
     expect(g.unresolved).toBe(1)
   })
 
+  it('aggregates unresolved targets into ranked gaps grouped case-insensitively', () => {
+    page('wiki/concepts/A.md', 'wants [[Pharmacokinetics]] and [[Zeta Potential]]')
+    page('wiki/concepts/B.md', 'also [[pharmacokinetics]] here') // same gap, different case
+    page('wiki/concepts/C.md', 'again [[Pharmacokinetics]] plus a dupe [[Pharmacokinetics]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    const byTitle = new Map(g.nodes.map((n, i) => [n.title, i]))
+
+    expect(g.unresolved).toBe(4) // 2 in A, 1 in B, 1 in C (parseWikilinks dedupes C's repeat)
+    expect(g.gaps).toHaveLength(2)
+
+    const pk = g.gaps[0]! // most-referenced first
+    expect(pk.title).toBe('Pharmacokinetics') // first-written casing
+    // refBy is deduped per page (C links twice but appears once) and holds node indices.
+    expect(pk.refBy.map((i) => g.nodes[i]!.title).sort()).toEqual(['A', 'B', 'C'])
+    expect(pk.refBy).toContain(byTitle.get('A'))
+
+    expect(g.gaps[1]!.title).toBe('Zeta Potential')
+    expect(g.gaps[1]!.refBy).toHaveLength(1)
+  })
+
+  it('counts path-qualified navigation links as unresolved but excludes them from gaps', () => {
+    // The claude-obsidian vault links its folder hubs as [[concepts/_index]] — dangling
+    // under the basename resolver, but navigation, not a missing content page.
+    page('wiki/concepts/A.md', 'nav [[concepts/_index]] and content gap [[Osmosis]]')
+    page('wiki/concepts/B.md', 'more nav [[sources/_index]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(3) // all three dangling links still count
+    expect(g.gaps).toHaveLength(1) // only the real content gap surfaces
+    expect(g.gaps[0]!.title).toBe('Osmosis')
+  })
+
   it('returns the identical graph object while nothing changed (whole-graph cache)', () => {
     page('wiki/concepts/A.md', '[[B]]')
     page('wiki/concepts/B.md', 'x')

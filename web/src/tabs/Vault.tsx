@@ -15,7 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
 import type { GraphNode, VaultGraph } from '../api/types.ts'
-import { GraphCanvas, domainColor } from '../components/GraphCanvas.tsx'
+import { GraphCanvas, domainColor, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
@@ -124,6 +124,89 @@ export function Vault({ path }: { path: string }): React.ReactElement {
 /** Key under which "page has no domain" appears in the domain filter (SPEC §12.4 Stufe 1). */
 const NO_DOMAIN = ''
 
+/** Synthetic path prefix marking a ghost (gap) node in the canvas node list. */
+const GAP_PATH_PREFIX = '#gap:'
+
+/** The explorer selection: a real page (by path) or a knowledge gap (by title). */
+type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string } | null
+
+/** Clusters below this many members aren't tinted — a hull needs a body to be worth drawing. */
+const MIN_CLUSTER = 4
+
+/**
+ * Label-propagation community detection over the first `realCount` nodes (ghosts, at the
+ * tail, are excluded and get id -1). Deterministic: nodes are processed in index order and
+ * ties are broken toward the lowest label, so the same graph always yields the same
+ * communities — no jitter between renders. Returns a per-node id array (compacted, small
+ * clusters folded to -1) and each cluster's label from its dominant shared tags.
+ */
+function detectClusters(
+  nodes: GraphNode[],
+  edges: Array<[number, number]>,
+  realCount: number,
+): { clusterIds: number[]; clusterLabels: Map<number, string> } {
+  const adj: number[][] = Array.from({ length: realCount }, () => [])
+  for (const [a, b] of edges) {
+    if (a < realCount && b < realCount) {
+      adj[a]!.push(b)
+      adj[b]!.push(a)
+    }
+  }
+  const label = Array.from({ length: realCount }, (_, i) => i)
+  for (let iter = 0; iter < 12; iter++) {
+    let changed = false
+    for (let i = 0; i < realCount; i++) {
+      const nbrs = adj[i]!
+      if (nbrs.length === 0) continue
+      const tally = new Map<number, number>()
+      for (const j of nbrs) tally.set(label[j]!, (tally.get(label[j]!) ?? 0) + 1)
+      let best = label[i]!
+      let bestCount = -1
+      for (const [lab, count] of tally) {
+        if (count > bestCount || (count === bestCount && lab < best)) {
+          best = lab
+          bestCount = count
+        }
+      }
+      if (best !== label[i]) {
+        label[i] = best
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+
+  // Count members, keep only clusters ≥ MIN_CLUSTER, and compact the surviving ids to 0..k.
+  const size = new Map<number, number>()
+  for (let i = 0; i < realCount; i++) size.set(label[i]!, (size.get(label[i]!) ?? 0) + 1)
+  const remap = new Map<number, number>()
+  for (const [lab, n] of size) if (n >= MIN_CLUSTER) remap.set(lab, remap.size)
+
+  const clusterIds = nodes.map((_, i) => (i < realCount ? remap.get(label[i]!) ?? -1 : -1))
+
+  // Label each cluster by its top shared tags (up to 2), falling back to the dominant domain.
+  const tagCounts = new Map<number, Map<string, number>>()
+  const domCounts = new Map<number, Map<string, number>>()
+  for (let i = 0; i < realCount; i++) {
+    const cid = clusterIds[i]!
+    if (cid < 0) continue
+    const tc = tagCounts.get(cid) ?? tagCounts.set(cid, new Map()).get(cid)!
+    for (const t of nodes[i]!.tags) tc.set(t, (tc.get(t) ?? 0) + 1)
+    if (nodes[i]!.domain) {
+      const dc = domCounts.get(cid) ?? domCounts.set(cid, new Map()).get(cid)!
+      dc.set(nodes[i]!.domain!, (dc.get(nodes[i]!.domain!) ?? 0) + 1)
+    }
+  }
+  const topN = (m: Map<string, number> | undefined, n: number): string[] =>
+    m ? [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([k]) => k) : []
+  const clusterLabels = new Map<number, string>()
+  for (const cid of remap.values()) {
+    const tags = topN(tagCounts.get(cid), 2)
+    clusterLabels.set(cid, tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : topN(domCounts.get(cid), 1)[0] ?? '')
+  }
+  return { clusterIds, clusterLabels }
+}
+
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   const [query, setQuery] = useState('')
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(new Set())
@@ -133,10 +216,39 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * domains. (The old hide-semantics did the exact opposite of what a click intends.)
    */
   const [selectedDomains, setSelectedDomains] = useState<ReadonlySet<string>>(new Set())
-  // Domain coloring is the default view — the meta-categories are the axis the user
-  // actually thinks in; the wiki bucket coloring stays available as a toggle.
-  const [colorBy, setColorBy] = useState<'type' | 'domain'>('domain')
+  // The color lens. Domain is the default — the meta-categories are the axis the user
+  // actually thinks in; type + the metric lenses (authority/orphans/stubs/recency) live in
+  // the lens dropdown.
+  const [lens, setLens] = useState<Lens>('domain')
   const [localDepth, setLocalDepth] = useState<1 | 2 | 0>(focusPath ? 2 : 0) // 0 = whole graph
+  // Cluster hulls: auto-detected communities as tinted, tag-labelled blobs. Off by default.
+  const [showClusters, setShowClusters] = useState(false)
+  // Gaps view: overlays the unresolved link targets as ghost nodes (SPEC §12.4). Off by
+  // default — it is an exploration mode, not the resting state of the graph.
+  const [showGaps, setShowGaps] = useState(false)
+  /**
+   * The explorer selection, keyed stably (path for a page, title for a gap) so it survives
+   * the index churn a filter change causes. Clicking a node opens the panel instead of
+   * navigating; "Open page" inside the panel is the explicit navigation.
+   */
+  const [selection, setSelection] = useState<Selection>(null)
+  /** Breadcrumb of visited PAGES (not gaps) — every hop is a chip you can jump back to. */
+  const [trail, setTrail] = useState<string[]>([])
+
+  const selectPage = (path: string): void => {
+    setSelection({ kind: 'page', path })
+    setTrail((prev) => {
+      const at = prev.indexOf(path)
+      if (at >= 0) return prev.slice(0, at + 1) // revisiting an earlier hop rewinds the trail
+      const next = [...prev, path]
+      return next.length > 8 ? next.slice(next.length - 8) : next
+    })
+  }
+  const selectGap = (title: string): void => setSelection({ kind: 'gap', title })
+  const closeExplorer = (): void => {
+    setSelection(null)
+    setTrail([])
+  }
 
   const focusIndexFull = useMemo(
     () => (focusPath ? graph.nodes.findIndex((n) => n.path === focusPath) : -1),
@@ -165,7 +277,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // Displayed subgraph: type + domain filters first, then (optionally) the BFS neighborhood
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
   // graph — that is also what keeps the force layout small in local mode on a huge vault.
-  const { nodes, edges, focusIndex } = useMemo(() => {
+  // When the gaps view is on, the unresolved targets are appended as synthetic ghost nodes.
+  const { nodes, edges, focusIndex, ghostIndices, realCount, realEdgeCount } = useMemo(() => {
     let keep: boolean[] = graph.nodes.map(
       (n) =>
         !hiddenTypes.has(n.type) &&
@@ -212,8 +325,34 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       const rb = remap.get(b)
       if (ra !== undefined && rb !== undefined) edges.push([ra, rb])
     }
-    return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null }
-  }, [graph, hiddenTypes, selectedDomains, localDepth, focusIndexFull])
+
+    const realCount = nodes.length
+    const realEdgeCount = edges.length
+    const ghostIndices = new Set<number>()
+    if (showGaps) {
+      for (const gap of graph.gaps) {
+        // Only wire the ghost to referencing pages that survived the current filters; a gap
+        // whose referrers are all hidden would otherwise float edgeless and meaningless.
+        const visibleRefs = gap.refBy.map((fi) => remap.get(fi)).filter((r): r is number => r !== undefined)
+        if (visibleRefs.length === 0) continue
+        const ghostIdx = nodes.length
+        ghostIndices.add(ghostIdx)
+        nodes.push({
+          path: `${GAP_PATH_PREFIX}${gap.title}`,
+          title: gap.title,
+          type: 'gap',
+          tags: [],
+          domain: null,
+          // `in` = true reference count (drives node size); edges only to visible referrers.
+          in: gap.refBy.length,
+          out: 0,
+        })
+        for (const r of visibleRefs) edges.push([r, ghostIdx])
+      }
+    }
+
+    return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null, ghostIndices, realCount, realEdgeCount }
+  }, [graph, hiddenTypes, selectedDomains, localDepth, focusIndexFull, showGaps])
 
   // Search matches titles AND frontmatter tags — "finance" finds every page tagged
   // german-finance even though no title contains the word.
@@ -222,8 +361,28 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     if (q === '') return new Set<number>()
     const hit = (n: GraphNode): boolean =>
       n.title.toLowerCase().includes(q) || n.tags.some((t) => t.toLowerCase().includes(q))
-    return new Set(nodes.map((n, i) => (hit(n) ? i : -1)).filter((i) => i >= 0))
-  }, [nodes, query])
+    // Real pages only — a ghost has no page to open, and its title matching would put a
+    // dead entry in the results list.
+    return new Set(nodes.map((n, i) => (i < realCount && hit(n) ? i : -1)).filter((i) => i >= 0))
+  }, [nodes, realCount, query])
+
+  // Subgraph index of the explorer selection, for the canvas ring + spotlight. Null when the
+  // selected page/gap is currently filtered out of view (the panel still shows regardless).
+  const selectedIndex = useMemo(() => {
+    if (selection === null) return null
+    const wantPath = selection.kind === 'page' ? selection.path : `${GAP_PATH_PREFIX}${selection.title}`
+    const i = nodes.findIndex((n) => n.path === wantPath)
+    return i >= 0 ? i : null
+  }, [nodes, selection])
+
+  // Community detection (label propagation) over the currently-visible page graph, computed
+  // only when the hulls are shown. Ghost nodes are excluded (id -1) — a missing page has no
+  // community. Small clusters (< MIN_CLUSTER) are dropped so the canvas isn't peppered with
+  // singleton blobs. Each surviving cluster is labelled by its most common shared tags.
+  const { clusterIds, clusterLabels } = useMemo(() => {
+    if (!showClusters) return { clusterIds: null as number[] | null, clusterLabels: new Map<number, string>() }
+    return detectClusters(nodes, edges, realCount)
+  }, [showClusters, nodes, edges, realCount])
 
   // The clickable result list under the search box — the rings in the graph show WHERE the
   // matches are, this shows WHAT they are. Title matches first (they read as more direct
@@ -332,18 +491,44 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         )}
         <span className="spacer" />
         <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
-        {hasDomains && (
+        {graph.gaps.length > 0 && (
           <button
-            className={`chip${colorBy === 'domain' ? ' active' : ''}`}
-            onClick={() => setColorBy(colorBy === 'domain' ? 'type' : 'domain')}
-            title="Toggle node coloring between domain and page type"
+            className={`chip${showGaps ? ' active' : ''}`}
+            onClick={() => {
+              const next = !showGaps
+              setShowGaps(next)
+              if (!next && selection?.kind === 'gap') closeExplorer()
+            }}
+            title="Show unresolved links as ghost nodes — the pages your vault still wants written"
           >
-            <Icon name="palette" /> {colorBy === 'domain' ? 'by domain' : 'by type'}
+            <Icon name="graph" /> Gaps
           </button>
         )}
+        <button
+          className={`chip${showClusters ? ' active' : ''}`}
+          onClick={() => setShowClusters((v) => !v)}
+          title="Outline auto-detected communities as tinted, tag-labelled clusters"
+        >
+          <Icon name="graph" /> Clusters
+        </button>
+        <LensDropdown lens={lens} onSelect={setLens} hasDomains={hasDomains} />
         <span className="vtool-stats">
-          {nodes.length} of {graph.nodes.length} pages · {edges.length} links
-          {graph.unresolved > 0 ? ` · ${graph.unresolved} unresolved` : ''}
+          {realCount} of {graph.nodes.length} pages · {realEdgeCount} links
+          {graph.unresolved > 0 && (
+            <>
+              {' · '}
+              <button
+                className="linklike"
+                onClick={() => {
+                  setShowGaps(true)
+                  if (graph.gaps[0]) selectGap(graph.gaps[0].title)
+                }}
+                title="Explore the unresolved links as knowledge gaps"
+              >
+                {graph.unresolved} unresolved
+              </button>
+            </>
+          )}
         </span>
       </div>
 
@@ -370,17 +555,298 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         </div>
       )}
 
-      <GraphCanvas
-        nodes={nodes}
-        edges={edges}
-        focusIndex={focusIndex}
-        matches={matches}
-        colorBy={hasDomains ? colorBy : 'type'}
-        // Every filter/depth change re-frames the graph; SSE live updates don't touch this key.
-        fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}`}
-        onSelect={(n) => navigate(pageRoute(n.path))}
-        overlay={searchOverlay}
-      />
+      <div className="graph-stage">
+        <GraphCanvas
+          nodes={nodes}
+          edges={edges}
+          focusIndex={focusIndex}
+          selectedIndex={selectedIndex}
+          ghostIndices={ghostIndices}
+          matches={matches}
+          lens={hasDomains ? lens : lens === 'domain' ? 'type' : lens}
+          clusters={clusterIds}
+          clusterLabels={clusterLabels}
+          // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}`}
+          onSelect={(n) =>
+            n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
+          }
+          overlay={
+            <>
+              {searchOverlay}
+              {hasDomains && <LensLegend lens={lens} />}
+              {trail.length > 1 && (
+                <div className="graph-trail" role="navigation" aria-label="Exploration trail">
+                  {trail.map((p, i) => {
+                    const n = graph.nodes.find((g) => g.path === p)
+                    if (!n) return null
+                    const cur = selection?.kind === 'page' && selection.path === p
+                    return (
+                      <span key={p}>
+                        {i > 0 && <span className="trail-arrow" aria-hidden>→</span>}
+                        <button className={`crumb${cur ? ' cur' : ''}`} onClick={() => selectPage(p)} title={n.title}>
+                          {n.title.length > 22 ? `${n.title.slice(0, 20)}…` : n.title}
+                        </button>
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          }
+        />
+        <GraphExplorer
+          graph={graph}
+          selection={selection}
+          gaps={showGaps ? graph.gaps : []}
+          onSelectPage={selectPage}
+          onSelectGap={selectGap}
+          onClose={closeExplorer}
+        />
+      </div>
+    </div>
+  )
+}
+
+// --------------------------------------------------------------------- explorer side panel
+
+/**
+ * The node explorer: click a page or a knowledge gap in the graph and browse it as lists.
+ * Backlinks, outgoing links and tag-siblings are computed from the FULL graph (not the
+ * filtered subgraph), so the panel is complete even when filters hide neighbors. Clicking a
+ * link re-selects that page in place — you browse without leaving the graph; "Open page"
+ * is the explicit navigation.
+ */
+function GraphExplorer({
+  graph,
+  selection,
+  gaps,
+  onSelectPage,
+  onSelectGap,
+  onClose,
+}: {
+  graph: VaultGraph
+  selection: Selection
+  gaps: VaultGraph['gaps']
+  onSelectPage: (path: string) => void
+  onSelectGap: (title: string) => void
+  onClose: () => void
+}): React.ReactElement | null {
+  // A ranked gaps list shows when the gaps view is on but nothing specific is selected.
+  const showGapList = selection === null && gaps.length > 0
+  const open = selection !== null || showGapList
+  if (!open) return null
+
+  return (
+    <aside className="graph-explorer" role="complementary" aria-label="Graph explorer">
+      <button className="gx-close" onClick={onClose} aria-label="Close explorer">
+        <Icon name="x" />
+      </button>
+      {selection?.kind === 'page' ? (
+        <PageExplorer graph={graph} path={selection.path} onSelectPage={onSelectPage} />
+      ) : selection?.kind === 'gap' ? (
+        <GapExplorer graph={graph} title={selection.title} onSelectPage={onSelectPage} />
+      ) : (
+        <GapList gaps={gaps} onSelectGap={onSelectGap} />
+      )}
+    </aside>
+  )
+}
+
+function PageExplorer({
+  graph,
+  path,
+  onSelectPage,
+}: {
+  graph: VaultGraph
+  path: string
+  onSelectPage: (path: string) => void
+}): React.ReactElement {
+  const idx = useMemo(() => graph.nodes.findIndex((n) => n.path === path), [graph, path])
+  const node = idx >= 0 ? graph.nodes[idx] : undefined
+  const backlinks = useMemo(
+    () =>
+      idx < 0
+        ? []
+        : graph.edges.filter(([, to]) => to === idx).map(([from]) => graph.nodes[from]!).sort(byTitle),
+    [graph, idx],
+  )
+  const outgoing = useMemo(
+    () =>
+      idx < 0
+        ? []
+        : graph.edges.filter(([from]) => from === idx).map(([, to]) => graph.nodes[to]!).sort(byTitle),
+    [graph, idx],
+  )
+  // Related by shared tag, excluding pages already linked either way — the tag axis surfaces
+  // neighbors the wikilinks don't. Capped so the panel stays a summary.
+  const related = useMemo(() => {
+    if (!node || node.tags.length === 0) return []
+    const linked = new Set([path, ...backlinks.map((n) => n.path), ...outgoing.map((n) => n.path)])
+    const tags = new Set(node.tags)
+    return graph.nodes
+      .filter((n) => !linked.has(n.path) && n.tags.some((t) => tags.has(t)))
+      .sort(byTitle)
+      .slice(0, 6)
+  }, [graph, node, path, backlinks, outgoing])
+
+  if (!node) return <div className="gx-empty">This page is no longer in the graph.</div>
+
+  return (
+    <>
+      <div className="gx-head">
+        <div className="gx-kicker">{TYPE_LABELS[node.type] ?? node.type}</div>
+        <h2 className="gx-title">{node.title}</h2>
+        <div className="gx-tags">
+          {node.domain && (
+            <span className="gx-tag dom" style={{ borderColor: domainColor(node.domain), color: domainColor(node.domain) }}>
+              {node.domain}
+            </span>
+          )}
+          {node.tags.map((t) => (
+            <span key={t} className="gx-tag">#{t}</span>
+          ))}
+        </div>
+      </div>
+      <div className="gx-metrics">
+        <div className="gx-metric"><span className="v">{node.in}</span><span className="l">backlinks</span></div>
+        <div className="gx-metric"><span className="v">{node.out}</span><span className="l">links out</span></div>
+      </div>
+      <div className="gx-body">
+        <LinkSection title="Backlinks" list={backlinks} onSelect={onSelectPage} />
+        <LinkSection title="Links to" list={outgoing} onSelect={onSelectPage} />
+        <LinkSection title="Related by tag" list={related} onSelect={onSelectPage} />
+      </div>
+      <div className="gx-actions">
+        <button className="btn primary" onClick={() => navigate(pageRoute(node.path))}>
+          Open page <Icon name="link" />
+        </button>
+        <button className="btn" onClick={() => navigate(`/vault?focus=${encodeURIComponent(node.path)}`)}>
+          Focus neighborhood
+        </button>
+      </div>
+    </>
+  )
+}
+
+function GapExplorer({
+  graph,
+  title,
+  onSelectPage,
+}: {
+  graph: VaultGraph
+  title: string
+  onSelectPage: (path: string) => void
+}): React.ReactElement {
+  const gap = graph.gaps.find((g) => g.title === title)
+  const refPages = useMemo(
+    () => (gap ? gap.refBy.map((i) => graph.nodes[i]!).sort(byTitle) : []),
+    [graph, gap],
+  )
+  if (!gap) return <div className="gx-empty">This link is resolved now.</div>
+  const prefill = `Research and write a vault page about "${gap.title}". ${gap.refBy.length} existing pages already link to it.`
+  return (
+    <>
+      <div className="gx-head">
+        <div className="gx-kicker gap">Knowledge gap · missing page</div>
+        <h2 className="gx-title">{gap.title}</h2>
+        <div className="gx-tags">
+          <span className="gx-tag">
+            {gap.refBy.length} unresolved link{gap.refBy.length === 1 ? '' : 's'} point here
+          </span>
+        </div>
+      </div>
+      <div className="gx-note">
+        No page named <strong>“{gap.title}”</strong> exists yet, but {gap.refBy.length} page
+        {gap.refBy.length === 1 ? '' : 's'} already link to it — the vault telling you what to write next.
+      </div>
+      <div className="gx-body">
+        <LinkSection title="Referenced by" list={refPages} onSelect={onSelectPage} />
+      </div>
+      <div className="gx-actions">
+        <button
+          className="btn primary"
+          onClick={() => navigate(`/research?prefill=${encodeURIComponent(prefill)}`)}
+        >
+          Start research on this <Icon name="link" />
+        </button>
+      </div>
+    </>
+  )
+}
+
+function GapList({
+  gaps,
+  onSelectGap,
+}: {
+  gaps: VaultGraph['gaps']
+  onSelectGap: (title: string) => void
+}): React.ReactElement {
+  const total = gaps.reduce((s, g) => s + g.refBy.length, 0)
+  const max = gaps[0]?.refBy.length ?? 1
+  return (
+    <>
+      <div className="gx-head">
+        <div className="gx-kicker gap">Knowledge gaps</div>
+        <h2 className="gx-title">Most-wanted missing pages</h2>
+        <div className="gx-tags">
+          <span className="gx-tag">
+            {total} unresolved link{total === 1 ? '' : 's'} · {gaps.length} distinct target{gaps.length === 1 ? '' : 's'}
+          </span>
+        </div>
+      </div>
+      <div className="gx-note">
+        Every dashed node is a page other pages link to but that doesn’t exist yet — ranked by how
+        many links are waiting. A ready-made research backlog.
+      </div>
+      <div className="gx-body">
+        <ol className="gx-gaplist">
+          {gaps.map((g, i) => (
+            <li key={g.title}>
+              <button className="gx-gaprow" onClick={() => onSelectGap(g.title)}>
+                <span className="rank">{i + 1}</span>
+                <span className="gtitle">{g.title}</span>
+                <span className="meter" aria-hidden>
+                  <i style={{ width: `${Math.round((g.refBy.length / max) * 100)}%` }} />
+                </span>
+                <span className="gn">{g.refBy.length}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </>
+  )
+}
+
+const byTitle = (a: GraphNode, b: GraphNode): number => a.title.localeCompare(b.title)
+
+/** One titled list of pages in the explorer; nothing renders when the list is empty. */
+function LinkSection({
+  title,
+  list,
+  onSelect,
+}: {
+  title: string
+  list: GraphNode[]
+  onSelect: (path: string) => void
+}): React.ReactElement | null {
+  if (list.length === 0) return null
+  return (
+    <div className="gx-sec">
+      <h3>
+        {title} <span className="c">{list.length}</span>
+      </h3>
+      <ul>
+        {list.map((n) => (
+          <li key={n.path}>
+            <button className="gx-link" onClick={() => onSelect(n.path)} title={n.path}>
+              <span className="bullet" style={{ background: n.domain ? domainColor(n.domain) : 'var(--muted)' }} />
+              {n.title}
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -434,6 +900,114 @@ function TypesDropdown({
       )}
     </div>
   )
+}
+
+/** The color lenses offered in the dropdown, with the one-line description each shows. */
+const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
+  { key: 'domain', label: 'Domain', desc: 'hash color per meta-category' },
+  { key: 'type', label: 'Page type', desc: 'wiki bucket (concept, entity, …)' },
+  { key: 'authority', label: 'Authority', desc: 'brighter = more backlinks' },
+  { key: 'orphans', label: 'Orphans', desc: 'red = no backlinks' },
+  { key: 'stubs', label: 'Stubs', desc: 'amber = thin page (< 1 KB)' },
+  { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
+]
+
+/**
+ * The color-lens picker: one dropdown that re-encodes the graph to answer a different
+ * question. Replaces the old two-state "by domain / by type" toggle — same job, four more
+ * axes. Domain is disabled when no page carries one.
+ */
+function LensDropdown({
+  lens,
+  onSelect,
+  hasDomains,
+}: {
+  lens: Lens
+  onSelect: (l: Lens) => void
+  hasDomains: boolean
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+  const current = LENSES.find((l) => l.key === lens) ?? LENSES[0]!
+  return (
+    <div className="dropdown" ref={ref}>
+      <button
+        className={`chip${lens !== 'domain' ? ' active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title="Change how nodes are colored"
+      >
+        <Icon name="palette" /> {current.label} ▾
+      </button>
+      {open && (
+        <div className="dropdown-menu lens-menu" role="menu">
+          {LENSES.map((l) => {
+            const disabled = l.key === 'domain' && !hasDomains
+            return (
+              <button
+                key={l.key}
+                role="menuitemradio"
+                aria-checked={l.key === lens}
+                className={`lens-item${l.key === lens ? ' sel' : ''}`}
+                disabled={disabled}
+                onClick={() => {
+                  onSelect(l.key)
+                  setOpen(false)
+                }}
+              >
+                <span className="lens-name">{l.label}</span>
+                <span className="lens-desc">{disabled ? 'no domains assigned yet' : l.desc}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A small canvas-corner legend for the metric lenses (categorical lenses use the chips). */
+function LensLegend({ lens }: { lens: Lens }): React.ReactElement | null {
+  let body: React.ReactNode = null
+  if (lens === 'authority')
+    body = (
+      <>
+        <span className="ll-title">Authority</span>
+        <span className="ll-row"><i className="ll-grad ll-authority" /> few → many backlinks</span>
+      </>
+    )
+  else if (lens === 'orphans')
+    body = (
+      <>
+        <span className="ll-title">Orphans</span>
+        <span className="ll-row"><i className="ll-sw" style={{ background: 'var(--err)' }} /> no backlinks (unreachable)</span>
+      </>
+    )
+  else if (lens === 'stubs')
+    body = (
+      <>
+        <span className="ll-title">Stubs</span>
+        <span className="ll-row"><i className="ll-sw" style={{ background: 'var(--warn)' }} /> thin page (&lt; 1 KB)</span>
+      </>
+    )
+  else if (lens === 'recency')
+    body = (
+      <>
+        <span className="ll-title">Recency</span>
+        <span className="ll-row"><i className="ll-grad ll-recency" /> older → edited recently</span>
+      </>
+    )
+  if (body === null) return null
+  return <div className="lens-legend">{body}</div>
 }
 
 // ---------------------------------------------------------------------------- page view

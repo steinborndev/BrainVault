@@ -28,7 +28,7 @@ function graphOf(
     out: 0,
     in: 0,
   }))
-  return { nodes, edges, unresolved: 0, builtAt: '2026-07-19T00:00:00.000Z' }
+  return { nodes, edges, unresolved: 0, gaps: [], builtAt: '2026-07-19T00:00:00.000Z' }
 }
 
 const pagesWithTag = (n: number, tag: string, prefix = 'P'): Array<{ title: string; tags: string[] }> =>

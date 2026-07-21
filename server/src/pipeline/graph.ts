@@ -30,6 +30,22 @@ export interface GraphNode {
   /** Out-degree (links this page makes) and in-degree (backlinks) over RESOLVED edges. */
   readonly out: number
   readonly in: number
+  /** File mtime (epoch ms) — drives the "recency" color lens. Optional: only the builder sets it. */
+  readonly mtimeMs?: number
+  /** File size in bytes — a cheap proxy the "stubs" lens thresholds on. Builder-only. */
+  readonly size?: number
+}
+
+/**
+ * A knowledge gap: a wikilink target no page satisfies. The vault's own record of what
+ * to write next — pages already cite it, it just doesn't exist yet. Feeds the dashboard's
+ * ghost nodes and the ranked "most-wanted missing pages" list (SPEC §12.4).
+ */
+export interface GraphGap {
+  /** The missing page's name, cased as first written in a wikilink. */
+  readonly title: string
+  /** Indices into `nodes` of the pages linking to this target (deduped per page). */
+  readonly refBy: number[]
 }
 
 export interface VaultGraph {
@@ -38,6 +54,8 @@ export interface VaultGraph {
   readonly edges: Array<[number, number]>
   /** Wikilink targets that resolved to no page (dangling links), counted per source of truth. */
   readonly unresolved: number
+  /** Distinct unresolved targets, most-referenced first. */
+  readonly gaps: GraphGap[]
   readonly builtAt: string
 }
 
@@ -136,11 +154,24 @@ export class GraphBuilder {
     const edges: Array<[number, number]> = []
     const seenEdge = new Set<number>()
     let unresolved = 0
+    // Distinct missing targets grouped case-insensitively (same rule as resolution above);
+    // the first-written casing becomes the display title.
+    const gapByKey = new Map<string, { title: string; refBy: Set<number> }>()
     files.forEach((f, from) => {
       for (const target of this.cache.get(f.abs)?.links ?? []) {
         const to = byName.get(target.toLowerCase())
         if (to === undefined) {
           unresolved++
+          // A path-qualified target (`[[concepts/_index]]`) is a navigation link the
+          // basename resolver structurally can't match — not a missing CONTENT page. Count
+          // it as unresolved (it is a dangling link) but keep it out of the gaps list, or
+          // the vault's `_index` hubs would drown out the real "pages to write".
+          if (!target.includes('/')) {
+            const key = target.toLowerCase()
+            const gap = gapByKey.get(key)
+            if (gap === undefined) gapByKey.set(key, { title: target, refBy: new Set([from]) })
+            else gap.refBy.add(from)
+          }
           continue
         }
         if (to === from) continue
@@ -163,10 +194,16 @@ export class GraphBuilder {
         domain: entry?.domain ?? null,
         out: outDeg[i]!,
         in: inDeg[i]!,
+        mtimeMs: f.mtimeMs,
+        size: f.size,
       }
     })
 
-    const graph: VaultGraph = { nodes, edges, unresolved, builtAt: new Date().toISOString() }
+    const gaps: GraphGap[] = [...gapByKey.values()]
+      .map((g) => ({ title: g.title, refBy: [...g.refBy].sort((a, b) => a - b) }))
+      .sort((a, b) => b.refBy.length - a.refBy.length || a.title.localeCompare(b.title))
+
+    const graph: VaultGraph = { nodes, edges, unresolved, gaps, builtAt: new Date().toISOString() }
     this.lastSignature = signature
     this.lastGraph = graph
     return graph

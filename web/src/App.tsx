@@ -120,7 +120,7 @@ export function App(): React.ReactElement {
           <Ingestion />
         </section>
         <section className="tab-panel" hidden={tab !== 'chat'}>
-          <Chat />
+          <Chat researchPrefill={tab === 'chat' ? (new URLSearchParams(path.split('?')[1] ?? '').get('prefill') ?? '') : ''} />
         </section>
         <section className="tab-panel" hidden={tab !== 'vault'}>
           {vaultPath !== null && (
