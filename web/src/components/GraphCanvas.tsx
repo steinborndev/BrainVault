@@ -21,6 +21,13 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { GraphNode } from '../api/types.ts'
 
+/**
+ * Smallest connected component that earns a guaranteed label (see `labelReps`). Below this a
+ * blob is an orphan or a stray pair, not a cluster worth reserving a label slot for — and the
+ * graph carries hundreds of gap nodes we must not each force onto the canvas.
+ */
+const MIN_LABELED_CLUSTER = 3
+
 export interface GraphCanvasProps {
   nodes: GraphNode[]
   /** Directed [from, to] index pairs into `nodes`. */
@@ -205,6 +212,46 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     }
     return map
   }, [edges])
+
+  // One guaranteed label per domain-region of every connected component big enough to read as
+  // a cluster. Without this, the label loop's global degree sort + fixed budget fill every slot
+  // from the densest regions, leaving small detached clusters (materials-science, unassigned)
+  // anonymous — their local hubs never reach the global cutoff. Grouping by (component, domain)
+  // rather than component alone means a domain bridged into a larger component still keeps its
+  // own label, and a domain split across two blobs gets one in each. Union-find over the edges;
+  // memoised on the node/edge set, not per frame.
+  const labelReps = useMemo(() => {
+    const parent = new Int32Array(nodes.length)
+    for (let i = 0; i < nodes.length; i++) parent[i] = i
+    const find = (x: number): number => {
+      while (parent[x] !== x) {
+        parent[x] = parent[parent[x]!]!
+        x = parent[x]!
+      }
+      return x
+    }
+    for (const [a, b] of edges) {
+      const ra = find(a)
+      const rb = find(b)
+      if (ra !== rb) parent[ra] = rb
+    }
+    const compSize = new Map<number, number>()
+    for (let i = 0; i < nodes.length; i++) {
+      const r = find(i)
+      compSize.set(r, (compSize.get(r) ?? 0) + 1)
+    }
+    // Highest-degree node per (component root, domain); skip components too small to be a cluster
+    // so orphans and pairs don't each force a label (the graph has hundreds of gap nodes).
+    const best = new Map<string, number>()
+    for (let i = 0; i < nodes.length; i++) {
+      const r = find(i)
+      if ((compSize.get(r) ?? 0) < MIN_LABELED_CLUSTER) continue
+      const key = `${r} ${nodes[i]!.domain ?? ''}`
+      const cur = best.get(key)
+      if (cur === undefined || nodes[i]!.in + nodes[i]!.out > nodes[cur]!.in + nodes[cur]!.out) best.set(key, i)
+    }
+    return new Set(best.values())
+  }, [nodes, edges])
 
   const radius = useCallback(
     (i: number): number => {
@@ -411,12 +458,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // Labels: every visible node is a candidate — no global hub threshold. The old
     // top-8%-by-degree gate concentrated all low-zoom labels in the densest domains
     // (where they overlapped) and left small clusters entirely anonymous, because their
-    // local hubs never reached a global cutoff. Instead, candidates draw in priority
-    // order (interactive state, spotlight membership, ghosts, then degree) and a label
-    // that would overlap an already-placed one is skipped: dense regions show only their
-    // local hubs, sparse clusters always get their best labels, and zooming in frees
-    // space so culled labels reappear on their own. The order is deterministic (degree,
-    // then index), so nothing flickers between frames.
+    // local hubs never reached a global cutoff. Candidates draw in priority order
+    // (interactive state, spotlight membership, ghosts, cluster representatives, then
+    // degree) and a label that would overlap an already-placed one is skipped. The
+    // representative tier (labelReps) is the guarantee that every readable cluster keeps
+    // at least its strongest label: without it the fixed budget below still fills from the
+    // densest regions first, so a detached blob whose best node ranks past the cutoff went
+    // unlabeled. Dense regions then show only their local hubs, sparse clusters always get
+    // their best labels, and zooming in frees space so culled labels reappear on their own.
+    // The order is deterministic (priority, degree, then index), so nothing flickers.
     const candidates: number[] = []
     for (let i = 0; i < nodes.length; i++) {
       const x = pos[i * 2]!
@@ -427,9 +477,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const interactive = (i: number): boolean =>
       i === hovered || i === selectedIndex || i === focusIndex || matches.has(i)
     const prio = (i: number): number =>
-      interactive(i) ? 3
-      : highlight !== null && highlight.has(i) ? 2
-      : ghostIndices !== undefined && ghostIndices.has(i) ? 1
+      interactive(i) ? 4
+      : highlight !== null && highlight.has(i) ? 3
+      : ghostIndices !== undefined && ghostIndices.has(i) ? 2
+      : labelReps.has(i) ? 1
       : 0
     candidates.sort((a, b) => {
       const pd = prio(b) - prio(a)
@@ -482,7 +533,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, neighbors, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, neighbors, labelReps, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
