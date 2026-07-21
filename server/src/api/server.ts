@@ -69,6 +69,11 @@ export interface AppContext {
   readonly scheduleRestart?: () => void
   /** Dropped-sender counters for the telegram status endpoint (migration v8). Optional in tests. */
   readonly telegramDrops?: TelegramDropStore
+  /**
+   * Shared graph builder. main.ts passes the instance the post-run validator already uses so
+   * the graph cache is warmed once; when omitted (tests) the server builds its own.
+   */
+  readonly graph?: GraphBuilder
 }
 
 /** Location of the built frontend (`web/dist`), resolved relative to this source file. */
@@ -99,7 +104,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   // One shared graph builder: the graph endpoint serves it, the pages DELETE consults it for
   // the backlink count, and the domain candidate finder reads tags/domains off it (its
   // per-file cache makes all three cheap).
-  const graphBuilder = new GraphBuilder(ctx.config.vaultRoot)
+  const graphBuilder = ctx.graph ?? new GraphBuilder(ctx.config.vaultRoot)
   const dismissals = ctx.domainDismissals ?? new MemoryDismissalStore()
   registerMaintenanceRoute(app, ctx, graphBuilder, dismissals)
   registerPagesRoute(app, ctx, graphBuilder)

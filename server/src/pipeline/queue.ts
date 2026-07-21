@@ -41,6 +41,7 @@ import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
 import { readDomainRegistry, domainSystemPrompt } from './domains.js'
+import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
@@ -119,6 +120,12 @@ export interface IngestQueueOptions {
    * (finding F4). Defaults to a private registry when the queue is the only writer.
    */
   readonly runRegistry?: RunRegistry
+  /**
+   * Post-run validator (validator.ts): deterministic checks over the pages a run touched,
+   * logged as warnings against the job. Read-only and advisory — findings never change the
+   * job's outcome. Omitted (e.g. in the CLI) means no validation.
+   */
+  readonly validate?: Validator
 }
 
 /**
@@ -221,6 +228,7 @@ export class IngestQueue {
 
   private readonly commitMutex: Mutex
   private readonly runRegistry: RunRegistry
+  private readonly validate: Validator | undefined
   private running = false
   private paused = false
   /** Why the queue is paused — the dashboard distinguishes a rate limit from a spent budget. */
@@ -256,6 +264,7 @@ export class IngestQueue {
     this.msUntilBudgetReset = opts.msUntilBudgetReset ?? ((): number => msUntilReset())
     this.commitMutex = opts.commitMutex ?? new Mutex()
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
+    this.validate = opts.validate
   }
 
   /**
@@ -677,12 +686,13 @@ export class IngestQueue {
       })
       // created_pages comes from the actual commit (see commitVault): the only
       // authoritative record of what landed, correct even at concurrency 2.
-      await this.commitStep(job, {
+      const committed = await this.commitStep(job, {
         written,
         dirtyBefore,
         extra: [path.posix.join('.raw', job.id)],
       })
       endRun()
+      this.validateStep(job.id, [...written, ...committed])
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(job.id, 'info', note)
       return
@@ -737,13 +747,15 @@ export class IngestQueue {
     return [...new Set([...scope.written, ...swept, ...scope.extra, ...BOOKKEEPING_PATHS])]
   }
 
-  private async commitStep(job: JobRow, scope: CommitScope): Promise<void> {
+  /** Returns the committed wiki pages, so the validation step can cover Bash-written pages
+   * the tool stream never reported (empty when the commit was skipped or failed). */
+  private async commitStep(job: JobRow, scope: CommitScope): Promise<string[]> {
     const label = job.original_name ?? job.url ?? job.id
     if (!this.autoCommit()) {
       // Pages are already written; only the commit is skipped, so nothing is lost — the
       // operator (or the next run with auto-commit on) picks them up.
       this.store.log(job.id, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
-      return
+      return []
     }
     try {
       const result = await this.commitMutex.runExclusive(async () => {
@@ -759,13 +771,38 @@ export class IngestQueue {
         )
         // Vault-visible numbers (page counts, git history) changed → refresh the Overview.
         this.events?.publish({ kind: 'stats' })
-      } else {
-        this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
+        return result.committedPages
       }
+      this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
     } catch (err) {
       // A commit failure must not undo a completed ingest — the pages are on disk and the
       // next successful job's `git add -A` will sweep them in. Surface it, don't fail.
       this.store.log(job.id, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
+    }
+    return []
+  }
+
+  /**
+   * Post-run validation (validator.ts): the mechanical lint checks, scoped to the pages this
+   * run touched, logged as warnings while the job's context is still on screen. Advisory by
+   * design — a finding never fails a `done` job, and a validator crash only logs.
+   */
+  private validateStep(jobId: string, touched: readonly string[]): void {
+    if (this.validate === undefined) return
+    try {
+      const findings = this.validate(touched)
+      if (findings.length === 0) {
+        this.store.log(jobId, 'info', 'post-run validation: no findings')
+        return
+      }
+      for (const f of findings) this.store.log(jobId, 'warn', `validation [${f.rule}] ${f.path}: ${f.message}`)
+      this.store.log(
+        jobId,
+        'warn',
+        `post-run validation: ${findings.length} finding(s) — advisory only, nothing was modified`,
+      )
+    } catch (err) {
+      this.store.log(jobId, 'warn', `post-run validation crashed (ignored): ${(err as Error).message}`)
     }
   }
 
@@ -851,12 +888,13 @@ export class IngestQueue {
           log: `batch ingest complete (member ${i + 1}/${n}, ${res.numTurns} turns)`,
         })
       })
-      await this.batchCommit(ready.map((r) => r.id), names, {
+      const committed = await this.batchCommit(ready.map((r) => r.id), names, {
         written,
         dirtyBefore,
         extra: ready.map((r) => path.posix.join('.raw', r.id)),
       })
       endRun()
+      this.validateStep(lead, [...written, ...committed])
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(lead, 'info', note)
       return
@@ -902,12 +940,13 @@ export class IngestQueue {
     )
   }
 
-  /** One commit for a whole batch; every member is attributed the same committed pages. */
-  private async batchCommit(memberIds: string[], names: string[], scope: CommitScope): Promise<void> {
+  /** One commit for a whole batch; every member is attributed the same committed pages.
+   * Returns the committed wiki pages for the validation step (empty when skipped/failed). */
+  private async batchCommit(memberIds: string[], names: string[], scope: CommitScope): Promise<string[]> {
     const label = names.length <= 2 ? names.join(', ') : `${names[0]} +${names.length - 1} more`
     if (!this.autoCommit()) {
       this.store.log(memberIds[0]!, 'info', 'auto-commit disabled in settings — pages are on disk, not committed')
-      return
+      return []
     }
     try {
       const result = await this.commitMutex.runExclusive(async () => {
@@ -918,12 +957,13 @@ export class IngestQueue {
         for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
         this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)
         this.events?.publish({ kind: 'stats' })
-      } else {
-        this.store.log(memberIds[0]!, 'info', `not committed: ${result.note ?? 'no changes'}`)
+        return result.committedPages
       }
+      this.store.log(memberIds[0]!, 'info', `not committed: ${result.note ?? 'no changes'}`)
     } catch (err) {
       this.store.log(memberIds[0]!, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
     }
+    return []
   }
 
   private deferJob(job: JobRow, jobDir: string): void {

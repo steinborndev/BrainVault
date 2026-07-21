@@ -29,6 +29,7 @@ import { readDomainRegistry, domainSystemPrompt, DOMAIN_REGISTRY_PATH, UNASSIGNE
 import { parseDomainReview, DOMAIN_REVIEW_FORMAT, type DomainReview } from './domain-review.js'
 import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
+import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
 
@@ -78,6 +79,11 @@ export interface MaintenanceRunnerOptions {
    * (finding F4). Defaults to a private registry when this runner is the only writer.
    */
   readonly runRegistry?: RunRegistry
+  /**
+   * Post-run validator (validator.ts), same instance the queue uses: deterministic checks
+   * over the pages a run touched, streamed as warnings on the run's channel. Advisory only.
+   */
+  readonly validate?: Validator
 }
 
 export interface MaintenanceResult {
@@ -138,6 +144,7 @@ export class MaintenanceRunner {
   private readonly commit: (vaultRoot: string, message: string, opts?: CommitOptions) => Promise<CommitResult>
   private readonly timeoutMs: number
   private readonly runRegistry: RunRegistry
+  private readonly validate: Validator | undefined
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
   /** In-memory registry of async runs, keyed by run id (insertion-ordered for eviction). */
@@ -152,6 +159,7 @@ export class MaintenanceRunner {
     this.commit = opts.commit ?? commitVault
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
+    this.validate = opts.validate
   }
 
   /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
@@ -498,6 +506,22 @@ export class MaintenanceRunner {
       const pages = commit.committed ? commit.committedPages : []
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')
       this.events.publish({ kind: 'stats' })
+
+      // Post-run validation, only when the run actually touched pages (a read-only kind like
+      // domain-review has nothing to check). Advisory: findings never fail the run.
+      const touched = [...new Set([...written, ...pages])]
+      if (this.validate !== undefined && touched.length > 0) {
+        try {
+          const findings = this.validate(touched)
+          if (findings.length === 0) log('info', 'post-run validation: no findings')
+          for (const f of findings) log('warn', `validation [${f.rule}] ${f.path}: ${f.message}`)
+          if (findings.length > 0) {
+            log('warn', `post-run validation: ${findings.length} finding(s) — advisory only, nothing was modified`)
+          }
+        } catch (err) {
+          log('warn', `post-run validation crashed (ignored): ${(err as Error).message}`)
+        }
+      }
 
       const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage, answer: res.result }
       if (kind === 'lint') {

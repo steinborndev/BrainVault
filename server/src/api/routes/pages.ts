@@ -28,6 +28,7 @@ import type { AppContext } from '../server.js'
 import { commitPaths } from '../../pipeline/git.js'
 import { Mutex } from '../../util/mutex.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
+import { validatePages, validateAddressMap, type ValidationFinding } from '../../pipeline/validator.js'
 
 /** How much of a page to send for a preview — enough to judge relevance, not a whole document. */
 const PREVIEW_LIMIT = 4_000
@@ -145,12 +146,28 @@ export function registerPagesRoute(app: FastifyInstance, ctx: AppContext, graph?
         currentMtime: result.conflict,
       })
     }
+
+    // Post-edit validation (validator.ts): the mechanical lint checks for THIS page, plus any
+    // address_map divergence the edit introduced. Advisory — the edit is already committed;
+    // findings only ride along so the UI can surface them. A validator crash must not turn a
+    // successful edit into an error response.
+    let validation: ValidationFinding[] = []
+    try {
+      validation = [
+        ...validatePages(config.vaultRoot, [page.rel], graph?.build()),
+        ...validateAddressMap(config.vaultRoot).filter((f) => f.path === page.rel),
+      ]
+    } catch {
+      /* advisory only */
+    }
+
     return reply.send({
       ok: true,
       path: page.rel,
       mtime: result.mtime,
       commit: result.commit?.hash ?? null,
       committed: result.commit?.committed ?? false,
+      validation,
     })
   })
 
@@ -180,12 +197,23 @@ export function registerPagesRoute(app: FastifyInstance, ctx: AppContext, graph?
       return autoCommit() ? await commitPaths(config.vaultRoot, `delete: ${page.title}`, [page.rel]) : undefined
     })
 
+    // Deletion is not a manifest-aware operation (the tooling's documented gap): if the
+    // deleted page was in `.raw/.manifest.json`'s address_map, its entry is stale as of this
+    // request. Report it here, at the moment it happens, instead of in the next full lint.
+    let validation: ValidationFinding[] = []
+    try {
+      validation = validateAddressMap(config.vaultRoot).filter((f) => f.path === page.rel)
+    } catch {
+      /* advisory only */
+    }
+
     return reply.send({
       ok: true,
       path: page.rel,
       staleLinks,
       commit: commit?.hash ?? null,
       committed: commit?.committed ?? false,
+      validation,
     })
   })
 }

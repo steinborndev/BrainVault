@@ -132,6 +132,21 @@ describe('PUT /api/v1/pages', () => {
     expect(git('status', '--porcelain')).toContain('Beta.md')
   })
 
+  it('returns advisory validation findings for the edited page', async () => {
+    // The fixture pages carry no frontmatter, and this edit adds a dead link on top.
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/pages',
+      payload: { path: 'wiki/concepts/Beta.md', markdown: '# Beta\n\nsee [[No Such Page]]\n' },
+    })
+    expect(res.statusCode).toBe(200) // findings never fail the edit
+    const { validation } = res.json<{ validation: Array<{ rule: string; path: string; message: string }> }>()
+    const rules = validation.map((f) => f.rule)
+    expect(rules).toContain('frontmatter')
+    expect(rules).toContain('dead-link')
+    expect(validation.every((f) => f.path === 'wiki/concepts/Beta.md')).toBe(true)
+  })
+
   it('does not sweep an unrelated dirty file into the edit commit', async () => {
     // Simulates an agent mid-write: another page is dirty while the user edits Beta.
     page('wiki/concepts/AgentDraft.md', 'half-written by a concurrent run\n')
@@ -163,6 +178,19 @@ describe('DELETE /api/v1/pages', () => {
   it('404s on a missing page and refuses traversal', async () => {
     expect((await app.inject({ method: 'DELETE', url: '/api/v1/pages?path=wiki/concepts/Nope.md' })).statusCode).toBe(404)
     expect((await app.inject({ method: 'DELETE', url: '/api/v1/pages?path=../.git/config' })).statusCode).toBe(400)
+  })
+
+  it('reports the now-stale address_map entry when a mapped page is deleted (2c)', async () => {
+    page(
+      '.raw/.manifest.json',
+      JSON.stringify({ version: 1, address_map: { 'wiki/concepts/Beta.md': 'c-000042' } }),
+    )
+    const res = await app.inject({ method: 'DELETE', url: '/api/v1/pages?path=wiki/concepts/Beta.md' })
+    expect(res.statusCode).toBe(200)
+    const { validation } = res.json<{ validation: Array<{ rule: string; path: string; message: string }> }>()
+    expect(validation).toHaveLength(1)
+    expect(validation[0]).toMatchObject({ rule: 'address-map', path: 'wiki/concepts/Beta.md' })
+    expect(validation[0]!.message).toContain('c-000042')
   })
 })
 

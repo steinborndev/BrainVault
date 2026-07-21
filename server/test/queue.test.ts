@@ -6,6 +6,7 @@ import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { IngestQueue, classifyFailure, guessType, sanitizeOriginalName, type IngestRunner } from '../src/pipeline/queue.js'
 import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
+import type { Validator } from '../src/pipeline/validator.js'
 import { PreprocessError, type PreprocessResult, type ToolAvailability } from '../src/pipeline/preprocess/index.js'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
@@ -80,6 +81,7 @@ interface QueueOverrides {
   concurrency?: number
   maxRetries?: number
   budgetExceeded?: () => boolean
+  validate?: Validator
 }
 
 function makeQueue(over: QueueOverrides = {}): IngestQueue {
@@ -99,6 +101,7 @@ function makeQueue(over: QueueOverrides = {}): IngestQueue {
     setTimeoutFn: (fn) => void pausedTimers.push(fn),
     runIngest: over.runIngest ?? (async () => okResult()),
     ...(over.budgetExceeded ? { budgetExceeded: over.budgetExceeded } : {}),
+    ...(over.validate ? { validate: over.validate } : {}),
   })
 }
 
@@ -124,6 +127,50 @@ describe('pure helpers', () => {
     expect(classifyFailure(failResult('fetch failed ECONNRESET'))).toBe('transient')
     expect(classifyFailure(okResult({ ok: false, timedOut: true }))).toBe('transient')
     expect(classifyFailure(failResult('run consumed zero tokens — auth failure'))).toBe('permanent')
+  })
+})
+
+describe('post-run validation', () => {
+  it('runs the validator over written+committed pages and logs findings as warnings', async () => {
+    const seen: string[][] = []
+    const q = makeQueue({
+      validate: (paths) => {
+        seen.push([...paths])
+        return [
+          { rule: 'frontmatter', path: 'wiki/concepts/Foo.md', message: 'missing required frontmatter field(s): tags' },
+        ]
+      },
+    })
+    q.start()
+    const { job } = await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+
+    expect(store.getOrThrow(job.id).status).toBe('done') // findings are advisory, never fail the job
+    expect(seen[0]).toContain('wiki/concepts/Foo.md') // the fake commit's committedPages reached the validator
+    const logs = store.logs(job.id)
+    const finding = logs.find((l) => l.message.includes('validation [frontmatter] wiki/concepts/Foo.md'))
+    expect(finding?.level).toBe('warn')
+    expect(logs.some((l) => l.message.includes('post-run validation: 1 finding(s)'))).toBe(true)
+  })
+
+  it('logs a clean pass, and a validator crash never fails the job', async () => {
+    const clean = makeQueue({ validate: () => [] })
+    clean.start()
+    const { job: ok } = await clean.enqueueFile({ sourcePath: writeSource('a.md'), source: 'drop' })
+    await clean.onIdle()
+    expect(store.logs(ok.id).some((l) => l.message.includes('post-run validation: no findings'))).toBe(true)
+
+    const crashing = makeQueue({
+      validate: () => {
+        throw new Error('boom')
+      },
+    })
+    crashing.start()
+    // Distinct content — identical bytes would dedupe against the job above.
+    const { job } = await crashing.enqueueFile({ sourcePath: writeSource('b.md', 'other'), source: 'drop' })
+    await crashing.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('done')
+    expect(store.logs(job.id).some((l) => l.message.includes('post-run validation crashed'))).toBe(true)
   })
 })
 

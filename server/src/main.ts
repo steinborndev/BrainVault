@@ -16,6 +16,8 @@ import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
 import { MaintenanceRunner } from './pipeline/maintenance.js'
 import { RunRegistry } from './pipeline/run-registry.js'
+import { GraphBuilder } from './pipeline/graph.js'
+import { createValidator } from './pipeline/validator.js'
 import { budgetStatus } from './pipeline/budget.js'
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
@@ -60,6 +62,12 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // flagged "restart required"); `concurrency`/`gitAutoCommit` apply live via the queue.
   const settings = new SettingsStore(db)
   const effective = settings.effective(config)
+  // One graph builder for the whole service (its per-file cache makes rebuilds cheap): the
+  // graph/pages/domains routes serve it, and the post-run validator reads in-degrees off it.
+  const graph = new GraphBuilder(config.vaultRoot)
+  // Deterministic post-run checks (validator.ts) shared by ingest and maintenance runs —
+  // findings land as warnings in the job/run log the moment a run introduces them.
+  const validate = createValidator(config.vaultRoot, graph)
   const queue = new IngestQueue({
     store,
     vaultRoot: config.vaultRoot,
@@ -73,6 +81,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // Same pattern for the daily budget — evaluated through the shared budget module so the
     // queue's pause decision and the dashboard's display can never disagree (SPEC.md §11.3).
     budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
+    validate,
   })
   // SETUP MODE (config.auth === null): serve the dashboard so the user can enter the
   // credential there, but start nothing that could spawn an agent — the queue never claims
@@ -90,6 +99,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     events,
     commitMutex,
     runRegistry,
+    validate,
   })
 
   // The start-time-bound settings folded into the config the watcher and HTTP server see. The
@@ -130,6 +140,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // Persistent, so a rejected domain candidate stays rejected across restarts.
     domainDismissals: new DomainDismissalStore(db),
     telegramDrops,
+    graph,
   })
   await app.listen({ host: config.server.host, port: config.server.port })
   const url = `http://${config.server.host}:${config.server.port}`
