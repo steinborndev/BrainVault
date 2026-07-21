@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
-import type { GraphNode, VaultGraph } from '../api/types.ts'
+import type { GraphNode, VaultGraph, ValidationFinding } from '../api/types.ts'
 import { GraphCanvas, domainColor, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
@@ -1027,10 +1027,16 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     if (deleteTimer.current) clearTimeout(deleteTimer.current)
   }, [])
 
+  // Advisory findings the server's post-edit validation returned for THIS page (the edit
+  // itself has landed either way). Cleared when navigating to another page.
+  const [saveFindings, setSaveFindings] = useState<ValidationFinding[]>([])
+  useEffect(() => setSaveFindings([]), [path])
+
   const save = useMutation({
     mutationFn: () => api.savePage(path, draft, pageQ.data?.mtime),
-    onSuccess: () => {
+    onSuccess: (res) => {
       setEditing(false)
+      setSaveFindings(res.validation ?? [])
       qc.invalidateQueries({ queryKey: ['page-full', path] })
       qc.invalidateQueries({ queryKey: ['page', path] }) // the citation-preview cache
       qc.invalidateQueries({ queryKey: ['graph'] }) // links may have changed
@@ -1183,6 +1189,16 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                   <Icon name="copy" /> {copiedPath ? 'Copied' : 'Copy vault path'}
                 </button>
                 <div className="omenu-sep" />
+                {confirmDelete && backlinks.length > 0 && (
+                  <div className="omenu-note" role="note">
+                    {backlinks.length} page{backlinks.length === 1 ? '' : 's'} link here (
+                    {backlinks
+                      .slice(0, 3)
+                      .map((b) => b.title)
+                      .join(', ')}
+                    {backlinks.length > 3 ? ', …' : ''}) — deleting leaves dangling links.
+                  </div>
+                )}
                 <button
                   role="menuitem"
                   className="danger"
@@ -1201,6 +1217,20 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
 
       <StaleLinksBanner />
       {del.isError && <div className="toast err">Delete failed: {(del.error as Error).message}</div>}
+
+      {saveFindings.length > 0 && (
+        <div className="stale-banner" role="status">
+          <Icon name="graph" />
+          <span>
+            Saved, but the page checks found {saveFindings.length} issue{saveFindings.length === 1 ? '' : 's'}:{' '}
+            {saveFindings.map((f) => `${f.rule}: ${f.message}`).join(' · ')}
+          </span>
+          <span className="spacer" />
+          <button className="btn ghost" onClick={() => setSaveFindings([])} title="Dismiss" aria-label="Dismiss findings">
+            <Icon name="x" />
+          </button>
+        </div>
+      )}
 
       {editing ? (
         <div className="page-editor">
@@ -1342,32 +1372,94 @@ function EditorPreview({
 }
 
 /**
- * Banner shown after manual deletions: N backlinks now point at nothing, and the vault's own
- * cleanup mechanism for that is a lint run — guide the user there instead of leaving the
- * dangling references to be discovered weeks later.
+ * Banner shown after manual deletions: N backlinks now point at nothing. Primary action is
+ * the bounded reference-cleanup agent run (maintenance kind `cleanup`) — one click instead
+ * of leaving the dangling references to be discovered weeks later by a lint. The banner
+ * tracks the run inline (poll every 2 s) so the user never has to leave the tab.
  */
 function StaleLinksBanner(): React.ReactElement | null {
   const state = useStaleLinks()
+  const qc = useQueryClient()
+  const [runId, setRunId] = useState<string | null>(null)
+  const start = useMutation({
+    mutationFn: () => api.cleanupReferences(state.pages),
+    onSuccess: (run) => setRunId(run.id),
+  })
+  const runQ = useQuery({
+    queryKey: ['maintenance-run', runId],
+    queryFn: () => api.maintenanceRun(runId!),
+    enabled: runId !== null,
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'running' ? false : 2000),
+  })
+  const run = runQ.data
+  const settled = run !== undefined && run.status !== 'running'
+  useEffect(() => {
+    if (run?.status === 'done') {
+      // The run edited pages and committed — refresh everything derived from the vault.
+      qc.invalidateQueries({ queryKey: ['graph'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    }
+  }, [run?.status, qc])
+
   if (state.count === 0) return null
+  const dismiss = (): void => {
+    staleLinks.clear()
+    setRunId(null)
+    start.reset()
+  }
   const pages = state.pages.join(', ')
+
+  let body: React.ReactElement
+  if (runId !== null && !settled) {
+    body = (
+      <span>
+        Reference cleanup is running — removing dangling links to <strong>{pages}</strong>…
+      </span>
+    )
+  } else if (run?.status === 'done') {
+    const touched = run.result?.pages.length ?? 0
+    body = (
+      <span>
+        Reference cleanup finished: {touched} page{touched === 1 ? '' : 's'} updated (one revertable commit).
+      </span>
+    )
+  } else if (run?.status === 'error' || start.isError) {
+    body = (
+      <span>
+        Reference cleanup failed: {run?.error ?? (start.error as Error | undefined)?.message ?? 'unknown error'}
+      </span>
+    )
+  } else {
+    body = (
+      <span>
+        Deleting <strong>{pages}</strong> left <strong>{state.count}</strong> link
+        {state.count === 1 ? '' : 's'} dangling.
+      </span>
+    )
+  }
+
   return (
     <div className="stale-banner" role="status">
       <Icon name="graph" />
-      <span>
-        Deleting <strong>{pages}</strong> left <strong>{state.count}</strong> link
-        {state.count === 1 ? '' : 's'} dangling. A lint run finds and cleans up the references.
-      </span>
+      {body}
       <span className="spacer" />
+      {runId === null && state.pages.length > 0 && (
+        <button className="btn primary" onClick={() => start.mutate()} disabled={start.isPending}>
+          {start.isPending ? 'Starting…' : 'Clean up references'}
+        </button>
+      )}
+      {run?.status === 'error' && (
+        <button className="btn" onClick={() => { setRunId(null); start.reset() }}>
+          Retry
+        </button>
+      )}
       <button
-        className="btn primary"
-        onClick={() => {
-          staleLinks.clear()
-          navigate('/maintenance')
-        }}
+        className="btn ghost"
+        onClick={dismiss}
+        disabled={runId !== null && !settled}
+        title="Dismiss"
+        aria-label="Dismiss banner"
       >
-        Go to maintenance
-      </button>
-      <button className="btn ghost" onClick={() => staleLinks.clear()} title="Dismiss" aria-label="Dismiss banner">
         <Icon name="x" />
       </button>
     </div>

@@ -190,8 +190,10 @@ describe('ingest runs receive the registry', () => {
     expect(extra).toContain(UNASSIGNED)
   })
 
-  it('passes nothing when the vault has no registry', async () => {
-    expect(await ingestOnce()).toBe('')
+  it('passes no domain block when the vault has no registry (the hygiene checklist still rides)', async () => {
+    const extra = await ingestOnce()
+    expect(extra).not.toContain('<domain_registry>')
+    expect(extra).toContain('<page_hygiene>')
   })
 })
 

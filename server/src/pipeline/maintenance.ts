@@ -20,6 +20,7 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
+import { PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
 import { formatMessage } from './format-message.js'
 import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { RunRegistry } from './run-registry.js'
@@ -47,6 +48,7 @@ export type MaintenanceKind =
   | 'save'
   | 'domain-backfill'
   | 'domain-review'
+  | 'cleanup'
 
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
@@ -262,6 +264,38 @@ export class MaintenanceRunner {
   }
 
   /**
+   * Cleans up the references a user deletion left dangling (the delete flow's follow-up
+   * offer). Deleting the Espresso pages produced FOUR lint finding classes at once — dead
+   * links in 4 files, orphaned drink mentions, stale address_map entries — because deletion
+   * is not a reference-aware operation; this run is the one-click repair, bounded to exactly
+   * the named pages. Titles come from the dashboard's own delete flow, not free text.
+   */
+  startReferenceCleanup(deletedTitles: readonly string[]): MaintenanceRun {
+    const titles = deletedTitles.map((t) => `"${t}"`).join(', ')
+    return this.start(
+      'cleanup',
+      `The user deliberately deleted these wiki pages: ${titles}. The pages are gone (each ` +
+        'deletion was its own git commit); what remains are dangling references. Find every ' +
+        'remaining reference to these page titles across wiki/ (search for the exact titles, ' +
+        'as [[wikilinks]] and as plain-text mentions) and clean them up:\n\n' +
+        '- Remove list entries/bullets that point at the deleted pages in wiki/index.md, ' +
+        'wiki/overview.md, and any _index pages. Adjust page/source counters on the lines ' +
+        'you touch if they are now off.\n' +
+        '- In content pages, convert a dangling [[wikilink]] into plain text; only rewrite ' +
+        'or drop a sentence when it stops making sense without the deleted page.\n' +
+        '- Leave wiki/log.md and wiki/hot.md history entries untouched — they are ' +
+        'append-only records and MAY keep referring to deleted pages.\n' +
+        "- If .raw/.manifest.json has an address_map entry for a deleted page's path, remove " +
+        'exactly that entry. Do not touch other entries and never edit the address counter.\n' +
+        '- Do not delete, rename, or create any page, and do not touch pages that carry no ' +
+        'reference to the deleted ones.\n\n' +
+        'Finish by reporting which files you changed and which references you left in place.',
+      'ingest',
+      { commitMessage: `maintenance: cleanup references (${deletedTitles.join(', ').slice(0, 120)})` },
+    )
+  }
+
+  /**
    * Files every existing wiki page under a registry domain (SPEC.md §12.4 Stufe 2). This is
    * the one-time catch-up for pages written before the registry existed — from here on the
    * ingest system-prompt extension keeps new pages classified.
@@ -453,8 +487,11 @@ export class MaintenanceRunner {
 
       log('info', `maintenance: ${kind} started`)
       // Read the registry per run (it is a user-editable vault page), unless the caller pinned
-      // its own extension text.
-      const systemPromptExtra = opts.systemPromptExtra ?? domainSystemPrompt(readDomainRegistry(this.vaultRoot))
+      // its own extension text. The hygiene checklist rides along for the same reason it does
+      // on ingest runs: any of these runs may write pages.
+      const systemPromptExtra =
+        opts.systemPromptExtra ??
+        [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST].filter(Boolean).join('\n\n')
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
       // can still be committed — but only if we turn out to be the sole writer (F4).
       const dirtyBefore = await dirtyPaths(this.vaultRoot)

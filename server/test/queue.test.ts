@@ -130,6 +130,22 @@ describe('pure helpers', () => {
   })
 })
 
+describe('system-prompt extension', () => {
+  it('every ingest run carries the page-hygiene checklist', async () => {
+    let extra = ''
+    const q = makeQueue({
+      runIngest: async (opts) => {
+        extra = opts.systemPromptExtra ?? ''
+        return okResult()
+      },
+    })
+    q.start()
+    await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
+    await q.onIdle()
+    expect(extra).toContain('<page_hygiene>')
+  })
+})
+
 describe('post-run validation', () => {
   it('runs the validator over written+committed pages and logs findings as warnings', async () => {
     const seen: string[][] = []

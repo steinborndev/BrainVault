@@ -176,6 +176,14 @@ export const api = {
   hotCache: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceRun>),
 
+  /** Reference cleanup after deletions: a bounded agent run over the named pages' dangling refs. */
+  cleanupReferences: (pages: readonly string[]): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pages }),
+    }).then(json<MaintenanceRun>),
+
   research: (topic: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/research`, {
       method: 'POST',

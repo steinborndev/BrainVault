@@ -51,7 +51,8 @@ export const staleLinks = {
   /** Records a deletion. `count` may be 0 (nothing linked here) — then nothing changes. */
   add(count: number, pageTitle: string): void {
     if (count <= 0) return
-    write({ count: cached.count + count, pages: [...cached.pages.slice(-4), pageTitle] })
+    // Deduped: the titles double as the payload for the reference-cleanup run.
+    write({ count: cached.count + count, pages: [...new Set([...cached.pages, pageTitle])].slice(-8) })
   },
   /** Clears the banner (dismissed, or the user headed off to run lint). */
   clear(): void {

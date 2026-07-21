@@ -57,6 +57,26 @@ export function registerMaintenanceRoute(
     return reply.code(202).send(maintenance.startHotCache())
   })
 
+  /**
+   * Reference cleanup after user deletions (the delete flow's follow-up offer): a bounded
+   * agent run over the dangling references the named deletions left behind. Titles are
+   * attacker-adjacent input that ends up in a prompt — enforce shape and size hard.
+   */
+  app.post('/api/v1/maintenance/cleanup', async (req, reply) => {
+    if (credentialMissing(reply)) return reply
+    const body = (req.body ?? {}) as { pages?: unknown }
+    const raw = Array.isArray(body.pages) ? body.pages : []
+    const pages = raw
+      .filter((p): p is string => typeof p === 'string')
+      .map((p) => p.replace(/\s+/g, ' ').trim())
+      .filter((p) => p !== '' && p.length <= 200)
+      .slice(0, 20)
+    if (pages.length === 0) {
+      return reply.code(400).send({ error: 'provide "pages": the deleted page titles to clean up after' })
+    }
+    return reply.code(202).send(maintenance.startReferenceCleanup(pages))
+  })
+
   // The domain backfill (SPEC.md §12.4 Stufe 2). 409 when no registry is installed — the
   // action is meaningless without the closed list it files against.
   app.post('/api/v1/maintenance/domain-backfill', async (_req, reply) => {

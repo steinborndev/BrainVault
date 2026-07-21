@@ -189,6 +189,13 @@ export interface PageFull {
   mtime?: string
 }
 
+/** One advisory finding from the deterministic post-mutation checks (pipeline/validator.ts). */
+export interface ValidationFinding {
+  rule: string
+  path: string
+  message: string
+}
+
 /** Result of a user page edit (PUT /pages) — every edit is one git commit. */
 export interface PageWriteResult {
   ok: boolean
@@ -196,6 +203,8 @@ export interface PageWriteResult {
   mtime: string
   commit: string | null
   committed: boolean
+  /** Advisory checks over the edited page — the edit itself has already landed. */
+  validation?: ValidationFinding[]
 }
 
 /** Result of a user page delete; staleLinks = backlinks that just went dangling. */
@@ -205,6 +214,8 @@ export interface PageDeleteResult {
   staleLinks: number
   commit: string | null
   committed: boolean
+  /** Advisory: e.g. the address_map entry this deletion just made stale. */
+  validation?: ValidationFinding[]
 }
 
 /** A resolved page citation for a chat answer (server/src/pipeline/citations.ts). */
@@ -278,6 +289,7 @@ export type MaintenanceKind =
   | 'save'
   | 'domain-backfill'
   | 'domain-review'
+  | 'cleanup'
 
 /** One meta-category from the vault's domain registry (GET /api/v1/domains, SPEC §12.4). */
 export interface DomainEntry {

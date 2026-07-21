@@ -46,6 +46,35 @@ All wiki content is written in English, regardless of the source language.
 `.trim()
 
 /**
+ * Page-hygiene checklist appended to every vault-WRITING run (ingest, batch ingest, and the
+ * maintenance write kinds). Derived from the recurring finding classes of the 2026-07-19
+ * lint report — each item is a step the ingest skill has demonstrably skipped at least once.
+ * This is the prevention side; the deterministic post-run validator (validator.ts) is the
+ * backstop that catches what still slips through, so the two lists must stay in sync.
+ */
+export const PAGE_HYGIENE_CHECKLIST = `
+<page_hygiene>
+When you create or edit wiki pages, always finish with these checks (a post-run validator
+flags violations to the operator):
+
+- Complete frontmatter on every page you touch: type, status, created, updated, tags.
+  Bump "updated:" on EVERY edit — including on index/hot/overview pages.
+- If scripts/allocate-address.sh exists, every NEW non-meta page needs an allocated
+  "address:" in its frontmatter (run the script once per page; never edit the counter file
+  directly). Do not skip this for any page in a batch.
+- Link every new page from wiki/index.md (and the relevant _index page) so it has at least
+  one inbound link. No orphans.
+- When you add pages or sources, keep the header counters in wiki/index.md and
+  wiki/overview.md consistent with the change — update them together with the body, or
+  leave an explicit note that they are stale.
+- Wikilinks use exact page titles (no trailing "?" or other punctuation drift). Wrap the
+  FIRST mention of an existing entity/concept page in a [[wikilink]] instead of plain text.
+- If you delete or rename a page, update every page linking to it and remove/update its
+  entry in .raw/.manifest.json's address_map.
+</page_hygiene>
+`.trim()
+
+/**
  * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
  * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
  * tells the model why so it doesn't waste turns trying to "file the answer back" (a default

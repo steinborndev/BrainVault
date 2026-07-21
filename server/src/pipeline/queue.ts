@@ -41,6 +41,7 @@ import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
 import { readDomainRegistry, domainSystemPrompt } from './domains.js'
+import { PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -667,7 +668,9 @@ export class IngestQueue {
       timeoutMs: this.timeoutMs,
       // Read per run, not cached: the registry is a vault page the user may edit at any
       // time, and the next ingest should honour the edit without a service restart.
-      systemPromptExtra: domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
+      systemPromptExtra: [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST]
+        .filter(Boolean)
+        .join('\n\n'),
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(job.id, 'info', line)
@@ -864,7 +867,9 @@ export class IngestQueue {
       timeoutMs: this.timeoutMs,
       // Read per run, not cached: the registry is a vault page the user may edit at any
       // time, and the next ingest should honour the edit without a service restart.
-      systemPromptExtra: domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
+      systemPromptExtra: [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST]
+        .filter(Boolean)
+        .join('\n\n'),
       onMessage: (m) => {
         const line = formatMessage(m)
         if (line !== undefined) this.store.log(lead, 'info', line)

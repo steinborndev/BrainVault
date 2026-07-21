@@ -1086,6 +1086,41 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(prompt).toContain('do NOT')
   })
 
+  it('cleanup requires titles, bounds the run to them, and sanitizes the input', async () => {
+    const bad = await fetch(`${baseUrl}/api/v1/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pages: [] }),
+    })
+    expect(bad.status).toBe(400)
+
+    let prompt = ''
+    let extra = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      extra = opts.systemPromptExtra ?? ''
+      return okResult('cleaned 2 references')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pages: ['Espresso', '  Milk\nSteaming  ', 42, ''] }),
+    })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:cleanup')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    // Bounded to exactly the sanitized titles; append-only records are protected.
+    expect(prompt).toContain('"Espresso"')
+    expect(prompt).toContain('"Milk Steaming"')
+    expect(prompt).toContain('log.md')
+    expect(prompt).toContain('address_map')
+    // Write runs carry the page-hygiene checklist (prevention side of the validator).
+    expect(extra).toContain('<page_hygiene>')
+  })
+
   it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',

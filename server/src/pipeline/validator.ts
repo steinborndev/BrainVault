@@ -23,7 +23,14 @@ import path from 'node:path'
 import { parseWikilinks } from './citations.js'
 import type { VaultGraph } from './graph.js'
 
-export type ValidationRule = 'frontmatter' | 'dates' | 'address' | 'dead-link' | 'orphan' | 'address-map'
+export type ValidationRule =
+  | 'frontmatter'
+  | 'dates'
+  | 'address'
+  | 'dead-link'
+  | 'orphan'
+  | 'address-map'
+  | 'stale-counter'
 
 export interface ValidationFinding {
   readonly rule: ValidationRule
@@ -376,7 +383,82 @@ export function validateAddressMap(vaultRoot: string): ValidationFinding[] {
   return findings
 }
 
-/** The standard composition the service wires in: per-page checks + the address_map check. */
+/**
+ * How far a hand-maintained header counter may lag the real count before it is flagged.
+ * The tolerance absorbs legitimate semantic differences (a "Total pages" line that never
+ * counted meta pages); the lint report's real drift cases were 13 and 8 pages behind.
+ */
+const COUNTER_SLACK = 3
+
+/**
+ * The stale-counter check (lint report "Stale Claims"): wiki/index.md and wiki/overview.md
+ * carry hand-maintained "Total pages: N" / "Sources ingested: N" header lines that had
+ * drifted for 3+ ingest sessions because every single-source run correctly deferred fixing
+ * them. Compare the claimed numbers against the counted reality; findings are advisory.
+ */
+export function validateCounters(vaultRoot: string): ValidationFinding[] {
+  const findings: ValidationFinding[] = []
+  const totals = countWikiPages(vaultRoot)
+  if (totals === undefined) return findings
+
+  for (const rel of ['wiki/index.md', 'wiki/overview.md']) {
+    let markdown: string
+    try {
+      markdown = fs.readFileSync(path.join(vaultRoot, rel), 'utf8')
+    } catch {
+      continue
+    }
+    const checks: Array<{ re: RegExp; label: string; actual: number }> = [
+      { re: /(?:total|wiki) pages\D{0,5}(\d+)/i, label: 'pages', actual: totals.pages },
+      { re: /sources ingested\D{0,5}(\d+)/i, label: 'sources', actual: totals.sources },
+    ]
+    for (const { re, label, actual } of checks) {
+      const m = re.exec(markdown)
+      if (!m) continue
+      const claimed = Number(m[1])
+      if (Math.abs(actual - claimed) > COUNTER_SLACK) {
+        findings.push({
+          rule: 'stale-counter',
+          path: rel,
+          message: `header claims ${claimed} ${label} but the vault has ${actual} — update the counter (or drop it from the header)`,
+        })
+      }
+    }
+  }
+  return findings
+}
+
+/** Counts wiki pages and source pages on disk (`_index` hubs excluded from sources). */
+function countWikiPages(vaultRoot: string): { pages: number; sources: number } | undefined {
+  const wikiRoot = path.join(vaultRoot, 'wiki')
+  if (!fs.existsSync(wikiRoot)) return undefined
+  let pages = 0
+  let sources = 0
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries) {
+      const abs = path.join(dir, e.name)
+      if (e.isDirectory()) walk(abs)
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        pages++
+        if (path.basename(dir) === 'sources' && !e.name.startsWith('_')) sources++
+      }
+    }
+  }
+  walk(wikiRoot)
+  return { pages, sources }
+}
+
+/** The standard composition the service wires in: per-page, address_map, and counter checks. */
 export function createValidator(vaultRoot: string, graph?: { build(): VaultGraph }): Validator {
-  return (paths) => [...validatePages(vaultRoot, paths, graph?.build()), ...validateAddressMap(vaultRoot)]
+  return (paths) => [
+    ...validatePages(vaultRoot, paths, graph?.build()),
+    ...validateAddressMap(vaultRoot),
+    ...validateCounters(vaultRoot),
+  ]
 }

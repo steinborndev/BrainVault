@@ -8,7 +8,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { validatePages, validateAddressMap, createValidator, type ValidationFinding } from '../src/pipeline/validator.js'
+import {
+  validatePages,
+  validateAddressMap,
+  validateCounters,
+  createValidator,
+  type ValidationFinding,
+} from '../src/pipeline/validator.js'
 import { GraphBuilder } from '../src/pipeline/graph.js'
 
 let vaultRoot: string
@@ -217,6 +223,27 @@ describe('address_map consistency (2c)', () => {
     expect(validateAddressMap(vaultRoot)).toEqual([])
     write('.raw/.manifest.json', JSON.stringify({ version: 1, sources: {} }))
     expect(validateAddressMap(vaultRoot)).toEqual([])
+  })
+})
+
+describe('stale counters', () => {
+  it('flags header counters that lag the vault by more than the slack', () => {
+    for (let i = 0; i < 6; i++) page(`wiki/concepts/C${i}.md`)
+    for (let i = 0; i < 4; i++) page(`wiki/sources/S${i}.md`, { type: 'source' })
+    write('wiki/index.md', '---\ntype: meta\n---\nTotal pages: 3 | Sources ingested: 4\n')
+    const findings = validateCounters(vaultRoot)
+    // 11 pages on disk vs claimed 3 → flagged; sources 4 vs 4 → fine.
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ rule: 'stale-counter', path: 'wiki/index.md' })
+    expect(findings[0]!.message).toContain('claims 3 pages')
+  })
+
+  it('tolerates small semantic differences and pages without counters', () => {
+    for (let i = 0; i < 6; i++) page(`wiki/concepts/C${i}.md`)
+    // 7 pages on disk, header says 5 — within the slack of 3 (a "content pages only" counter).
+    write('wiki/overview.md', '---\ntype: meta\n---\nWiki pages: 5\n')
+    write('wiki/index.md', '---\ntype: meta\n---\nno counters here\n')
+    expect(validateCounters(vaultRoot)).toEqual([])
   })
 })
 

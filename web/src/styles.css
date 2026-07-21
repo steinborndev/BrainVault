@@ -2181,6 +2181,14 @@ details.hot-cache[open] .hc-summary::before {
   background: var(--border);
   margin: 4px 2px;
 }
+/* Advisory line inside the ⋯ menu (armed delete: "N pages link here"). */
+.omenu-note {
+  max-width: 260px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--warn);
+}
 .graph-canvas-wrap {
   position: relative;
   /* No `flex: 1` here: in a column flex container it sets flex-basis:0 and OVERRIDES the
