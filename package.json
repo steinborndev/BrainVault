@@ -18,7 +18,7 @@
     "web"
   ],
   "scripts": {
-    "test": "npm run test --workspace server",
+    "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace web",
     "lint": "npm run lint --workspace server",
     "ingest": "npm run ingest --workspace server --",

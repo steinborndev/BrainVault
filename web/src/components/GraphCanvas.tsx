@@ -337,6 +337,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Cluster hulls, drawn FIRST so everything else sits on top. Each community becomes a
     // tinted, tag-labelled convex blob — making the graph's implicit structure explicit.
+    //
+    // Region labels are placed in a SECOND pass (placeRegionLabels): each label used to draw
+    // above its OWN hull top with no collision test, so overlapping communities (the central
+    // biomedical stack) buried each other's labels. Now labels are anchored OUTSIDE every
+    // tinted blob and cleared against one another; their boxes then seed the node-label
+    // collision list below so a page title can't overwrite a group label either.
+    const regionLabelBoxes: Array<[number, number, number, number]> = []
     if (clusters !== null) {
       const members = new Map<number, Array<[number, number]>>()
       for (let i = 0; i < nodes.length; i++) {
@@ -348,12 +355,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         ;(members.get(cid) ?? members.set(cid, []).get(cid)!).push([x, y])
       }
       ctx.lineWidth = 1.4 / t.k
+      const paddedHulls = new Map<number, Pt[]>()
       for (const [cid, pts] of members) {
         if (pts.length < 3) continue // 2 points make no area worth tinting
         const hull = convexHull(pts)
         const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
         const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
         const padded = expandHull(hull, cx, cy, 26 / t.k)
+        paddedHulls.set(cid, padded)
         ctx.beginPath()
         traceSmooth(ctx, padded)
         const hue = clusterHue(cid)
@@ -361,15 +370,21 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         ctx.strokeStyle = `hsl(${hue} 60% 60% / 0.4)`
         ctx.fill()
         ctx.stroke()
+      }
+      // Second pass: measure widths (needs the canvas), place collision-free, then draw.
+      ctx.font = `600 ${12 / t.k}px system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      const labelInputs: RegionLabelInput[] = []
+      for (const [cid, pts] of members) {
         const label = clusterLabels?.get(cid)
-        if (label) {
-          ctx.font = `600 ${12 / t.k}px system-ui, sans-serif`
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'bottom'
-          const top = Math.min(...padded.map((p) => p[1]))
-          ctx.fillStyle = `hsl(${hue} 55% 62%)`
-          ctx.fillText(label, cx, top - 4 / t.k)
-        }
+        if (label === undefined || !paddedHulls.has(cid)) continue
+        labelInputs.push({ key: cid, width: ctx.measureText(label).width, weight: pts.length })
+      }
+      for (const p of placeRegionLabels(labelInputs, paddedHulls, 14 / t.k, 6 / t.k)) {
+        ctx.fillStyle = `hsl(${clusterHue(p.key)} 55% 62%)`
+        ctx.fillText(clusterLabels!.get(p.key)!, p.x, p.y)
+        regionLabelBoxes.push(p.box)
       }
     }
 
@@ -495,7 +510,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const labelH = 13 / t.k
     const padX = 2 / t.k
     const halo = cssVar('--bg', '#0d1117')
-    const placed: Array<[number, number, number, number]> = []
+    // Seeded with the region labels so a node title never overwrites a group label.
+    const placed: Array<[number, number, number, number]> = [...regionLabelBoxes]
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
     ctx.lineJoin = 'round'
@@ -1131,6 +1147,139 @@ function expandHull(hull: Pt[], cx: number, cy: number, pad: number): Pt[] {
     const d = Math.hypot(dx, dy) || 1
     return [x + (dx / d) * pad, y + (dy / d) * pad] as Pt
   })
+}
+
+/** Axis-aligned label/hull box: [minX, minY, maxX, maxY]. */
+type Box = [number, number, number, number]
+
+/** Bounds [minX, minY, maxX, maxY] of a polygon. */
+function polygonBounds(poly: Pt[]): Box {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const [x, y] of poly) {
+    if (x < minX) minX = x
+    if (x > maxX) maxX = x
+    if (y < minY) minY = y
+    if (y > maxY) maxY = y
+  }
+  return [minX, minY, maxX, maxY]
+}
+
+const boxesOverlap = (a: Box, b: Box): boolean =>
+  a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
+
+/** Ray-casting point-in-polygon test (polygon is a closed vertex ring). */
+export function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i]![0]
+    const yi = poly[i]![1]
+    const xj = poly[j]![0]
+    const yj = poly[j]![1]
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+/**
+ * True if a label box overlaps the (convex) hull polygon. Cheap and adequate for small labels
+ * against much larger hulls: a box corner inside the hull, or a hull vertex inside the box,
+ * catches every case where a label sitting outside its OWN region would intrude on another.
+ */
+export function boxIntersectsPolygon(box: Box, poly: Pt[]): boolean {
+  const corners: Pt[] = [
+    [box[0], box[1]],
+    [box[2], box[1]],
+    [box[2], box[3]],
+    [box[0], box[3]],
+  ]
+  for (const [x, y] of corners) if (pointInPolygon(x, y, poly)) return true
+  for (const [x, y] of poly) if (x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3]) return true
+  return false
+}
+
+/** A cluster label to place: its hull is `hulls.get(key)`; wider clusters place first. */
+export interface RegionLabelInput {
+  readonly key: number
+  /** Rendered label width in world units. */
+  readonly width: number
+  /** Larger clusters place first (more important, and likelier to find room). */
+  readonly weight: number
+}
+
+export interface PlacedRegionLabel {
+  readonly key: number
+  /** fillText anchor, for textAlign 'center' + textBaseline 'top'. */
+  readonly x: number
+  readonly y: number
+  readonly box: Box
+  /** No collision-free anchor was found; kept above the hull anyway (shown beats dropped). */
+  readonly fallback: boolean
+}
+
+/**
+ * Places region (cluster) labels so each sits OUTSIDE every tinted hull and clears the others.
+ *
+ * Greedy and deterministic: labels place largest-first (weight desc, then key), each taking the
+ * first candidate anchor — above the blob, then its top corners, sides, and below — whose box
+ * hits neither another hull nor an already-placed label. When a dense region leaves no free
+ * anchor, the label falls back to just above its own hull top and is marked `fallback` (a tight
+ * label beats a missing one). Pure geometry: widths are measured by the caller and passed in.
+ */
+export function placeRegionLabels(
+  labels: readonly RegionLabelInput[],
+  hulls: ReadonlyMap<number, Pt[]>,
+  labelH: number,
+  margin: number,
+): PlacedRegionLabel[] {
+  const order = [...labels].sort((a, b) => b.weight - a.weight || a.key - b.key)
+  const placedBoxes: Box[] = []
+  const out: PlacedRegionLabel[] = []
+  for (const label of order) {
+    const own = hulls.get(label.key)
+    if (own === undefined || own.length < 3) continue
+    const [minX, minY, maxX, maxY] = polygonBounds(own)
+    const cx = (minX + maxX) / 2
+    const cy = (minY + maxY) / 2
+    const halfW = label.width / 2
+    const aboveTop = minY - margin - labelH
+    // [centerX, boxTopY], ordered by visual preference.
+    const candidates: Array<[number, number]> = [
+      [cx, aboveTop], // top-center
+      [maxX - halfW, aboveTop], // top, right-aligned to the blob
+      [minX + halfW, aboveTop], // top, left-aligned to the blob
+      [maxX + margin + halfW, cy - labelH / 2], // right
+      [minX - margin - halfW, cy - labelH / 2], // left
+      [cx, maxY + margin], // bottom-center
+    ]
+    let chosen: { x: number; y: number; box: Box } | null = null
+    for (const [x, top] of candidates) {
+      const box: Box = [x - halfW, top, x + halfW, top + labelH]
+      if (placedBoxes.some((p) => boxesOverlap(box, p))) continue
+      let hitsHull = false
+      for (const [cid, poly] of hulls) {
+        if (cid === label.key) continue // a label may sit just outside its OWN blob
+        if (boxIntersectsPolygon(box, poly)) {
+          hitsHull = true
+          break
+        }
+      }
+      if (hitsHull) continue
+      chosen = { x, y: top, box }
+      break
+    }
+    if (chosen === null) {
+      const box: Box = [cx - halfW, aboveTop, cx + halfW, aboveTop + labelH]
+      out.push({ key: label.key, x: cx, y: aboveTop, box, fallback: true })
+      placedBoxes.push(box)
+    } else {
+      out.push({ key: label.key, x: chosen.x, y: chosen.y, box: chosen.box, fallback: false })
+      placedBoxes.push(chosen.box)
+    }
+  }
+  return out
 }
 
 /** Traces a closed, rounded blob through the points using midpoint quadratic curves. */
