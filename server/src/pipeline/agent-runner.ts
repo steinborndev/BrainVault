@@ -24,6 +24,7 @@ import {
   WRITE_TOOLS,
   type RunProfile,
 } from './permissions.js'
+import { createUpstreamGuard } from './upstream-guard.js'
 import { CREDENTIAL_ENV_VARS, type CredentialEnvVar } from '../config.js'
 
 /** Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 15 min)"). */
@@ -151,7 +152,13 @@ export function buildOptions(
   spawnClaudeCodeProcess?: (options: SdkSpawnOptions) => SpawnedProcess,
 ): Options {
   const profile: RunProfile = opts.profile ?? 'ingest'
-  const ctx = { vaultRoot: opts.vaultRoot, profile }
+  const ctx = {
+    vaultRoot: opts.vaultRoot,
+    profile,
+    // Hard rule 5 at the tool level: plugin machinery and shipped doc pages are not
+    // writable by any run. Constructed once per vault root (cached in the module).
+    writeGuard: createUpstreamGuard(opts.vaultRoot).writeRefusalReason,
+  }
   // Web tools stay out of context unless this is a research run; a read-only query run
   // also drops the write tools so the model never even attempts a vault mutation.
   const disallowedTools = [

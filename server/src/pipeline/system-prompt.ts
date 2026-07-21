@@ -71,6 +71,9 @@ flags violations to the operator):
   FIRST mention of an existing entity/concept page in a [[wikilink]] instead of plain text.
 - If you delete or rename a page, update every page linking to it and remove/update its
   entry in .raw/.manifest.json's address_map.
+- Never edit the claude-obsidian plugin's own files: anything outside wiki/ (skills/,
+  scripts/, bin/, docs/, templates, repo-root files) and the shipped reference docs
+  (wiki/references/*, wiki/getting-started.md). Writes there are refused by policy.
 </page_hygiene>
 `.trim()
 

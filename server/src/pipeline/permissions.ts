@@ -95,6 +95,13 @@ export interface PermissionContext {
   readonly vaultRoot: string
   /** The run profile; defaults to `ingest` when omitted (back-compat with M1 call sites). */
   readonly profile?: RunProfile
+  /**
+   * Optional upstream-protection check (hard rule 5): refusal reason for a WRITE-tool
+   * path inside the vault, or undefined to allow. Applied to WRITE_TOOLS only — reads
+   * of plugin files stay unrestricted (skills consult their own docs). Like the bash
+   * denylist, this cannot cover Bash-written files; it is tool-level defense in depth.
+   */
+  readonly writeGuard?: (resolvedPath: string) => string | undefined
 }
 
 /** True when `candidate` is inside `root` (or is `root` itself). */
@@ -203,6 +210,7 @@ export function decidePermission(
 
   // Any tool naming a path must stay inside the vault, whatever it is. This is the
   // guarantee that actually protects the vault, and it is enforced without exception.
+  const isWriteTool = (WRITE_TOOLS as readonly string[]).includes(toolName)
   for (const raw of extractPaths(input)) {
     const resolved = path.resolve(ctx.vaultRoot, raw)
     if (!isInside(ctx.vaultRoot, resolved)) {
@@ -211,6 +219,14 @@ export function decidePermission(
         message:
           `Path is outside the vault and may not be accessed: ${resolved}. ` +
           `All work stays under ${ctx.vaultRoot}.`,
+      }
+    }
+    // Inside the vault, writes additionally respect the plugin boundary (hard rule 5):
+    // the vault clone carries claude-obsidian's own machinery, which no run may edit.
+    if (isWriteTool && ctx.writeGuard !== undefined) {
+      const reason = ctx.writeGuard(resolved)
+      if (reason !== undefined) {
+        return { behavior: 'deny', message: `Refused: ${reason}` }
       }
     }
   }
