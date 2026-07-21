@@ -200,6 +200,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const hoverRef = useRef<number | null>(null)
   hoverRef.current = hover
   const [layouting, setLayouting] = useState(false)
+  // Hover-driven neighborhood spotlight, OFF by default: it dims the rest of the graph and
+  // drops their labels, which makes precise clicking hard as it flickers under the pointer.
+  // A click selection (selectedIndex) still spotlights; this toggle only gates the HOVER one.
+  const [hoverSpotlight, setHoverSpotlight] = useState(false)
+  const hoverSpotlightRef = useRef(hoverSpotlight)
+  hoverSpotlightRef.current = hoverSpotlight
 
   // Neighbor sets for hover highlighting (undirected view of the directed edges).
   const neighbors = useMemo(() => {
@@ -319,13 +325,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // Hover only counts while a pointer is actually over the canvas — a hover index that
     // outlived its pointer (capture edge cases, focus loss) must never keep the graph dimmed.
     const hovered = lastPointerRef.current === null ? null : hoverRef.current
-    const active = hovered ?? selectedIndex ?? focusIndex
+    // Hover only spotlights when the toggle is on; a click selection always does. The hovered
+    // node still keeps its own label + tooltip (via `interactive` below) so pointing still
+    // tells you what a node is — only the neighborhood dimming is gated.
+    const spotHover = hoverSpotlightRef.current ? hovered : null
+    const active = spotHover ?? selectedIndex ?? focusIndex
     const highlight = active !== null ? new Set([active, ...(neighbors.get(active) ?? [])]) : null
     // The transient hover may dim hard; a selection/focus spotlight is long-lived, so it
     // dims gently enough that the rest of the graph stays readable underneath it.
-    const dimNode = hovered !== null ? 0.18 : 0.45
-    const dimEdge = hovered !== null ? 0.08 : 0.18
-    const dimLabel = hovered !== null ? 0.15 : 0.4
+    const dimNode = spotHover !== null ? 0.18 : 0.45
+    const dimEdge = spotHover !== null ? 0.08 : 0.18
+    const dimLabel = spotHover !== null ? 0.15 : 0.4
 
     // Visible world-rect for culling (small margin for radii/labels).
     const margin = 40 / t.k
@@ -1091,6 +1101,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
           +
         </button>
+        <button
+          className={`btn ghost${hoverSpotlight ? ' active' : ''}`}
+          aria-pressed={hoverSpotlight}
+          onClick={() => {
+            setHoverSpotlight((v) => !v)
+            scheduleDraw()
+          }}
+          title="Highlight a node's neighbors on hover (off by default — easier to click when off)"
+        >
+          Hover-Highlight {hoverSpotlight ? 'on' : 'off'}
+        </button>
       </div>
       {overlay}
       {layouting && <div className="graph-status">Laying out…</div>}
@@ -1220,13 +1241,36 @@ export interface PlacedRegionLabel {
 }
 
 /**
- * Places region (cluster) labels so each sits OUTSIDE every tinted hull and clears the others.
+ * Search directions for a label anchor, ordered by visual preference: straight up first, then
+ * the upper diagonals, sides, and finally below. Diagonals are ~unit length (0.7 ≈ 1/√2).
+ */
+const LABEL_DIRECTIONS: ReadonlyArray<Pt> = [
+  [0, -1], // up
+  [0.7, -0.7], // up-right
+  [-0.7, -0.7], // up-left
+  [1, 0], // right
+  [-1, 0], // left
+  [0.7, 0.7], // down-right
+  [-0.7, 0.7], // down-left
+  [0, 1], // down
+]
+
+/** Radial search resolution — how many distance tiers between "touching the hull" and the cap. */
+const LABEL_SEARCH_STEPS = 40
+
+/**
+ * Places region (cluster) labels so each sits OUTSIDE every tinted hull and clears the other
+ * labels.
  *
- * Greedy and deterministic: labels place largest-first (weight desc, then key), each taking the
- * first candidate anchor — above the blob, then its top corners, sides, and below — whose box
- * hits neither another hull nor an already-placed label. When a dense region leaves no free
- * anchor, the label falls back to just above its own hull top and is marked `fallback` (a tight
- * label beats a missing one). Pure geometry: widths are measured by the caller and passed in.
+ * Deterministic ring search, largest cluster first (weight desc, then key): for each label, walk
+ * outward from the cluster centroid in tiers, and within a tier try each direction (up first).
+ * The first position whose box clears every OTHER hull and all already-placed labels wins — the
+ * NEAREST escape, tie-broken toward "above". Walking outward (rather than only touching the own
+ * hull) is what frees a small cluster embedded inside a larger one: its label steps past the
+ * enclosing blob instead of staying buried in it. The search radius derives from the union of
+ * all hulls, so cost and result are zoom-independent. If even the outermost tier is blocked, the
+ * label falls back to just above its own hull and is marked `fallback`. Pure geometry: widths
+ * are measured by the caller and passed in.
  */
 export function placeRegionLabels(
   labels: readonly RegionLabelInput[],
@@ -1234,6 +1278,30 @@ export function placeRegionLabels(
   labelH: number,
   margin: number,
 ): PlacedRegionLabel[] {
+  // Zoom-independent search span from the bounds of every hull together.
+  let uMinX = Infinity
+  let uMinY = Infinity
+  let uMaxX = -Infinity
+  let uMaxY = -Infinity
+  for (const poly of hulls.values()) {
+    const [aX, aY, bX, bY] = polygonBounds(poly)
+    if (aX < uMinX) uMinX = aX
+    if (aY < uMinY) uMinY = aY
+    if (bX > uMaxX) uMaxX = bX
+    if (bY > uMaxY) uMaxY = bY
+  }
+  const span = Math.hypot(uMaxX - uMinX, uMaxY - uMinY) || 1
+  const step = span / LABEL_SEARCH_STEPS
+
+  const clears = (box: Box, ownKey: number, placedBoxes: Box[]): boolean => {
+    if (placedBoxes.some((p) => boxesOverlap(box, p))) return false
+    for (const [cid, poly] of hulls) {
+      if (cid === ownKey) continue // a label may sit just outside its OWN blob
+      if (boxIntersectsPolygon(box, poly)) return false
+    }
+    return true
+  }
+
   const order = [...labels].sort((a, b) => b.weight - a.weight || a.key - b.key)
   const placedBoxes: Box[] = []
   const out: PlacedRegionLabel[] = []
@@ -1243,34 +1311,28 @@ export function placeRegionLabels(
     const [minX, minY, maxX, maxY] = polygonBounds(own)
     const cx = (minX + maxX) / 2
     const cy = (minY + maxY) / 2
+    const hx = (maxX - minX) / 2
+    const hy = (maxY - minY) / 2
     const halfW = label.width / 2
-    const aboveTop = minY - margin - labelH
-    // [centerX, boxTopY], ordered by visual preference.
-    const candidates: Array<[number, number]> = [
-      [cx, aboveTop], // top-center
-      [maxX - halfW, aboveTop], // top, right-aligned to the blob
-      [minX + halfW, aboveTop], // top, left-aligned to the blob
-      [maxX + margin + halfW, cy - labelH / 2], // right
-      [minX - margin - halfW, cy - labelH / 2], // left
-      [cx, maxY + margin], // bottom-center
-    ]
+
     let chosen: { x: number; y: number; box: Box } | null = null
-    for (const [x, top] of candidates) {
-      const box: Box = [x - halfW, top, x + halfW, top + labelH]
-      if (placedBoxes.some((p) => boxesOverlap(box, p))) continue
-      let hitsHull = false
-      for (const [cid, poly] of hulls) {
-        if (cid === label.key) continue // a label may sit just outside its OWN blob
-        if (boxIntersectsPolygon(box, poly)) {
-          hitsHull = true
+    for (let tier = 0; tier <= LABEL_SEARCH_STEPS && chosen === null; tier++) {
+      for (const [dx, dy] of LABEL_DIRECTIONS) {
+        // Distance from centroid to the box CENTER: clear the own hull and half the box in
+        // this direction, plus the margin, plus this tier's outward step.
+        const dist =
+          Math.abs(dx) * (hx + halfW) + Math.abs(dy) * (hy + labelH / 2) + margin + tier * step
+        const centerX = cx + dx * dist
+        const top = cy + dy * dist - labelH / 2
+        const box: Box = [centerX - halfW, top, centerX + halfW, top + labelH]
+        if (clears(box, label.key, placedBoxes)) {
+          chosen = { x: centerX, y: top, box }
           break
         }
       }
-      if (hitsHull) continue
-      chosen = { x, y: top, box }
-      break
     }
     if (chosen === null) {
+      const aboveTop = minY - margin - labelH
       const box: Box = [cx - halfW, aboveTop, cx + halfW, aboveTop + labelH]
       out.push({ key: label.key, x: cx, y: aboveTop, box, fallback: true })
       placedBoxes.push(box)

@@ -3082,6 +3082,10 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 12px;
   padding: 3px 10px;
 }
+.graph-controls .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* Frontmatter shown as properties, the way Obsidian does — not as prose. */
 .page-meta {

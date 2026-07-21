@@ -103,14 +103,16 @@ describe('placeRegionLabels', () => {
     expect(boxIntersectsPolygon(placed!.box, hulls.get(2)!)).toBe(false)
   })
 
-  it('falls back to above-hull (marked) when every anchor is blocked', () => {
-    // Hull B fully surrounds A: no candidate anchor can clear it.
+  it('escapes a hull that encloses it by walking outward to a clear position', () => {
+    // Small hull A embedded inside a large hull B: the ring search must step the label past
+    // B rather than leaving it buried (the #aav-inside-biomedical case).
     const hulls = new Map<number, Pt[]>([
-      [1, sq(0, 0, 10, 10)],
+      [1, sq(-5, -5, 5, 5)],
       [2, sq(-100, -100, 100, 100)],
     ])
     const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], hulls, LABEL_H, MARGIN)
-    expect(placed!.fallback).toBe(true)
+    expect(placed!.fallback).toBe(false)
+    expect(boxIntersectsPolygon(placed!.box, hulls.get(2)!)).toBe(false)
   })
 
   it('places heavier clusters first (deterministic order)', () => {
