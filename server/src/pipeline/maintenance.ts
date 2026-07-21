@@ -353,9 +353,11 @@ export class MaintenanceRunner {
   }
 
   /**
-   * Files every existing wiki page under a registry domain (SPEC.md §12.4 Stufe 2). This is
-   * the one-time catch-up for pages written before the registry existed — from here on the
-   * ingest system-prompt extension keeps new pages classified.
+   * Files every existing wiki page under a registry domain (SPEC.md §12.4 Stufe 2). Two jobs
+   * in one: the catch-up for pages written before the registry existed, and the adoption step
+   * after a human adds a domain — `unassigned` pages are re-classified against the CURRENT
+   * registry on every run, so a new key picks up its backlog on the next backfill. (From here
+   * on the ingest system-prompt extension keeps new pages classified.)
    *
    * Throws when no registry is installed: a backfill with no closed list to file against is
    * exactly the free-for-all this feature exists to end, so it must fail loudly rather than
@@ -380,9 +382,12 @@ export class MaintenanceRunner {
         'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
         `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
         'Rules:\n' +
-        `- A page that already has a valid \`domain:\` from the list keeps it. A page whose current ` +
+        `- A page that already has a REAL domain from the list keeps it. A page whose current ` +
         'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
         '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
+        `- A page carrying \`${UNASSIGNED}\` is NOT settled: re-classify it against the list above — ` +
+        'a domain added after the last backfill may fit it now. It keeps ' +
+        `\`${UNASSIGNED}\` only when still no listed domain fits.\n` +
         `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
         `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
         '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
