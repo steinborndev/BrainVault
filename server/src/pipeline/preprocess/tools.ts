@@ -20,6 +20,7 @@ const TOOL_BINARIES = {
   exiftool: 'exiftool',
   defuddle: 'defuddle',
   ytDlp: 'yt-dlp',
+  deno: 'deno',
 } as const satisfies Record<keyof ToolAvailability, string>
 
 export interface RunResult {

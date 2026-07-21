@@ -6,7 +6,7 @@ import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { IngestQueue, classifyFailure, guessType, sanitizeOriginalName, type IngestRunner } from '../src/pipeline/queue.js'
 import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
-import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
+import { PreprocessError, type PreprocessResult, type ToolAvailability } from '../src/pipeline/preprocess/index.js'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
 const NO_TOOLS: ToolAvailability = {
@@ -18,6 +18,7 @@ const NO_TOOLS: ToolAvailability = {
   exiftool: false,
   defuddle: false,
   ytDlp: false,
+  deno: false,
 }
 
 function okResult(over: Partial<AgentRunResult> = {}): AgentRunResult {
@@ -286,6 +287,73 @@ describe('happy path', () => {
     await q.onIdle()
     expect(urlSeen).toBe('https://example.com/x')
     expect(store.getOrThrow(job.id).status).toBe('done')
+  })
+
+  const urlQueue = (preprocessUrlFn: (input: { jobId: string; jobDir: string }) => Promise<PreprocessResult>) =>
+    new IngestQueue({
+      store,
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      detectToolsFn: async () => NO_TOOLS,
+      commit: async () => ({ committed: true, hash: 'h', committedPages: ['wiki/x.md'] }),
+      refreshHotCache: async () => 'noop',
+      runIngest: async () => okResult(),
+      setTimeoutFn: (fn) => void pausedTimers.push(fn),
+      preprocessUrlFn,
+    })
+
+  it('retries a TRANSIENT preprocess failure (e.g. YouTube bot check) after a delay', async () => {
+    let attempts = 0
+    const q = urlQueue(async (input) => {
+      attempts++
+      if (attempts === 1) throw new PreprocessError('yt-dlp could not read video x: bot check', false, true)
+      fs.mkdirSync(input.jobDir, { recursive: true })
+      return {
+        type: 'web',
+        deferred: false,
+        manifestPath: path.join(input.jobDir, 'manifest.json'),
+        primaryArtifact: `.raw/${input.jobId}/normalized.md`,
+        manifest: {} as never,
+      }
+    })
+    q.start()
+    const { job } = q.enqueueUrl({ url: 'https://www.youtube.com/watch?v=x', source: 'drop' })
+    await q.onIdle()
+    // Parked in `failed` (visible, manually retryable) until the backoff timer fires.
+    expect(store.getOrThrow(job.id).status).toBe('failed')
+    expect(pausedTimers).toHaveLength(1)
+    pausedTimers.shift()!()
+    await q.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('done')
+    expect(attempts).toBe(2)
+  })
+
+  it('gives up on a transient preprocess failure once retries are exhausted', async () => {
+    let attempts = 0
+    const q = urlQueue(async () => {
+      attempts++
+      throw new PreprocessError('still bot-checked', false, true)
+    })
+    q.start()
+    const { job } = q.enqueueUrl({ url: 'https://www.youtube.com/watch?v=x', source: 'drop' })
+    await q.onIdle()
+    while (pausedTimers.length > 0) {
+      pausedTimers.shift()!()
+      await q.onIdle()
+    }
+    expect(store.getOrThrow(job.id).status).toBe('failed')
+    expect(attempts).toBe(3) // initial + maxRetries (2)
+  })
+
+  it('does not schedule a retry for a permanent preprocess failure', async () => {
+    const q = urlQueue(async () => {
+      throw new PreprocessError('Private video', false, false)
+    })
+    q.start()
+    const { job } = q.enqueueUrl({ url: 'https://www.youtube.com/watch?v=x', source: 'drop' })
+    await q.onIdle()
+    expect(store.getOrThrow(job.id).status).toBe('failed')
+    expect(pausedTimers).toHaveLength(0)
   })
 
   it('skips ingest for a duplicate', async () => {

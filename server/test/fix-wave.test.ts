@@ -25,6 +25,7 @@ const NO_TOOLS: ToolAvailability = {
   exiftool: false,
   defuddle: false,
   ytDlp: false,
+  deno: false,
 }
 
 function okResult(over: Partial<AgentRunResult> = {}): AgentRunResult {

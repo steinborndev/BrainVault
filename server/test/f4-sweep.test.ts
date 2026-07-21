@@ -29,6 +29,7 @@ const NO_TOOLS: ToolAvailability = {
   exiftool: false,
   defuddle: false,
   ytDlp: false,
+  deno: false,
 }
 
 const okResult = (): AgentRunResult => ({

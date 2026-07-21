@@ -26,7 +26,14 @@ import type { AgentAuth, AgentRunResult } from './agent-runner.js'
 import { runAgent, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { formatMessage } from './format-message.js'
 import { sha256File } from './hash.js'
-import { preprocess, detectTools, type PreprocessResult, type Manifest, type ToolAvailability } from './preprocess/index.js'
+import {
+  preprocess,
+  detectTools,
+  PreprocessError,
+  type PreprocessResult,
+  type Manifest,
+  type ToolAvailability,
+} from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
 import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
@@ -71,6 +78,12 @@ export interface IngestQueueOptions {
   readonly maxRetries?: number
   /** How long to hold the queue after a usage-limit signal before auto-resuming. */
   readonly rateLimitPauseMs?: number
+  /**
+   * Base delay before retrying a TRANSIENT preprocess failure (e.g. a YouTube bot check
+   * or HTTP 429), scaled linearly by attempt. Unlike agent retries these are delayed:
+   * an immediate retry against a rate-limiting upstream is three fast failures in a row.
+   */
+  readonly preprocessRetryDelayMs?: number
   readonly runIngest?: IngestRunner
   readonly preprocessFile?: typeof preprocess
   readonly preprocessUrlFn?: typeof preprocessUrl
@@ -193,6 +206,7 @@ export class IngestQueue {
   private readonly timeoutMs: number
   private readonly maxRetries: number
   private readonly rateLimitPauseMs: number
+  private readonly preprocessRetryDelayMs: number
   private readonly runIngest: IngestRunner
   private readonly preprocessFile: typeof preprocess
   private readonly preprocessUrlFn: typeof preprocessUrl
@@ -225,6 +239,7 @@ export class IngestQueue {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.maxRetries = opts.maxRetries ?? 2
     this.rateLimitPauseMs = opts.rateLimitPauseMs ?? 60_000
+    this.preprocessRetryDelayMs = opts.preprocessRetryDelayMs ?? 60_000
     this.runIngest = opts.runIngest ?? ((o) => runAgent(o))
     this.preprocessFile = opts.preprocessFile ?? preprocess
     this.preprocessUrlFn = opts.preprocessUrlFn ?? preprocessUrl
@@ -578,6 +593,7 @@ export class IngestQueue {
         log: `preprocessing failed: ${message}`,
         level: 'error',
       })
+      if (err instanceof PreprocessError && err.transient) this.schedulePreprocessRetry(job.id)
       return
     }
 
@@ -917,6 +933,35 @@ export class IngestQueue {
     const deferredDir = path.join(this.vaultRoot, '.raw', 'deferred')
     fs.mkdirSync(deferredDir, { recursive: true })
     fs.renameSync(src, path.join(deferredDir, `${job.id}-${job.original_name}`))
+  }
+
+  /**
+   * Retries a transient preprocess failure (bot check, upstream 429, timeout) after a
+   * linear-backoff delay. The job sits in `failed` until the timer fires — visible and
+   * manually retryable the whole time — then requeues itself; a manual retry or cancel
+   * in the meantime wins (the timer checks the status before touching the job). Unlike
+   * a usage-limit pause this never parks the whole queue: only this job waits.
+   */
+  private schedulePreprocessRetry(jobId: string): void {
+    const attempt = this.store.incrementAttempts(jobId)
+    if (attempt > this.maxRetries) {
+      this.store.log(jobId, 'error', `gave up after ${attempt} attempt(s) — preprocess retries exhausted`)
+      return
+    }
+    const delayMs = this.preprocessRetryDelayMs * attempt
+    this.store.log(
+      jobId,
+      'info',
+      `transient preprocess failure — retry ${attempt}/${this.maxRetries} in ${Math.round(delayMs / 1000)}s`,
+    )
+    this.setTimeoutFn(() => {
+      if (!this.running) return
+      if (this.store.get(jobId)?.status !== 'failed') return // manually retried or cancelled meanwhile
+      this.store.transition(jobId, 'queued', {
+        log: `retry ${attempt}/${this.maxRetries} after transient preprocess failure`,
+      })
+      this.pump()
+    }, delayMs)
   }
 
   private pauseForRateLimit(jobId: string, errorText?: string): void {

@@ -14,6 +14,7 @@ const NO_TOOLS: ToolAvailability = {
   exiftool: false,
   defuddle: false,
   ytDlp: false,
+  deno: false,
 }
 
 let vaultRoot: string

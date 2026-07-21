@@ -4,6 +4,7 @@ import path from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { assessExtractedContent, MIN_WEB_CONTENT_CHARS } from '../src/pipeline/preprocess/web.js'
 import {
+  diagnoseYtDlpFailure,
   findUrlHandler,
   formatTweetMarkdown,
   matchTweetUrl,
@@ -26,6 +27,7 @@ const NO_TOOLS: ToolAvailability = {
   exiftool: false,
   defuddle: false,
   ytDlp: false,
+  deno: false,
 }
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'url-handlers-'))
@@ -187,7 +189,81 @@ describe('matchYoutubeUrl', () => {
   })
 })
 
+describe('diagnoseYtDlpFailure', () => {
+  // What runTool actually produces: Node's "Command failed" line first, stderr appended.
+  const wrap = (stderr: string) => `yt-dlp failed: Command failed: yt-dlp --skip-download …\n${stderr}`
+
+  it('classifies the bot check as transient and surfaces the ERROR line, not the command line', () => {
+    const d = diagnoseYtDlpFailure(
+      wrap('ERROR: [youtube] abc123: Sign in to confirm you’re not a bot. Use --cookies-from-browser …'),
+    )
+    expect(d.kind).toBe('bot-check')
+    expect(d.transient).toBe(true)
+    expect(d.detail).toMatch(/^ERROR: .*Sign in to confirm/)
+  })
+
+  it('classifies HTTP 429 as transient', () => {
+    const d = diagnoseYtDlpFailure(wrap('ERROR: [youtube] abc123: HTTP Error 429: Too Many Requests'))
+    expect(d.kind).toBe('rate-limited')
+    expect(d.transient).toBe(true)
+  })
+
+  it('classifies definitive failures as permanent', () => {
+    const cases: Array<[string, string]> = [
+      ['ERROR: [youtube] abc123: Private video. Sign in if you’ve been granted access', 'private'],
+      ['ERROR: [youtube] abc123: Join this channel to get access to members-only content', 'members-only'],
+      ['ERROR: [youtube] abc123: The uploader has not made this video available in your country', 'geo-blocked'],
+      ['ERROR: [youtube] abc123: Video unavailable', 'unavailable'],
+      ['ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users.', 'age-restricted'],
+    ]
+    for (const [stderr, kind] of cases) {
+      const d = diagnoseYtDlpFailure(wrap(stderr))
+      expect(d.kind, stderr).toBe(kind)
+      expect(d.transient, stderr).toBe(false)
+    }
+  })
+
+  it('uses the LAST ERROR line (warnings and earlier errors are context, not cause)', () => {
+    const d = diagnoseYtDlpFailure(
+      wrap(
+        'WARNING: [youtube] abc123: Unable to download webpage: HTTP Error 429: Too Many Requests\nERROR: [youtube] abc123: Sign in to confirm you’re not a bot.',
+      ),
+    )
+    expect(d.kind).toBe('bot-check')
+  })
+
+  it('falls back to unknown/permanent with an update hint', () => {
+    const d = diagnoseYtDlpFailure(wrap('ERROR: [youtube] abc123: Unsupported gizmo frobnication'))
+    expect(d.kind).toBe('unknown')
+    expect(d.transient).toBe(false)
+    expect(d.advice).toMatch(/updating yt-dlp/)
+  })
+})
+
 describe('youtubeHandler', () => {
+  const TOOLS = { ...NO_TOOLS, ytDlp: true, deno: true }
+  const BOT_CHECK = 'yt-dlp failed: Command failed: yt-dlp\nERROR: [youtube] x: Sign in to confirm you’re not a bot.'
+  const clientOf = (args: readonly string[]) => {
+    const i = args.indexOf('--extractor-args')
+    return i === -1 ? undefined : /player_client=(\w+)/.exec(args[i + 1] ?? '')?.[1]
+  }
+  const writeArtifacts = (jobDir: string) => {
+    fs.writeFileSync(
+      path.join(jobDir, 'video.info.json'),
+      JSON.stringify({
+        id: 'dQw4w9WgXcQ',
+        title: 'A Video',
+        channel: 'A Channel',
+        upload_date: '20260101',
+        duration_string: '3:32',
+        description: 'About things.',
+        webpage_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        formats: [{ url: 'https://signed.example/ephemeral' }],
+      }),
+    )
+    fs.writeFileSync(path.join(jobDir, 'video.en.vtt'), 'WEBVTT\n\n00:00.000 --> 00:02.000\nhello world\n')
+  }
+
   it('fails with an actionable message when yt-dlp is missing', async () => {
     await expect(
       youtubeHandler.handle({
@@ -197,6 +273,89 @@ describe('youtubeHandler', () => {
         fetchText: async () => '',
       }),
     ).rejects.toThrow(/yt-dlp is not installed/)
+  })
+
+  it('falls back to the android player client when the web client hits the bot check', async () => {
+    const jobDir = tmpDir()
+    const calls: string[][] = []
+    const result = await youtubeHandler.handle({
+      url: new URL('https://youtu.be/dQw4w9WgXcQ'),
+      jobDir,
+      tools: TOOLS,
+      fetchText: async () => '',
+      runTool: async (_bin, args) => {
+        calls.push([...args])
+        if (clientOf(args) === undefined) throw new Error(BOT_CHECK)
+        writeArtifacts(jobDir)
+        return { stdout: '', stderr: '' }
+      },
+    })
+    expect(calls).toHaveLength(2)
+    expect(clientOf(calls[1]!)).toBe('android')
+    expect(result.markdown).toContain('# A Video')
+    expect(result.markdown).toContain('hello world')
+    expect(result.notes.join('; ')).toMatch(/blocked \(bot-check\).*android/)
+    // Raw artifact is the reduced video.json; the huge info dump with signed URLs is gone.
+    expect(JSON.parse(fs.readFileSync(path.join(jobDir, 'video.json'), 'utf8')).title).toBe('A Video')
+    expect(fs.existsSync(path.join(jobDir, 'video.info.json'))).toBe(false)
+  })
+
+  it('throws a TRANSIENT PreprocessError when every client is bot-checked', async () => {
+    const err = await youtubeHandler
+      .handle({
+        url: new URL('https://youtu.be/dQw4w9WgXcQ'),
+        jobDir: tmpDir(),
+        tools: TOOLS,
+        fetchText: async () => '',
+        runTool: async () => {
+          throw new Error(BOT_CHECK)
+        },
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e as PreprocessError,
+      )
+    expect(err).toBeInstanceOf(PreprocessError)
+    expect(err!.transient).toBe(true)
+    expect(err!.message).toMatch(/bot check/i)
+    expect(err!.message).not.toMatch(/may be private/)
+  })
+
+  it('fails fast and permanently on a private video — no client chain, no retry flag', async () => {
+    const calls: string[][] = []
+    const err = await youtubeHandler
+      .handle({
+        url: new URL('https://youtu.be/dQw4w9WgXcQ'),
+        jobDir: tmpDir(),
+        tools: TOOLS,
+        fetchText: async () => '',
+        runTool: async (_bin, args) => {
+          calls.push([...args])
+          throw new Error('yt-dlp failed: Command failed: yt-dlp\nERROR: [youtube] x: Private video.')
+        },
+      })
+      .then(
+        () => undefined,
+        (e: unknown) => e as PreprocessError,
+      )
+    expect(calls).toHaveLength(1)
+    expect(err!.transient).toBe(false)
+    expect(err!.message).toMatch(/private/i)
+  })
+
+  it('notes missing deno instead of failing', async () => {
+    const jobDir = tmpDir()
+    const result = await youtubeHandler.handle({
+      url: new URL('https://youtu.be/dQw4w9WgXcQ'),
+      jobDir,
+      tools: { ...TOOLS, deno: false },
+      fetchText: async () => '',
+      runTool: async () => {
+        writeArtifacts(jobDir)
+        return { stdout: '', stderr: '' }
+      },
+    })
+    expect(result.notes.join('; ')).toMatch(/deno .*not installed/)
   })
 })
 

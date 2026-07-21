@@ -25,6 +25,8 @@ export interface UrlHandlerContext {
   readonly tools: ToolAvailability
   /** SSRF-guarded, size-capped fetch provided by `preprocessUrl`. */
   readonly fetchText: (url: string) => Promise<string>
+  /** External-tool runner — injectable so tests can fake yt-dlp; defaults to the real one. */
+  readonly runTool?: typeof runTool
 }
 
 export interface UrlHandlerResult {
@@ -235,6 +237,106 @@ interface YtMetadata {
   readonly webpage_url?: string
 }
 
+export type YtFailureKind =
+  | 'bot-check'
+  | 'rate-limited'
+  | 'timeout'
+  | 'private'
+  | 'members-only'
+  | 'age-restricted'
+  | 'geo-blocked'
+  | 'unavailable'
+  | 'unknown'
+
+export interface YtDlpDiagnosis {
+  readonly kind: YtFailureKind
+  /** True when a later retry (cooled-down IP, different client) may succeed as-is. */
+  readonly transient: boolean
+  /** The decisive `ERROR:` line from yt-dlp's stderr, or the first message line as fallback. */
+  readonly detail: string
+  /** One actionable sentence for the job error. */
+  readonly advice: string
+}
+
+/**
+ * Extracts and classifies the real yt-dlp failure. yt-dlp writes the decisive line to
+ * stderr as `ERROR: …`; `runTool` appends stderr to the error message, but Node's own
+ * "Command failed: <argv>" line comes first — so grabbing the first line (the old
+ * behavior) reported the command, not the cause, and the handler could only guess.
+ */
+export function diagnoseYtDlpFailure(message: string): YtDlpDiagnosis {
+  const errLines = message.split('\n').filter((l) => /^\s*ERROR:/.test(l))
+  const detail = (errLines.at(-1) ?? message.split('\n')[0] ?? message).trim()
+  const scope = errLines.length > 0 ? errLines.join('\n') : message
+  const found = (re: RegExp) => re.test(scope)
+
+  if (found(/sign in to confirm you.{1,3}re not a bot/i)) {
+    return {
+      kind: 'bot-check',
+      transient: true,
+      detail,
+      advice:
+        "YouTube's bot check blocked this request — usually temporary and tied to this IP, not to the video. Retrying later often succeeds.",
+    }
+  }
+  if (found(/429|too many requests/i)) {
+    return {
+      kind: 'rate-limited',
+      transient: true,
+      detail,
+      advice: 'YouTube is rate-limiting this IP (HTTP 429). Wait a while and retry.',
+    }
+  }
+  if (found(/timed? ?out|ETIMEDOUT|SIGTERM|SIGKILL/i)) {
+    return { kind: 'timeout', transient: true, detail, advice: 'The yt-dlp call timed out. Retry later.' }
+  }
+  if (found(/private video/i)) {
+    return { kind: 'private', transient: false, detail, advice: 'The video is private and cannot be ingested.' }
+  }
+  if (found(/members-only|join this channel/i)) {
+    return {
+      kind: 'members-only',
+      transient: false,
+      detail,
+      advice: 'The video is members-only and cannot be ingested without an account.',
+    }
+  }
+  if (found(/age.restricted|confirm your age|inappropriate for some users/i)) {
+    return {
+      kind: 'age-restricted',
+      transient: false,
+      detail,
+      advice: 'The video is age-restricted and cannot be ingested without an account.',
+    }
+  }
+  if (found(/available in your country|geo.?(restrict|block)|blocked it in your country/i)) {
+    return { kind: 'geo-blocked', transient: false, detail, advice: 'The video is region-locked for this IP.' }
+  }
+  if (found(/video unavailable|has been removed|no longer available|account.{1,40}terminated/i)) {
+    return { kind: 'unavailable', transient: false, detail, advice: 'The video has been removed or never existed.' }
+  }
+  return {
+    kind: 'unknown',
+    transient: false,
+    detail,
+    advice: 'Unrecognized yt-dlp failure — if this repeats, updating yt-dlp usually helps.',
+  }
+}
+
+/**
+ * Player clients to try in order. YouTube's bot check targets clients individually — the
+ * default web client is blocked most often, while android/tv frequently still work
+ * (verified 2026-07-21 against a bot-checked IP: web blocked, android fine). The chain
+ * only advances on transient failures; definitive answers (private, removed, …) are
+ * final no matter the client. Which workaround client works shifts as YouTube reacts,
+ * so the chain is data, not logic.
+ */
+const YT_CLIENT_CHAIN: ReadonlyArray<string | undefined> = [undefined, 'android', 'tv']
+
+/** Output stem for everything the combined yt-dlp call writes into the job dir. */
+const YT_STEM = 'video'
+const YT_SUB_RE = /^video\.(.+)\.vtt$/
+
 function formatUploadDate(yyyymmdd: string | undefined): string | undefined {
   if (!yyyymmdd || !/^\d{8}$/.test(yyyymmdd)) return yyyymmdd
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`
@@ -252,51 +354,83 @@ export const youtubeHandler: UrlHandler = {
       )
     }
 
+    const run = ctx.runTool ?? runTool
     const notes: string[] = []
-    let meta: YtMetadata
-    try {
-      const { stdout } = await runTool(
-        'yt-dlp',
-        ['--dump-json', '--skip-download', '--no-playlist', m.videoUrl],
-        { timeoutMs: 90_000 },
-      )
-      meta = JSON.parse(stdout) as YtMetadata
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      throw new PreprocessError(
-        `yt-dlp could not read video ${m.videoId}: ${msg.split('\n')[0]} — the video may be private, members-only, or region-locked.`,
+    if (!ctx.tools.deno) {
+      notes.push(
+        'deno (JS runtime) is not installed — yt-dlp runs degraded and trips YouTube bot checks more often; scripts/install-preprocessing-tools.sh installs it',
       )
     }
 
-    // Subtitles are best-effort: a video without captions still has title + description.
-    try {
-      await runTool(
-        'yt-dlp',
-        [
-          '--skip-download',
-          '--no-playlist',
-          '--write-subs',
-          '--write-auto-subs',
-          '--sub-langs',
-          'de,en',
-          '--sub-format',
-          'vtt',
-          '-P',
-          ctx.jobDir,
-          '-o',
-          'subs',
-          m.videoUrl,
-        ],
-        { timeoutMs: 120_000 },
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      notes.push(`subtitle download failed: ${msg.split('\n')[0]}`)
+    // One combined call per client: metadata (--write-info-json) and subtitles together.
+    // The old two-call design (metadata dump, then subtitle download) hit YouTube twice
+    // per job — double the exposure to rate limits and bot checks. Subtitles stay
+    // best-effort: --ignore-errors keeps yt-dlp going when a caption download 429s
+    // (without it a subtitle error aborts BEFORE the metadata is written — measured
+    // 2026-07-21), so "did video.info.json land on disk" is the success criterion, not
+    // the exit code, which --ignore-errors makes unreliable in both directions.
+    const infoPath = path.join(ctx.jobDir, `${YT_STEM}.info.json`)
+    let stderrText = ''
+    let lastDiagnosis: YtDlpDiagnosis | undefined
+    for (const client of YT_CLIENT_CHAIN) {
+      try {
+        const res = await run(
+          'yt-dlp',
+          [
+            '--skip-download',
+            '--no-playlist',
+            '--ignore-errors',
+            '--write-info-json',
+            '--write-subs',
+            '--write-auto-subs',
+            '--sub-langs',
+            'de,en',
+            '--sub-format',
+            'vtt',
+            '-P',
+            ctx.jobDir,
+            '-o',
+            YT_STEM,
+            ...(client !== undefined ? ['--extractor-args', `youtube:player_client=${client}`] : []),
+            m.videoUrl,
+          ],
+          { timeoutMs: 120_000 },
+        )
+        stderrText = res.stderr
+      } catch (err) {
+        stderrText = err instanceof Error ? err.message : String(err)
+      }
+      if (fs.existsSync(infoPath)) {
+        if (client !== undefined) {
+          notes.push(
+            `default web client was blocked (${lastDiagnosis?.kind ?? 'unknown'}) — fetched via ${client} player client`,
+          )
+        }
+        const subError = stderrText.split('\n').find((l) => /ERROR:.*subtitle/i.test(l))
+        if (subError !== undefined) notes.push(`subtitle download failed: ${subError.trim()}`)
+        break
+      }
+      lastDiagnosis = diagnoseYtDlpFailure(stderrText)
+      if (!lastDiagnosis.transient) break // private/removed/… is final on every client
     }
+    if (!fs.existsSync(infoPath)) {
+      const d = lastDiagnosis ?? diagnoseYtDlpFailure(stderrText)
+      const triedNote = d.transient ? ` (tried ${YT_CLIENT_CHAIN.length} player clients)` : ''
+      throw new PreprocessError(
+        `yt-dlp could not read video ${m.videoId}${triedNote}: ${d.detail} — ${d.advice}`,
+        false,
+        d.transient,
+      )
+    }
+
+    // The full info dump is huge and carries short-lived signed format URLs — noise in a
+    // committed .raw dir. Reduce it to video.json (the durable raw artifact) and drop it.
+    const meta = JSON.parse(fs.readFileSync(infoPath, 'utf8')) as YtMetadata
+    fs.rmSync(infoPath)
 
     const subFiles = fs
       .readdirSync(ctx.jobDir)
-      .map((f) => /^subs\.(.+)\.vtt$/.exec(f))
+      .map((f) => YT_SUB_RE.exec(f))
       .filter((x): x is RegExpExecArray => x !== null)
     const langs = subFiles.map((x) => x[1]!)
     const lang = pickSubtitleLang(langs)

@@ -63,6 +63,8 @@ export interface ToolAvailability {
   readonly exiftool: boolean
   readonly defuddle: boolean
   readonly ytDlp: boolean
+  /** JS runtime yt-dlp needs for robust YouTube extraction (EJS); optional but recommended. */
+  readonly deno: boolean
 }
 
 export interface Manifest {
@@ -100,6 +102,12 @@ export class PreprocessError extends Error {
     message: string,
     /** True when the input was refused for safety (e.g. disguised executable). */
     readonly refused = false,
+    /**
+     * True when a later retry may succeed without anyone fixing anything (e.g. a YouTube
+     * bot check or HTTP 429). The queue retries these like transient agent failures
+     * instead of failing the job on the first attempt.
+     */
+    readonly transient = false,
   ) {
     super(message)
   }
