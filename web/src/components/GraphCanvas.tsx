@@ -60,6 +60,11 @@ export interface GraphCanvasProps {
    */
   fitKey?: string
   onSelect: (node: GraphNode) => void
+  /**
+   * Double-click / double-tap on a node. The click-vs-open split mirrors every file
+   * manager: single opens the explorer panel, double navigates to the page itself.
+   */
+  onOpen?: (node: GraphNode) => void
   /** Extra UI rendered inside the canvas wrap (e.g. the search box, top-right). */
   overlay?: React.ReactNode
 }
@@ -122,6 +127,9 @@ function clusterHue(id: number): number {
   return (id * 47) % 360
 }
 
+/** Two taps on the SAME node within this window are a double-tap (opens the page). */
+const DOUBLE_TAP_MS = 350
+
 /** A layout with at least this share of never-placed nodes restarts cold instead of reheating. */
 const COLD_RESTART_SHARE = 0.2
 /** How long a newly appeared node flashes, ms. */
@@ -168,7 +176,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, onOpen, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -770,6 +778,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const pinch = useRef<{ dist: number; k: number } | null>(null)
   /** True from pinch start until the last finger lifts — suppresses the tap-select. */
   const pinchedRef = useRef(false)
+  /**
+   * The previous tap, for double-tap detection. Hand-rolled (not onDoubleClick) because it
+   * must work for touch too, and keyed by PATH, not index — a live update between the two
+   * taps shifts indices, and opening the wrong page would be worse than missing the gesture.
+   */
+  const lastTapRef = useRef<{ time: number; path: string } | null>(null)
 
   const onPointerDown = (e: React.PointerEvent): void => {
     ;(e.target as Element).setPointerCapture(e.pointerId)
@@ -823,7 +837,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       pinchedRef.current = false
       if (!wasDrag && !wasPinch) {
         const hit = hitTest(e.clientX, e.clientY)
-        if (hit !== null) onSelect(nodes[hit]!)
+        if (hit !== null) {
+          const node = nodes[hit]!
+          const last = lastTapRef.current
+          const now = performance.now()
+          if (onOpen !== undefined && last !== null && last.path === node.path && now - last.time < DOUBLE_TAP_MS) {
+            lastTapRef.current = null
+            onOpen(node)
+          } else {
+            lastTapRef.current = { time: now, path: node.path }
+            onSelect(node)
+          }
+        } else {
+          lastTapRef.current = null
+        }
       }
       // A pan/pinch moved the world under the cursor while hover updates were suppressed —
       // re-resolve now instead of leaving whatever was highlighted when the drag began.
@@ -857,6 +884,32 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const handler = (e: WheelEvent): void => onWheelRef.current(e)
     canvas.addEventListener('wheel', handler, { passive: false })
     return () => canvas.removeEventListener('wheel', handler)
+  }, [])
+
+  // View shortcuts: f = fit, +/− = zoom. Window-level because the canvas isn't focusable
+  // (role="img"); the ref indirection keeps one stable listener (same pattern as the wheel).
+  // Guarded against typing contexts and against firing while another tab is shown — tabs
+  // stay MOUNTED but hidden (App.tsx), and a hidden element has no offsetParent.
+  const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  onKeyRef.current = (e: KeyboardEvent): void => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    const el = e.target as HTMLElement
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable) return
+    const canvas = canvasRef.current
+    if (canvas === null || canvas.offsetParent === null) return
+    if (e.key === 'f') {
+      userMovedRef.current = false
+      fitToView()
+    } else if (e.key === '+' || e.key === '=') {
+      zoomBy(1.4)
+    } else if (e.key === '-') {
+      zoomBy(1 / 1.4)
+    }
+  }
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => onKeyRef.current(e)
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
   }, [])
 
   return (
@@ -908,11 +961,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
               missing page · {nodes[hover]!.in} page{nodes[hover]!.in === 1 ? '' : 's'} link here
             </span>
           ) : (
-            <span>
-              {nodes[hover]!.path}
-              {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
-              {nodes[hover]!.out} out
-            </span>
+            <>
+              <span>
+                {nodes[hover]!.path}
+                {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
+                {nodes[hover]!.out} out
+              </span>
+              {onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>}
+            </>
           )}
         </div>
       )}

@@ -3295,3 +3295,55 @@ details.hot-cache[open] .hc-summary::before {
 .credential-kind.selected { border-color: var(--accent); }
 .credential-kind input[type='radio'] { display: none; }
 .credential-kind-title { font-weight: 600; font-size: 13px; }
+
+/* ---- Keyboard hints (vault view shortcuts, 2026-07-21) ---- */
+
+/* A key chip — used in the shortcut legend and the page-head Esc hint. */
+kbd {
+  font: 600 10.5px/1.7 ui-monospace, 'SF Mono', Menlo, monospace;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+/* The subtle "Esc = graph" hint in the page-view head. */
+.key-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* The shortcut legend inside the viewbar's ⓘ tip: keys right-aligned, meanings left. */
+.shortcuts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: baseline;
+}
+.shortcuts .k {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+/* The viewbar tip sits at the top of the content — drop its bubble DOWN and anchor it to
+   the right edge, or it would open upward into the header / off-screen. */
+.viewbar .tip-body {
+  top: calc(100% + 8px);
+  bottom: auto;
+  left: auto;
+  right: 0;
+  transform: none;
+  width: 300px;
+}
+/* The "double-click to open" line in the canvas hover tooltip. */
+.graph-tooltip .tt-hint {
+  font-style: italic;
+  margin-top: 1px;
+}
