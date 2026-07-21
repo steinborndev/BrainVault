@@ -163,9 +163,15 @@ describe('dead links', () => {
     expect(findings[1]!.message).toContain('[[wiki-cli]]')
   })
 
-  it('never checks links on a lint report — it quotes dead links on purpose', () => {
+  it('never checks links on lint reports or the append-only log/hot pages', () => {
     page('wiki/meta/lint-report-2026-07-19.md', { type: 'meta' }, 'Finding: [[Deleted Page]] is dead.\n')
-    expect(validatePages(vaultRoot, ['wiki/meta/lint-report-2026-07-19.md'])).toEqual([])
+    // log.md gets appended to by EVERY ingest — flagging its historical links would repeat
+    // the identical findings after every run.
+    page('wiki/log.md', { type: 'meta' }, 'Ingested [[Deleted Page]] back in the day.\n')
+    page('wiki/hot.md', { type: 'meta' }, 'Recent: [[Deleted Page]].\n')
+    expect(
+      validatePages(vaultRoot, ['wiki/meta/lint-report-2026-07-19.md', 'wiki/log.md', 'wiki/hot.md']),
+    ).toEqual([])
   })
 })
 

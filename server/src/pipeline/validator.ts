@@ -61,6 +61,15 @@ const ADDRESS_RE = /^[cl]-\d{6}$/
  */
 const isLintReport = (rel: string): boolean => /^wiki\/meta\/lint-report-.*\.md$/.test(rel)
 
+/**
+ * Pages exempt from the dead-link check: lint reports (above), plus log.md and hot.md —
+ * append-only records that legitimately keep referring to deleted pages (the same policy the
+ * reference-cleanup run enforces). Every ingest appends to log.md, so flagging its historical
+ * links would repeat the identical findings after every single run.
+ */
+const skipLinkCheck = (rel: string): boolean =>
+  isLintReport(rel) || rel === 'wiki/log.md' || rel === 'wiki/hot.md'
+
 const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, '')
 
 interface Frontmatter {
@@ -297,7 +306,7 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
       }
     }
 
-    const targets = isLintReport(rel) ? [] : linkTargets(markdown)
+    const targets = skipLinkCheck(rel) ? [] : linkTargets(markdown)
     if (targets.length > 0) {
       fileIndex ??= buildFileIndex(vaultRoot)
       for (const t of targets) {
