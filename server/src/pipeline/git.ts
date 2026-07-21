@@ -155,22 +155,30 @@ export async function commitVault(
   opts: CommitOptions = {},
 ): Promise<CommitResult> {
   const targeted = (opts.pathspec ?? []).filter((p) => fs.existsSync(path.join(vaultRoot, p)))
-  if (opts.pathspec !== undefined && targeted.length > 0) {
-    await git(vaultRoot, ['add', '--', ...targeted])
-    const staged = await git(vaultRoot, ['diff', '--cached', '--name-only'])
-    // Nothing matched (e.g. pages were written by a route we didn't observe) → stage all,
-    // so the working tree never silently accumulates changes.
-    if (staged.trim() === '') await git(vaultRoot, ['add', '-A'])
+  if (opts.pathspec !== undefined) {
+    // Explicit pathspec: stage ONLY these paths, and NEVER fall back to `git add -A`. A
+    // pathspec that matches nothing on disk means this run wrote nothing of its own that
+    // survives — falling back to `add -A` here is precisely what swept an interrupted ingest's
+    // orphaned pages into an unrelated maintenance commit (the 2026-07-21 Q8/Q14 incident).
+    // Draining orphaned dirty pages is startup reconciliation's job (queue.reconcileInterrupted),
+    // never any run's own commit. The old fallback existed "so the tree never silently
+    // accumulates changes"; that trade — mis-attributing another run's work vs. leaving it for
+    // reconciliation — is the wrong one, so it is gone.
+    if (targeted.length > 0) await git(vaultRoot, ['add', '--', ...targeted])
   } else {
+    // Legacy no-pathspec callers keep the coarse `add -A` behaviour.
     await git(vaultRoot, ['add', '-A'])
   }
 
-  const staged = await git(vaultRoot, ['status', '--porcelain'])
+  // Gate on what is actually STAGED, not the whole working tree: with the fallback gone, a
+  // pathspec that matched nothing leaves the tree dirty (orphans) but the index empty, and a
+  // bare `git commit` would then fail. `diff --cached` sees only what this call staged.
+  const staged = await git(vaultRoot, ['diff', '--cached', '--name-only'])
   if (staged.trim() === '') {
     return {
       committed: false,
       committedPages: [],
-      note: 'nothing to commit (a concurrent job likely committed the changes)',
+      note: 'nothing to commit (no matching paths staged; a concurrent job may have committed them)',
     }
   }
   await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message])

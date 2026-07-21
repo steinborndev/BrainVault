@@ -376,14 +376,26 @@ export class JobStore {
   }
 
   /**
-   * Reconciles jobs stranded in an active state (`preprocessing`/`ingesting`) by an abrupt
-   * stop — a WSL restart, a crash, a SIGKILL. The worker that owned them is gone, so they can
-   * never progress on their own. Mark them `failed` with an interrupted reason: this makes
-   * them diagnosable and one-click retryable (SPEC.md §10 M5), which is how in-flight work
-   * "resumes" after a restart. We deliberately do NOT auto-re-run them — an `ingesting` job
-   * may have partially written the vault, and silently replaying a mid-commit write risks
-   * vault integrity (hard rule 1). `queued` jobs are untouched; the queue resumes those itself.
-   * Returns the ids recovered. Idempotent (a second call finds nothing active).
+   * Jobs stranded in an active state (`preprocessing`/`ingesting`) by an abrupt stop — a WSL
+   * restart, a crash, a SIGKILL. The worker that owned them is gone, so they can never progress
+   * on their own. Pure query, creation order: the queue drives recovery (queue.reconcileInterrupted),
+   * because deciding failed-vs-done needs to look at the VAULT (did the run finish writing before
+   * the crash?), which the store layer has no access to. `queued` jobs are untouched — the queue
+   * resumes those itself.
+   */
+  interruptedJobs(): JobRow[] {
+    return this.db
+      .prepare("SELECT * FROM jobs WHERE status IN ('preprocessing', 'ingesting') ORDER BY created_at")
+      .all() as JobRow[]
+  }
+
+  /**
+   * Bulk-fails every stranded active job with an interrupted reason. A store-level primitive
+   * kept for callers with no vault access (the CLI, tests); the service's queue instead uses
+   * {@link interruptedJobs} + a vault-aware reconcile so a run that HAD finished writing is
+   * recovered to `done` rather than mis-flagged failed. We never auto-re-run — an `ingesting`
+   * job may have partially written the vault, and silently replaying a mid-commit write risks
+   * vault integrity (hard rule 1). Returns the ids recovered. Idempotent.
    */
   recoverInterrupted(): string[] {
     const stuck = this.db

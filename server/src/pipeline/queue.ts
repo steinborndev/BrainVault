@@ -36,7 +36,7 @@ import {
 } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import { commitVault, commitPaths, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
@@ -232,6 +232,17 @@ export class IngestQueue {
   private readonly validate: Validator | undefined
   private running = false
   private paused = false
+  /**
+   * True while startup reconciliation of interrupted jobs is in flight. pump() is gated on it so
+   * no newly-enqueued job can claim a worker and commit while reconcile is still reading the dirty
+   * tree — otherwise reconcile could sweep the new job's pages into a recovered commit.
+   */
+  private reconciling = false
+  /**
+   * Resolves once startup reconciliation has finished and pumping has (re)started. Production
+   * ignores it (jobs arrive later, long after reconcile); tests await it to assert recovery.
+   */
+  ready: Promise<void> = Promise.resolve()
   /** Why the queue is paused — the dashboard distinguishes a rate limit from a spent budget. */
   private pauseReason: 'rate-limit' | 'budget' | null = null
   private inFlight = 0
@@ -287,25 +298,153 @@ export class IngestQueue {
   }
 
   /** Starts pumping. Existing `queued` rows (e.g. after a restart) are picked up, and
-   * batches whose members are still queued are reconstructed into pending units. Jobs
-   * stranded mid-flight by an abrupt stop are first reconciled to `failed` (retryable). */
+   * batches whose members are still queued are reconstructed into pending units. Jobs stranded
+   * mid-flight by an abrupt stop are first reconciled — a run that had finished writing the vault
+   * before the crash is recovered to `done`, the rest to `failed` (retryable).
+   *
+   * Stays synchronous (the setup-mode guard must throw synchronously — callers and tests rely on
+   * it, and ~30 call sites fire-and-forget this). The vault-aware reconcile is async, so it runs
+   * off the synchronous path with pump() gated behind it via `reconciling`; enqueue's own pump()
+   * calls are no-ops until reconcile finishes and re-pumps. */
   start(): void {
     if (this.auth === null) throw new Error('IngestQueue.start() requires a configured credential (setup mode)')
     this.running = true
-    const recovered = this.store.recoverInterrupted()
-    if (recovered.length > 0) {
+    this.reconciling = true
+    this.ready = this.reconcileInterrupted()
+      .catch((err: unknown) => {
+        // 'queue' is a pseudo-source, not a job row, so this goes to the event bus (job_logs
+        // would break its FK to jobs.id) — the same channel the reconcile warn uses.
+        this.events?.publish({
+          kind: 'log',
+          log: {
+            jobId: 'queue',
+            ts: new Date().toISOString(),
+            level: 'error',
+            message: `startup reconcile failed: ${(err as Error).message}`,
+          },
+        })
+      })
+      .finally(() => {
+        this.reconciling = false
+        this.reloadPendingBatches()
+        this.pump()
+      })
+  }
+
+  /**
+   * Recovers jobs an abrupt stop left in `preprocessing`/`ingesting` (queue.start only). Unlike
+   * the store's blanket {@link JobStore.recoverInterrupted}, this looks at the VAULT to tell the
+   * two cases apart:
+   *
+   *   - An `ingesting` run whose final log entry is already in `wiki/log.md` had FINISHED writing;
+   *     only its commit and status update were lost to the crash. Commit exactly the wiki pages it
+   *     left dirty (via commitPaths — an explicit pathspec, never `git add -A`, so nothing outside
+   *     this run is swept in) and flip it to `done`. Commit BEFORE the status flip, so a second
+   *     crash mid-reconcile re-enters here (still `ingesting`) instead of stranding a terminal
+   *     `done` job with uncommitted pages.
+   *   - Everything else (a `preprocessing` job never reached the agent; an `ingesting` job with no
+   *     completion marker was genuinely mid-write) → `failed`, retryable, unchanged behaviour.
+   *
+   * Residual risk (SPEC §11.3 risk 5): the dirty-wiki set can, in principle, include a page the
+   * user was editing in Obsidian at restart, which would then land in the recovered commit. This
+   * only fires when a crash actually left a COMPLETED ingest uncommitted, and the page stays fully
+   * versioned and revertable — strictly better than the old behaviour, where the next unrelated
+   * run's `git add -A` swept the same page under an even less relevant message.
+   */
+  private async reconcileInterrupted(): Promise<void> {
+    const stuck = this.store.interruptedJobs()
+    if (stuck.length === 0) return
+
+    let recoveredToFailed = 0
+    // A batch's members share one output set: once the first confirmed-complete member commits
+    // the dirty tree, its siblings find nothing to commit and reuse the same page list.
+    const committedByBatch = new Map<string, string[]>()
+
+    for (const job of stuck) {
+      const completed = job.status === 'ingesting' && this.ingestLoggedCompletion(job)
+      if (!completed) {
+        this.store.transition(job.id, 'failed', {
+          patch: { error: 'interrupted by a service restart before it finished — retry to run it again' },
+          log: 'recovered after restart: mid-flight with no completion marker in wiki/log.md',
+        })
+        recoveredToFailed++
+        continue
+      }
+
+      const label = job.original_name ?? job.url ?? job.id
+      const cached = job.batch_id !== null ? committedByBatch.get(job.batch_id) : undefined
+      let pages: string[]
+      if (cached !== undefined) {
+        pages = cached
+      } else {
+        pages = await this.commitReconciledPages(job, label)
+        if (job.batch_id !== null) committedByBatch.set(job.batch_id, pages)
+      }
+
+      this.store.transition(job.id, 'done', {
+        patch: pages.length > 0 ? { createdPages: pages } : {},
+        log: 'reconciled to done after restart: run had completed; commit recovered',
+      })
+    }
+
+    if (recoveredToFailed > 0) {
       this.events?.publish({
         kind: 'log',
         log: {
           jobId: 'queue',
           ts: new Date().toISOString(),
           level: 'warn',
-          message: `recovered ${recovered.length} interrupted job(s) after restart → failed (retryable)`,
+          message: `recovered ${recoveredToFailed} interrupted job(s) after restart → failed (retryable)`,
         },
       })
     }
-    this.reloadPendingBatches()
-    this.pump()
+    this.events?.publish({ kind: 'stats' })
+  }
+
+  /** Commits the wiki pages a completed-but-uncommitted run left dirty; returns what landed. */
+  private async commitReconciledPages(job: JobRow, label: string): Promise<string[]> {
+    if (!this.autoCommit()) {
+      this.store.log(job.id, 'info', 'reconcile: auto-commit disabled — completed pages left on disk, not committed')
+      return []
+    }
+    const dirtyWiki = [...(await dirtyPaths(this.vaultRoot))].filter((p) => p.startsWith('wiki/'))
+    if (dirtyWiki.length === 0) {
+      this.store.log(job.id, 'info', 'reconcile: run had completed and its pages were already committed')
+      return []
+    }
+    // Include the job's .raw dir only when it is actually on disk — `git add -- <missing path>`
+    // throws "pathspec did not match", which would abort the whole recovery commit.
+    const rawDir = path.posix.join('.raw', job.id)
+    const paths = fs.existsSync(path.join(this.vaultRoot, rawDir)) ? [...dirtyWiki, rawDir] : dirtyWiki
+    try {
+      const result = await this.commitMutex.runExclusive(() =>
+        commitPaths(this.vaultRoot, `ingest: ${label} (recovered after restart)`, paths),
+      )
+      if (result.committed) {
+        this.store.log(
+          job.id,
+          'info',
+          `reconcile: committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} page(s)) the crash left uncommitted`,
+        )
+        this.events?.publish({ kind: 'stats' })
+        return result.committedPages
+      }
+      this.store.log(job.id, 'info', `reconcile: nothing to commit (${result.note ?? 'no changes'})`)
+    } catch (err) {
+      this.store.log(job.id, 'warn', `reconcile: git commit failed (pages are on disk): ${(err as Error).message}`)
+    }
+    return []
+  }
+
+  /** True when `wiki/log.md` carries this job's final ingest entry — the skill writes it (naming
+   * the job's `.raw` dir) only as its last action, so its presence means the run finished. */
+  private ingestLoggedCompletion(job: JobRow): boolean {
+    try {
+      const log = fs.readFileSync(path.join(this.vaultRoot, 'wiki', 'log.md'), 'utf8')
+      return log.includes(`.raw/${job.id}`) || (job.raw_path !== null && log.includes(job.raw_path))
+    } catch {
+      return false
+    }
   }
 
   /** Reconstructs pending batch units from queued batch members not already tracked in memory. */
@@ -541,7 +680,7 @@ export class IngestQueue {
   }
 
   private pump(): void {
-    if (!this.running || this.paused) {
+    if (!this.running || this.paused || this.reconciling) {
       this.settleIdle()
       return
     }
@@ -778,9 +917,13 @@ export class IngestQueue {
       }
       this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
     } catch (err) {
-      // A commit failure must not undo a completed ingest — the pages are on disk and the
-      // next successful job's `git add -A` will sweep them in. Surface it, don't fail.
-      this.store.log(job.id, 'warn', `git commit failed (pages are on disk): ${(err as Error).message}`)
+      // A commit failure must not undo a completed ingest — the pages are on disk. Note the job
+      // is already `done` (terminal) by now, and the old net that eventually swept these in (a
+      // later run's `git add -A`) is gone (see commitVault), so they are NOT auto-recovered:
+      // the operator commits them from the dashboard. This is deliberately narrow — a commit
+      // throwing while inside the mutex with a staged tree means disk-full or a broken repo,
+      // where a silent later sweep would have failed too. Surface it loudly, don't fail the job.
+      this.store.log(job.id, 'warn', `git commit failed (pages are on disk, commit manually): ${(err as Error).message}`)
     }
     return []
   }

@@ -7,8 +7,10 @@
  * Under the vault's filesystem transport, wiki pages ARE written via the Write tool with
  * an absolute path (per the vault's save skill), so those paths appear here. Files written
  * only by Bash scripts (e.g. `.vault-meta/address-counter.txt`) do NOT — the caller stages
- * those via a small bookkeeping allowlist, and commitVault falls back to `git add -A` if a
- * targeted stage turns up empty, so nothing is ever silently left uncommitted.
+ * those via a small bookkeeping allowlist plus the sole-writer F4 sweep (newWikiPaths). Note
+ * commitVault no longer falls back to `git add -A` when a targeted stage turns up empty: that
+ * fallback swept orphaned pages from dead runs into unrelated commits, so a genuinely empty
+ * commit is now surfaced as `committed: false` and drained by startup reconciliation instead.
  */
 
 import path from 'node:path'
