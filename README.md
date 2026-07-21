@@ -95,7 +95,7 @@ except the OS; the manual path below installs each row explicitly. `git` and `cu
 | Credential | a Claude subscription token **or** an Anthropic API key (exactly one) - entered in the dashboard on first run, not needed to start |
 | Claude Code CLI | only for the subscription path, to run `claude setup-token` once - install with `npm install -g @anthropic-ai/claude-code` |
 | Sandbox | `bubblewrap` + `socat` - **required**, agent runs fail without them |
-| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp (YouTube URLs: metadata + subtitles) |
+| Preprocessing | poppler-utils, ocrmypdf, tesseract, pandoc, exiftool, defuddle, yt-dlp + deno (YouTube URLs: metadata + subtitles - yt-dlp needs a JS runtime to clear YouTube's bot check) |
 
 ### 1. The vault
 
@@ -216,24 +216,47 @@ Five tabs, all live over SSE:
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("Save to vault"). Autoresearch runs live here
   too.
-- **Vault** - the viewer that makes the Obsidian app optional for everyday use: an
-  interactive graph of the wikilink structure (search over titles **and** frontmatter tags,
-  per-bucket **and per-domain** filters - nodes can be colored by wiki type or by their
-  frontmatter `domain:` meta-category - and a local-
-  neighborhood mode around a focused page) and a page view with rendered markdown, clickable
-  `[[wikilinks]]`, a frontmatter properties panel, and backlink/outgoing panels. Pages can be
-  **edited and deleted right here** - every mutation is one git commit (`edit:`/`delete:`),
-  serialized behind the same commit mutex as agent commits, with an optimistic lock (409 if an
-  agent changed the page since you loaded it). After a delete, a banner counts the backlinks
-  that just went dangling and points you at a lint run. Deep-linkable: `/vault` and
-  `/vault/page/<path>` survive a reload and browser back/forward.
+- **Vault** - the viewer that makes the Obsidian app optional for everyday use. An interactive
+  graph of the wikilink structure with:
+  - **Search that narrows the graph** - a term (matched over titles, tags and domains) hides
+    everything unrelated and lists *every* match in a scrollable result list, not just the
+    first few. A local-neighborhood mode zooms in on one focused page and its links.
+  - **Color lenses** - recolor the same graph to answer different questions: by `domain:`
+    meta-category (the default), by wiki type, or by a metric (authority / orphans / stubs /
+    recency).
+  - **A two-tier toolbar** - a stable view bar (lens, page-type visibility, overlays) above a
+    domain filter band whose chips double as the color legend and scale to any number of
+    domains.
+  - **Overlays** - auto-detected community hulls (clusters), and knowledge-gap "ghost" nodes:
+    the pages other pages already link to but that don't exist yet, ranked into a ready-made
+    research backlog.
+  - **A System toggle** - structural scaffolding (index hubs, MOCs, the domain registry) and
+    maintenance artifacts (lint/release reports, session logs) are hidden by default so the
+    graph shows knowledge; one click brings them back.
+  - **An explorer panel** - click a node for its backlinks, outgoing links and tag-siblings
+    without leaving the graph. A "Graph health" section flags an isolated page or an
+    incidental-looking cross-domain link and offers a one-click, bounded repair run that
+    weaves the page in or reviews the link.
+  - **Keyboard + pointer navigation** - double-click a node to open its page, `Esc` to step
+    back out, `/` to jump to search, `f` to fit the view, Enter to open the selection.
+
+  The page view has rendered markdown, clickable `[[wikilinks]]`, a frontmatter properties
+  panel, and backlink/outgoing panels. Pages can be **edited and deleted right here** - every
+  mutation is one git commit (`edit:`/`delete:`), serialized behind the same commit mutex as
+  agent commits, with an optimistic lock (409 if an agent changed the page since you loaded it).
+  After a delete, a banner counts the backlinks that just went dangling and offers a one-click
+  reference-cleanup run. Deep-linkable: `/vault` and `/vault/page/<path>` survive a reload and
+  browser back/forward.
 
   All page links across the dashboard open this viewer first; the `obsidian://` deep link is
   the secondary action on each chip. That makes the dashboard fully usable from a **Windows**
   browser - Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only
   work from a WSLg browser.
-- **Maintenance** - lint (structured report), hot-cache refresh with its last-refresh time, the
-  domain registry with its backfill action, and the settings editor.
+- **Maintenance** - lint (structured report) plus a separate "fix safe findings" run that
+  automates only the report's mechanical categories (frontmatter gaps, stub pages, unlinked
+  mentions, stale index entries) and leaves anything needing judgment alone, hot-cache refresh
+  with its last-refresh time, the domain registry with its backfill action, and the settings
+  editor.
 
 **Domains** are the vault's meta-categories (`biomedicine`, `ai-tooling`, `knowledge-management`,
 …), the axis the graph filters and colors by. The allowed list lives in the vault itself, as the editable
@@ -256,8 +279,14 @@ The graph renders on a canvas with the force layout in a web worker, so it stays
 vault grows - deliberately, since the WSLg Obsidian graph does not. It also updates **live**:
 while an ingest writes pages, a debounced `vault` SSE event refreshes the graph, new nodes
 surface at their neighbors' centroid with a brief flash, existing nodes keep their positions,
-and the camera never jumps. The vault itself is never
-written from here; only agent runs write (see the security model).
+and the camera never jumps. The vault itself is never written from here; only agent runs write
+(see the security model).
+
+Every write - an ingest, a maintenance run, or a page edit - is followed by a deterministic,
+read-only check of the pages it touched: missing frontmatter, dead links, orphaned pages, stale
+counters. The findings are **advisory** - streamed to the run's log or shown as a banner after
+an edit - never an automatic rewrite, so the vault is only ever changed by something you or the
+agent did on purpose.
 
 ## Configuration
 
@@ -367,7 +396,7 @@ Behavior and limits:
 
 ## Security model
 
-Four constraints are load-bearing. They are documented in full in `CLAUDE.md`; do not weaken them.
+Five constraints are load-bearing. They are documented in full in `CLAUDE.md`; do not weaken them.
 `SECURITY.md` has the full threat model - including what a malicious *document* can and cannot make
 the ingest agent do - and the vulnerability reporting channel.
 
@@ -383,6 +412,11 @@ the ingest agent do - and the vulnerability reporting channel.
    execute under bubblewrap with writes confined to `VAULT_ROOT` and no web egress except in the
    autoresearch flow. Tool policy additionally runs through a `PreToolUse` hook. `canUseTool` was
    measured to be invoked *zero* times by this SDK and is not the enforcement point.
+5. **Plugin internals stay read-only.** The vault is a clone of claude-obsidian, so its own
+   machinery (skills, scripts, the shipped reference docs its skills consult by path) sits inside
+   the sandbox's writable area. A `PreToolUse` write guard confines agent writes to the knowledge
+   areas (`wiki/`, `.raw/`, …) and refuses edits to plugin files, so an ingest can extend the
+   vault but never rewrite the tool it runs on.
 
 Because the sandbox is the real boundary, it is configured with `failIfUnavailable: true`: if
 bubblewrap is missing or cannot start, an agent run **fails loudly** instead of silently running
@@ -397,7 +431,8 @@ Both guarantees rest on SDK behaviour that unit tests structurally cannot observ
 live probe. Re-run them after any change to the permission/spawn wiring or an SDK upgrade:
 
 ```bash
-# Is our guard still consulted at all? Expects: canary outside vault: blocked
+# Is our guard still consulted at all? Expects both canaries blocked -
+# outside the vault, and inside the plugin's skills/ (constraints 4 and 5).
 VAULT_ROOT=~/vault npm run permprobe --workspace server
 
 # Does a stuck tool really die with the run? Expects: PASS … descendants were reaped
@@ -507,7 +542,8 @@ POST   /sessions/:id/save        save a chat session into the vault (async run)
 GET    /pages?path=…[&full=1]    one wiki page's markdown - truncated preview, or the full
                                  page + title/type/mtime with full=1
 PUT    /pages                    user edit {path, markdown, baseMtime} → write + git commit
-                                 (409 when the page changed since baseMtime)
+                                 (409 when the page changed since baseMtime); returns advisory
+                                 validation findings for the edited page
 DELETE /pages?path=…             user delete → unlink + git commit; returns staleLinks
                                  (backlinks that now dangle, drives the lint banner)
 GET    /graph                    the vault's wikilink graph: typed nodes + directed edges
@@ -515,9 +551,10 @@ GET    /domains                  the vault's domain registry (installed? + parse
 POST   /domains                  create a domain: append to the registry page, one commit
 GET    /domains/candidates       themes among `unassigned` pages worth a domain (free)
 POST   /domains/candidates/:key/dismiss     stop proposing this theme (DELETE undoes it)
-POST   /maintenance/{lint,research,hot-cache,domain-backfill,domain-review}
-                                 starts an async run → { id, channel }; backfill 409s
-                                 without an installed registry, review 409s with no candidates
+POST   /maintenance/{lint,lint-fix,research,hot-cache,domain-backfill,domain-review,cleanup,repair}
+                                 starts an async run → { id, channel }; lint-fix 409s without a
+                                 report, backfill 409s without a registry, review 409s with no
+                                 candidates; repair validates its task paths against the live graph
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration
@@ -532,9 +569,10 @@ POST   /settings/telegram        {botToken, allowedUserIds} → writes BOTH env 
 DELETE /settings/telegram        disables the bot: removes both env vars, restarts
 ```
 
-Every vault-mutating agent run (lint, autoresearch, hot-cache, and saving a chat session) is
-asynchronous: the POST returns a run id immediately and streams its live log over the SSE channel,
-then you poll `/maintenance/runs/:id`. A long lint can never wedge the HTTP request.
+Every vault-mutating agent run (lint, lint-fix, autoresearch, hot-cache, reference cleanup, graph
+repair, and saving a chat session) is asynchronous: the POST returns a run id immediately and
+streams its live log over the SSE channel, then you poll `/maintenance/runs/:id`. A long run can
+never wedge the HTTP request.
 
 `GET /pages` is deliberately narrow: the path comes from agent-produced citations (and from
 client-side routes), so it is confined to `VAULT_ROOT/wiki`, must end in `.md`, and is re-checked
