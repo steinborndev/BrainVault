@@ -65,6 +65,12 @@ export interface GraphCanvasProps {
    * manager: single opens the explorer panel, double navigates to the page itself.
    */
   onOpen?: (node: GraphNode) => void
+  /**
+   * Click/tap on EMPTY canvas. Standard canvas convention: clicking the background clears
+   * the selection — without this, an accidental node tap leaves its spotlight stuck until
+   * the user finds the panel's ✕ or Esc.
+   */
+  onClear?: () => void
   /** Extra UI rendered inside the canvas wrap (e.g. the search box, top-right). */
   overlay?: React.ReactNode
 }
@@ -176,7 +182,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, onOpen, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -262,9 +268,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // Spotlight source, in priority order: the transient hover, then the persistent explorer
     // selection, then the URL-level focus. Whichever is active dims everything outside its
     // neighborhood so the local structure reads out of a dense cluster.
-    const hovered = hoverRef.current
+    //
+    // Hover only counts while a pointer is actually over the canvas — a hover index that
+    // outlived its pointer (capture edge cases, focus loss) must never keep the graph dimmed.
+    const hovered = lastPointerRef.current === null ? null : hoverRef.current
     const active = hovered ?? selectedIndex ?? focusIndex
     const highlight = active !== null ? new Set([active, ...(neighbors.get(active) ?? [])]) : null
+    // The transient hover may dim hard; a selection/focus spotlight is long-lived, so it
+    // dims gently enough that the rest of the graph stays readable underneath it.
+    const dimNode = hovered !== null ? 0.18 : 0.45
+    const dimEdge = hovered !== null ? 0.08 : 0.18
+    const dimLabel = hovered !== null ? 0.15 : 0.4
 
     // Visible world-rect for culling (small margin for radii/labels).
     const margin = 40 / t.k
@@ -327,7 +341,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const toGhost = ghostIndices !== undefined && (ghostIndices.has(a) || ghostIndices.has(b))
       ctx.setLineDash(toGhost ? [3 / t.k, 3 / t.k] : [])
       ctx.strokeStyle = edgeColor
-      ctx.globalAlpha = highlight === null ? (toGhost ? 0.45 : 0.35) : lit ? 0.9 : 0.08
+      ctx.globalAlpha = highlight === null ? (toGhost ? 0.45 : 0.35) : lit ? 0.9 : dimEdge
       ctx.beginPath()
       ctx.moveTo(x1, y1)
       ctx.lineTo(x2, y2)
@@ -346,7 +360,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const r = radius(i)
       const dimmed = highlight !== null && !highlight.has(i)
       const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
-      ctx.globalAlpha = dimmed ? 0.18 : 1
+      ctx.globalAlpha = dimmed ? dimNode : 1
       if (isGhost) {
         // Hollow, dashed ring in a faint neutral: present enough to click and count, but
         // visibly not a real page. A tiny fill keeps it hit-testable at its center.
@@ -394,28 +408,75 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       }
     }
 
-    // Labels with level-of-detail: hubs always (top by degree), everything from zoom 1.4,
-    // hovered/focused/matched always. Font size is screen-constant.
-    const labelAll = t.k >= 1.4
-    const hubDegree = labelAll ? 0 : hubThreshold(nodes)
+    // Labels: every visible node is a candidate — no global hub threshold. The old
+    // top-8%-by-degree gate concentrated all low-zoom labels in the densest domains
+    // (where they overlapped) and left small clusters entirely anonymous, because their
+    // local hubs never reached a global cutoff. Instead, candidates draw in priority
+    // order (interactive state, spotlight membership, ghosts, then degree) and a label
+    // that would overlap an already-placed one is skipped: dense regions show only their
+    // local hubs, sparse clusters always get their best labels, and zooming in frees
+    // space so culled labels reappear on their own. The order is deterministic (degree,
+    // then index), so nothing flickers between frames.
+    const candidates: number[] = []
+    for (let i = 0; i < nodes.length; i++) {
+      const x = pos[i * 2]!
+      if (Number.isNaN(x)) continue
+      if (!visible(x, pos[i * 2 + 1]!)) continue
+      candidates.push(i)
+    }
+    const interactive = (i: number): boolean =>
+      i === hovered || i === selectedIndex || i === focusIndex || matches.has(i)
+    const prio = (i: number): number =>
+      interactive(i) ? 3
+      : highlight !== null && highlight.has(i) ? 2
+      : ghostIndices !== undefined && ghostIndices.has(i) ? 1
+      : 0
+    candidates.sort((a, b) => {
+      const pd = prio(b) - prio(a)
+      if (pd !== 0) return pd
+      const dd = nodes[b]!.in + nodes[b]!.out - (nodes[a]!.in + nodes[a]!.out)
+      return dd !== 0 ? dd : a - b
+    })
+    // More labels never fit collision-free on one screen anyway; the examined cap bounds
+    // the measureText work when a huge vault fills the viewport.
+    const MAX_LABELS = 60
+    const MAX_EXAMINED = 400
+    const labelH = 13 / t.k
+    const padX = 2 / t.k
+    const halo = cssVar('--bg', '#0d1117')
+    const placed: Array<[number, number, number, number]> = []
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
-    for (let i = 0; i < nodes.length; i++) {
+    ctx.lineJoin = 'round'
+    let drawn = 0
+    let examined = 0
+    for (const i of candidates) {
+      if (drawn >= MAX_LABELS || examined >= MAX_EXAMINED) break
+      examined++
       const n = nodes[i]!
       const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
-      const wanted =
-        // Ghost nodes are few and are the point of the gaps view — always label them.
-        labelAll || isGhost || n.in + n.out >= hubDegree || i === hoverRef.current || i === selectedIndex || i === focusIndex || matches.has(i)
-      if (!wanted) continue
-      const x = pos[i * 2]!
-      const y = pos[i * 2 + 1]!
-      if (Number.isNaN(x)) continue
-      if (!visible(x, y)) continue
-      const dimmed = highlight !== null && !highlight.has(i)
-      ctx.globalAlpha = dimmed ? 0.15 : 0.95
+      const full = interactive(i)
+      // Long titles are the main space hogs — truncate unless the node is the one the
+      // user is interacting with (the tooltip carries the full title regardless).
+      const text = !full && n.title.length > 30 ? `${n.title.slice(0, 28)}…` : n.title
       ctx.font = `${isGhost ? 'italic ' : ''}${11 / t.k}px system-ui, sans-serif`
+      const w = ctx.measureText(text).width
+      const x = pos[i * 2]!
+      const y = pos[i * 2 + 1]! + radius(i) + 3 / t.k
+      const box: [number, number, number, number] = [x - w / 2 - padX, y, x + w / 2 + padX, y + labelH]
+      // Interactive labels skip the cull — "what am I pointing at" must always answer.
+      if (!full && placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) {
+        continue
+      }
+      placed.push(box)
+      drawn++
+      ctx.globalAlpha = highlight !== null && !highlight.has(i) ? dimLabel : 0.95
+      // A halo in the background color keeps text legible across edges and foreign nodes.
+      ctx.lineWidth = 3 / t.k
+      ctx.strokeStyle = halo
+      ctx.strokeText(text, x, y)
       ctx.fillStyle = isGhost ? cssVar('--text-faint', '#6b7791') : textColor
-      ctx.fillText(n.title, x, y + radius(i) + 3 / t.k)
+      ctx.fillText(text, x, y)
     }
     ctx.globalAlpha = 1
 
@@ -745,6 +806,18 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     refreshHover()
   }, [nodes, refreshHover])
 
+  // Losing window focus (alt-tab, devtools) fires no pointerleave — drop the hover there
+  // too, or the spotlight would greet the user dimmed when they come back.
+  useEffect(() => {
+    const onBlur = (): void => {
+      lastPointerRef.current = null
+      if (hoverRef.current !== null) setHover(null)
+      scheduleDraw()
+    }
+    window.addEventListener('blur', onBlur)
+    return () => window.removeEventListener('blur', onBlur)
+  }, [scheduleDraw])
+
   /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
   const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
     const canvas = canvasRef.current
@@ -850,6 +923,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
           }
         } else {
           lastTapRef.current = null
+          onClear?.()
         }
       }
       // A pan/pinch moved the world under the cursor while hover updates were suppressed —
@@ -1022,13 +1096,6 @@ function traceSmooth(ctx: CanvasRenderingContext2D, pts: Pt[]): void {
     ctx.quadraticCurveTo(cur[0], cur[1], m[0], m[1])
   }
   ctx.closePath()
-}
-
-/** Degree above which a node counts as a hub (labelled even when zoomed out): top ~8 %. */
-function hubThreshold(nodes: GraphNode[]): number {
-  if (nodes.length === 0) return 0
-  const degrees = nodes.map((n) => n.in + n.out).sort((a, b) => b - a)
-  return Math.max(3, degrees[Math.floor(nodes.length * 0.08)] ?? 3)
 }
 
 /** Coalesces draw requests into one per animation frame. */

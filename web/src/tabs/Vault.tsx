@@ -810,6 +810,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onOpen={(n) => {
             if (!n.path.startsWith(GAP_PATH_PREFIX)) navigate(pageRoute(n.path))
           }}
+          // Click on empty canvas: drop the selection (an accidental node tap is undone
+          // with one click). Deliberately keeps the trail — only the panel's ✕ resets it.
+          onClear={() => setSelection(null)}
           overlay={
             <>
               {searchOverlay}
