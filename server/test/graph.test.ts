@@ -74,7 +74,7 @@ describe('GraphBuilder', () => {
   })
 
   it('parseFrontmatterMeta handles absence and malformed frontmatter', () => {
-    const empty = { tags: [], domain: null, fmType: null }
+    const empty = { tags: [], domain: null, fmType: null, title: null, aliases: [] }
     expect(parseFrontmatterMeta('no frontmatter')).toEqual(empty)
     expect(parseFrontmatterMeta('---\ntags:\n---\nbody')).toEqual(empty)
     expect(parseFrontmatterMeta('---\ndomain:\n---\nbody')).toEqual(empty)
@@ -82,6 +82,11 @@ describe('GraphBuilder', () => {
     expect(parseFrontmatterMeta('body first\n---\ntags:\n  - nope\n---')).toEqual(empty)
     // `type:` is lowercased — the classifier compares against lowercase sets.
     expect(parseFrontmatterMeta('---\ntype: "Concept"\n---\nbody').fmType).toBe('concept')
+    // `title:` keeps its casing and punctuation; aliases parse in both list forms.
+    const meta = parseFrontmatterMeta('---\ntitle: "Does it work?"\naliases:\n  - "The Q"\n---\nbody')
+    expect(meta.title).toBe('Does it work?')
+    expect(meta.aliases).toEqual(['The Q'])
+    expect(parseFrontmatterMeta('---\naliases: [A, "B"]\n---\nbody').aliases).toEqual(['A', 'B'])
   })
 
   it('classifies pages as knowledge, structural or artifact', () => {
@@ -210,6 +215,37 @@ describe('GraphBuilder', () => {
     expect(g.gaps[0]!.title).toBe('Osmosis')
     // ...and don't inflate a real gap's referrer list either.
     expect(g.gaps[0]!.refBy.map((i) => g.nodes[i]!.title)).toEqual(['A'])
+  })
+
+  it('resolves links via frontmatter title and aliases when the basename differs', () => {
+    // Filenames drop filesystem-hostile characters that links keep: the vault files
+    // "…work?" as "…work.md" with the `?` preserved only in `title:`.
+    page(
+      'wiki/questions/How does the LLM Wiki pattern work.md',
+      '---\ntype: question\ndomain: km\ntitle: "How does the LLM Wiki pattern work?"\n---\nanswer',
+    )
+    page('wiki/meta/domains.md', '---\ntype: meta\ndomain: meta\ntitle: "Domain Registry"\n---\nregistry')
+    page('wiki/concepts/Reg Alias.md', '---\ntype: concept\ndomain: km\naliases:\n  - "The Registry"\n---\nx')
+    page(
+      'wiki/concepts/A.md',
+      '[[How does the LLM Wiki pattern work?]] and [[Domain Registry]] and [[The Registry]]',
+    )
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(0)
+    expect(g.gaps).toHaveLength(0)
+    const inDeg = (title: string): number => g.nodes.find((n) => n.title === title)!.in
+    expect(inDeg('How does the LLM Wiki pattern work')).toBe(1)
+    expect(inDeg('domains')).toBe(1)
+    expect(inDeg('Reg Alias')).toBe(1)
+  })
+
+  it('prefers the basename over another page claiming the same name as title', () => {
+    page('wiki/concepts/Osmosis.md', 'the real page')
+    page('wiki/concepts/Pretender.md', '---\ntitle: "Osmosis"\n---\nnot it')
+    page('wiki/concepts/A.md', '[[Osmosis]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    const edge = g.edges.map(([a, b]) => `${g.nodes[a]!.title}->${g.nodes[b]!.title}`)
+    expect(edge).toEqual(['A->Osmosis'])
   })
 
   it('ranks gaps wanted by knowledge pages above ones only system pages mention', () => {

@@ -82,24 +82,50 @@ interface CacheEntry {
   readonly domain: string | null
   /** Frontmatter `type:` (lowercased), the primary signal for the kind classification. */
   readonly fmType: string | null
+  /** Frontmatter `title:` — resolves links whose text differs from the filename. */
+  readonly fmTitle: string | null
+  readonly aliases: readonly string[]
 }
 
 const toPosix = (p: string): string => p.split(path.sep).join(path.posix.sep)
 
 const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, '')
 
+/** Parses a frontmatter list value (block `key:\n  - a` or inline `key: [a, b]`), deduped. */
+function parseFmList(body: string, key: string): string[] {
+  const out: string[] = []
+  const block = body.match(new RegExp(`^${key}:[ \\t]*\\r?\\n((?:[ \\t]+-[ \\t]*.*\\r?\\n?)+)`, 'm'))
+  if (block) {
+    for (const line of block[1]!.split(/\r?\n/)) {
+      const item = line.match(/^[ \t]+-[ \t]*(.+)$/)
+      if (item) out.push(unquote(item[1]!))
+    }
+  } else {
+    const inline = body.match(new RegExp(`^${key}:[ \\t]*\\[([^\\]]*)\\]`, 'm'))
+    if (inline) {
+      for (const item of inline[1]!.split(',')) {
+        const t = unquote(item)
+        if (t) out.push(t)
+      }
+    }
+  }
+  return [...new Set(out)]
+}
+
 /**
- * Extracts `tags:` (block or inline list), `domain:` and `type:` from a page's YAML
- * frontmatter. Deliberately a shallow parser, not a YAML library: the vault's frontmatter
- * is agent-written and flat, and this runs on every changed file of a growing vault.
+ * Extracts `tags:`/`aliases:` (block or inline list), `domain:`, `type:` and `title:` from
+ * a page's YAML frontmatter. Deliberately a shallow parser, not a YAML library: the vault's
+ * frontmatter is agent-written and flat, and this runs on every changed file of a growing vault.
  */
 export function parseFrontmatterMeta(markdown: string): {
   tags: string[]
   domain: string | null
   fmType: string | null
+  title: string | null
+  aliases: string[]
 } {
   const fm = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/)
-  if (!fm) return { tags: [], domain: null, fmType: null }
+  if (!fm) return { tags: [], domain: null, fmType: null, title: null, aliases: [] }
   const body = fm[1]!
 
   const domainMatch = body.match(/^domain:[ \t]*(.+)$/m)
@@ -108,25 +134,10 @@ export function parseFrontmatterMeta(markdown: string): {
   const typeMatch = body.match(/^type:[ \t]*(.+)$/m)
   const fmType = typeMatch ? unquote(typeMatch[1]!).toLowerCase() || null : null
 
-  const tags: string[] = []
-  // Block list:  tags:\n  - a\n  - b
-  const block = body.match(/^tags:[ \t]*\r?\n((?:[ \t]+-[ \t]*.*\r?\n?)+)/m)
-  if (block) {
-    for (const line of block[1]!.split(/\r?\n/)) {
-      const item = line.match(/^[ \t]+-[ \t]*(.+)$/)
-      if (item) tags.push(unquote(item[1]!))
-    }
-  } else {
-    // Inline list:  tags: [a, b]
-    const inline = body.match(/^tags:[ \t]*\[([^\]]*)\]/m)
-    if (inline) {
-      for (const item of inline[1]!.split(',')) {
-        const t = unquote(item)
-        if (t) tags.push(t)
-      }
-    }
-  }
-  return { tags: [...new Set(tags)], domain, fmType }
+  const titleMatch = body.match(/^title:[ \t]*(.+)$/m)
+  const title = titleMatch ? unquote(titleMatch[1]!) || null : null
+
+  return { tags: parseFmList(body, 'tags'), domain, fmType, title, aliases: parseFmList(body, 'aliases') }
 }
 
 /** Frontmatter `type:` values that mark a knowledge page wherever it lives. */
@@ -208,10 +219,12 @@ export class GraphBuilder {
       const hit = this.cache.get(f.abs)
       if (hit !== undefined && hit.mtimeMs === f.mtimeMs && hit.size === f.size) continue
       let links: string[] = []
-      let meta: { tags: string[]; domain: string | null; fmType: string | null } = {
+      let meta: ReturnType<typeof parseFrontmatterMeta> = {
         tags: [],
         domain: null,
         fmType: null,
+        title: null,
+        aliases: [],
       }
       try {
         const markdown = fs.readFileSync(f.abs, 'utf8')
@@ -227,17 +240,22 @@ export class GraphBuilder {
         tags: meta.tags,
         domain: meta.domain,
         fmType: meta.fmType,
+        fmTitle: meta.title,
+        aliases: meta.aliases,
       })
     }
 
-    // Resolve, three layers (checked in order):
+    // Resolve, four layers (checked in order):
     //  1. Case-insensitive basename index, first occurrence wins — the primary rule, shared
     //     with the citation resolver (chat chips resolve a subset of what the graph does:
-    //     layers 2 and 3 are graph-only, so a chip may show unresolved where the graph links).
+    //     layers 2–4 are graph-only, so a chip may show unresolved where the graph links).
     //  2. Path-qualified targets (`[[concepts/_index]]`) against the page's wiki-relative
     //     path — the basename index structurally can't match them, but the pages exist;
     //     without this layer the vault's `_index` nav links dominate the unresolved count.
-    //  3. Non-markdown vault files (`.canvas`, `.base`, …): resolution-only — a link to an
+    //  3. Frontmatter `title:` and `aliases:` — filenames drop characters the filesystem
+    //     dislikes while links keep them (`[[…work?]]` vs `…work.md`), and hub pages go by
+    //     another name entirely (`meta/domains.md` titled "Domain Registry").
+    //  4. Non-markdown vault files (`.canvas`, `.base`, …): resolution-only — a link to an
     //     existing canvas is not a missing page, but assets never become nodes.
     const byName = new Map<string, number>()
     files.forEach((f, i) => {
@@ -249,6 +267,15 @@ export class GraphBuilder {
       // `wiki/concepts/_index.md` → `concepts/_index` (links are written wiki-relative).
       const key = f.rel.slice('wiki/'.length, -'.md'.length).toLowerCase()
       if (!byPath.has(key)) byPath.set(key, i)
+    })
+    const byTitle = new Map<string, number>()
+    files.forEach((f, i) => {
+      const entry = this.cache.get(f.abs)
+      for (const name of [entry?.fmTitle, ...(entry?.aliases ?? [])]) {
+        if (name === undefined || name === null) continue
+        const key = name.toLowerCase()
+        if (!byTitle.has(key)) byTitle.set(key, i)
+      }
     })
     const assetKeys = new Set<string>()
     for (const rel of assets) {
@@ -281,7 +308,10 @@ export class GraphBuilder {
         // A leading `wiki/` is tolerated everywhere: paths and asset keys are stored
         // wiki-relative, and both link spellings occur in agent-written pages.
         const wikiRel = lower.startsWith('wiki/') ? lower.slice('wiki/'.length) : lower
-        const to = byName.get(lower) ?? (target.includes('/') ? byPath.get(wikiRel) : undefined)
+        const to =
+          byName.get(lower) ??
+          (target.includes('/') ? byPath.get(wikiRel) : undefined) ??
+          byTitle.get(lower)
         if (to === undefined) {
           if (assetKeys.has(wikiRel)) continue // an existing canvas/base — resolved, no node
           unresolved++
