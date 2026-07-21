@@ -2081,22 +2081,20 @@ details.hot-cache[open] .hc-summary::before {
   display: flex;
   align-items: center;
   gap: 7px;
-  overflow-x: scroll;
-  scrollbar-width: thin;
-  /* the horizontal scrollbar (~6px) sits below the content — mirrored as top padding so
-     the chips' visual center equals the band's center and the actions never sit lower */
-  padding: 8px 4px 2px;
+  overflow-x: auto;
+  /* No visible scrollbar: a space-taking one shifts the chips off the band's vertical
+     center by exactly its height, and how much that is depends on the browser's scrollbar
+     mode (classic vs overlay) — not compensatable in CSS. The edge fades signal overflow,
+     wheel/drag still scroll, and the "All domains" panel reaches everything regardless. */
+  scrollbar-width: none;
+  padding: 2px 4px;
   flex: 1 1 auto;
   min-width: 0;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
 }
 .db-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-.db-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 3px;
+  display: none;
 }
 .db-scroll .chip {
   flex: 0 0 auto;
