@@ -3347,3 +3347,47 @@ kbd {
   font-style: italic;
   margin-top: 1px;
 }
+
+/* ---- Graph-health section in the explorer panel (repair action, 2026-07-21) ---- */
+.gx-health {
+  margin: 12px 16px 4px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--border));
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.gx-health p {
+  margin: 0;
+}
+.gx-health-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+.gx-health-act {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.gx-health-err {
+  color: var(--err);
+  font-size: 12px;
+}
+/* Page links written inline in the health prose — not the list-row shape. */
+.gx-health .gx-link.inline {
+  display: inline;
+  width: auto;
+  padding: 0;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

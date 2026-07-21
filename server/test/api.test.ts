@@ -1121,6 +1121,56 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(extra).toContain('<page_hygiene>')
   })
 
+  it('repair validates tasks against the live graph and bounds the run to them', async () => {
+    // A path that names no page in the live graph rejects the WHOLE request — the user
+    // selected specific things, silently dropping one would repair less than they asked.
+    const unknown = await fetch(`${baseUrl}/api/v1/maintenance/repair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tasks: [{ kind: 'connect', path: 'wiki/concepts/No Such Page.md' }] }),
+    })
+    expect(unknown.status).toBe(400)
+    const badKind = await fetch(`${baseUrl}/api/v1/maintenance/repair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tasks: [{ kind: 'delete', path: 'wiki/index.md' }] }),
+    })
+    expect(badKind.status).toBe(400)
+
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Repair Island.md'), 'alone')
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Repair Cake.md'), 'see [[Repair Fund]]')
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Repair Fund.md'), 'x')
+
+    let prompt = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      return okResult('repaired')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/repair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        tasks: [
+          { kind: 'connect', path: 'wiki/concepts/Repair Island.md', reason: 'isolated  in\nknowledge view' },
+          { kind: 'edge', from: 'wiki/concepts/Repair Cake.md', to: 'wiki/concepts/Repair Fund.md' },
+        ],
+      }),
+    })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:repair')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    // Bounded to exactly the selected tasks; reasons are whitespace-collapsed; the prompt
+    // pins the no-create/no-delete boundary.
+    expect(prompt).toContain('CONNECT wiki/concepts/Repair Island.md')
+    expect(prompt).toContain('isolated in knowledge view')
+    expect(prompt).toContain('REVIEW LINK wiki/concepts/Repair Cake.md -> wiki/concepts/Repair Fund.md')
+    expect(prompt).toContain('Do not create, delete, rename or merge')
+  })
+
   it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',

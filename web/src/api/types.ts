@@ -296,6 +296,16 @@ export type MaintenanceKind =
   | 'domain-backfill'
   | 'domain-review'
   | 'cleanup'
+  | 'repair'
+
+/**
+ * One graph-repair task (POST /maintenance/repair): `connect` weaves an isolated page into
+ * the graph, `edge` has the agent review a link flagged as possibly incidental. Paths are
+ * validated server-side against the live graph.
+ */
+export type RepairTask =
+  | { kind: 'connect'; path: string; reason?: string }
+  | { kind: 'edge'; from: string; to: string; reason?: string }
 
 /** One meta-category from the vault's domain registry (GET /api/v1/domains, SPEC §12.4). */
 export interface DomainEntry {

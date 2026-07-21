@@ -49,6 +49,17 @@ export type MaintenanceKind =
   | 'domain-backfill'
   | 'domain-review'
   | 'cleanup'
+  | 'repair'
+
+/**
+ * One user-selected graph-repair task (SPEC.md §12.4 graph view). `connect` = an isolated
+ * page that should be woven into the graph; `edge` = an existing link flagged as possibly
+ * incidental (e.g. the single edge between two otherwise unconnected domains). The route
+ * validates every path against the live graph before this reaches a prompt.
+ */
+export type RepairTask =
+  | { readonly kind: 'connect'; readonly path: string; readonly reason?: string }
+  | { readonly kind: 'edge'; readonly from: string; readonly to: string; readonly reason?: string }
 
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
@@ -292,6 +303,52 @@ export class MaintenanceRunner {
         'Finish by reporting which files you changed and which references you left in place.',
       'ingest',
       { commitMessage: `maintenance: cleanup references (${deletedTitles.join(', ').slice(0, 120)})` },
+    )
+  }
+
+  /**
+   * Repairs user-selected graph-connectivity problems (the explorer panel's "Repair"
+   * action): weave isolated pages into the graph, review links flagged as incidental
+   * noise. Judgment-shaped by nature — which is exactly why it is bounded to the tasks the
+   * USER picked (never a vault-wide sweep) and why lint-fix refuses this category. The
+   * upstream guard additionally makes plugin pages unwritable, so a "connect" on a
+   * reference doc can only ever add links TO it from knowledge pages, never edit it.
+   */
+  startGraphRepair(tasks: readonly RepairTask[]): MaintenanceRun {
+    if (tasks.length === 0) throw new Error('graph repair started with no tasks (route validates — wiring bug)')
+    const lines = tasks.map((t, i) => {
+      const reason = t.reason ? ` — context: ${t.reason}` : ''
+      return t.kind === 'connect'
+        ? `${i + 1}. CONNECT ${t.path}${reason}`
+        : `${i + 1}. REVIEW LINK ${t.from} -> ${t.to}${reason}`
+    })
+    return this.start(
+      'repair',
+      'The user reviewed the wiki\'s link graph and selected these repair tasks. Work ONLY on ' +
+        `them:\n\n${lines.join('\n')}\n\n` +
+        'For a CONNECT task (an isolated page no knowledge page links to or from):\n' +
+        '- Read the page, then find the existing wiki pages most closely related to its topic ' +
+        '(search titles, tags and content).\n' +
+        '- Where a related page genuinely mentions — or naturally should mention — the topic, ' +
+        'wrap the existing mention in a [[wikilink]] or add ONE short, natural sentence linking ' +
+        'to the page. Also add the page to the relevant _index page. 2-4 inbound links are enough.\n' +
+        '- If nothing in the vault genuinely relates, add NO links and say so in your report — ' +
+        'forced links are worse than an isolated page.\n\n' +
+        'For a REVIEW LINK task (an existing link flagged as possibly incidental):\n' +
+        '- Read the source page and judge whether its [[wikilink]] to the target genuinely ' +
+        'supports the page content.\n' +
+        '- If it is an incidental aside (name-dropping, trivia, a passing cross-domain remark), ' +
+        'remove the [[ ]] brackets so the text remains but the link goes, or minimally rephrase ' +
+        'the sentence.\n' +
+        '- If the link IS meaningful, change nothing and justify keeping it in your report.\n\n' +
+        'Boundaries:\n' +
+        '- Edit only: the pages named in the tasks, pages where you add a wikilink for a ' +
+        'CONNECT task, and the relevant index/_index pages.\n' +
+        '- Do not create, delete, rename or merge any page. Do not rewrite prose beyond the ' +
+        'specific link or mention a task is about.\n\n' +
+        'Finish by reporting, per task, exactly what you changed — or why you changed nothing.',
+      'ingest',
+      { commitMessage: `maintenance: graph repair (${tasks.length} task${tasks.length === 1 ? '' : 's'})` },
     )
   }
 

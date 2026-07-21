@@ -12,7 +12,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
-import { DomainRegistryMissingError, LintReportMissingError } from '../../pipeline/maintenance.js'
+import { DomainRegistryMissingError, LintReportMissingError, type RepairTask } from '../../pipeline/maintenance.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
 
@@ -75,6 +75,51 @@ export function registerMaintenanceRoute(
       return reply.code(400).send({ error: 'provide "pages": the deleted page titles to clean up after' })
     }
     return reply.code(202).send(maintenance.startReferenceCleanup(pages))
+  })
+
+  /**
+   * Graph repair (the explorer panel's "Repair" action): a bounded agent run over
+   * user-selected connectivity problems. Task paths are attacker-adjacent input headed for
+   * a prompt — every path must name a page in the LIVE graph (no free-text targets), any
+   * invalid task rejects the whole request (the user selected specific things; silently
+   * dropping one would repair less than they asked), and free-text reasons are size-capped.
+   */
+  app.post('/api/v1/maintenance/repair', async (req, reply) => {
+    if (credentialMissing(reply)) return reply
+    if (graph === undefined) return reply.code(409).send({ error: 'graph unavailable' })
+    const known = new Set(graph.build().nodes.map((n) => n.path))
+    const clean = (v: unknown, max: number): string | undefined => {
+      if (typeof v !== 'string') return undefined
+      const s = v.replace(/\s+/g, ' ').trim()
+      return s !== '' && s.length <= max ? s : undefined
+    }
+    const body = (req.body ?? {}) as { tasks?: unknown }
+    const raw = Array.isArray(body.tasks) ? body.tasks : []
+    if (raw.length === 0 || raw.length > 10) {
+      return reply.code(400).send({ error: 'provide "tasks": 1-10 repair tasks' })
+    }
+    const tasks: RepairTask[] = []
+    for (const item of raw) {
+      const t = (item ?? {}) as Record<string, unknown>
+      const reason = clean(t['reason'], 200)
+      if (t['kind'] === 'connect') {
+        const path = clean(t['path'], 300)
+        if (path === undefined || !known.has(path)) {
+          return reply.code(400).send({ error: `connect task names no known wiki page: ${String(t['path'])}` })
+        }
+        tasks.push({ kind: 'connect', path, ...(reason ? { reason } : {}) })
+      } else if (t['kind'] === 'edge') {
+        const from = clean(t['from'], 300)
+        const to = clean(t['to'], 300)
+        if (from === undefined || !known.has(from) || to === undefined || !known.has(to)) {
+          return reply.code(400).send({ error: `edge task names an unknown wiki page: ${String(t['from'])} -> ${String(t['to'])}` })
+        }
+        tasks.push({ kind: 'edge', from, to, ...(reason ? { reason } : {}) })
+      } else {
+        return reply.code(400).send({ error: 'each task needs kind "connect" or "edge"' })
+      }
+    }
+    return reply.code(202).send(maintenance.startGraphRepair(tasks))
   })
 
   // The domain backfill (SPEC.md §12.4 Stufe 2). 409 when no registry is installed — the

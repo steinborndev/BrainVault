@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  RepairTask,
   DomainsResponse,
   CandidatesResponse,
   SettingsResponse,
@@ -182,6 +183,14 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ pages }),
+    }).then(json<MaintenanceRun>),
+
+  /** Graph repair: a bounded agent run over user-selected connectivity problems. */
+  graphRepair: (tasks: readonly RepairTask[]): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/repair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tasks }),
     }).then(json<MaintenanceRun>),
 
   research: (topic: string): Promise<MaintenanceRun> =>

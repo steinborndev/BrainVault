@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
-import type { GraphNode, VaultGraph, ValidationFinding } from '../api/types.ts'
+import type { GraphNode, VaultGraph, ValidationFinding, RepairTask } from '../api/types.ts'
 import { GraphCanvas, domainColor, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
@@ -313,6 +313,65 @@ const viewMemory = {
   trail: [] as string[],
 }
 
+/** An existing wikilink flagged as possibly incidental (see the graph-health memo). */
+interface SuspiciousEdge {
+  from: GraphNode
+  to: GraphNode
+}
+
+/**
+ * Deterministic connectivity findings over the FULL graph (filters don't change whether a
+ * page is isolated). Feeds the explorer panel's "Repair" action:
+ *  - isolated: knowledge pages with no edge to another knowledge page — invisible to graph
+ *    exploration (their only neighbors, if any, are system pages like lint reports).
+ *  - suspicious: the SINGLE edge between two domains that share no other link. One lone
+ *    wire between e.g. cooking and finance is almost always an incidental aside, not
+ *    knowledge (the real case: a recipe source name-dropping an investment PDF as "the
+ *    vault's earlier German source").
+ */
+interface GraphHealth {
+  isolated: ReadonlySet<string>
+  /** Suspicious edges keyed by BOTH endpoint paths, for per-page lookup in the panel. */
+  suspiciousByPage: ReadonlyMap<string, readonly SuspiciousEdge[]>
+}
+
+function computeGraphHealth(graph: VaultGraph): GraphHealth {
+  const nodes = graph.nodes
+  const kn = nodes.map(isKnowledge)
+  const knDeg = new Array<number>(nodes.length).fill(0)
+  // A domain only counts as a "side" when it is a real subject: meta/unassigned/absent
+  // domains produce no meaningful cross-domain signal.
+  const realDomain = (d: string | null): string | null => (d !== null && d !== 'meta' && d !== 'unassigned' ? d : null)
+  const pairCount = new Map<string, number>()
+  const cross: Array<[number, number, string]> = []
+  for (const [a, b] of graph.edges) {
+    if (!kn[a] || !kn[b]) continue
+    knDeg[a]!++
+    knDeg[b]!++
+    const da = realDomain(nodes[a]!.domain)
+    const db = realDomain(nodes[b]!.domain)
+    if (da !== null && db !== null && da !== db) {
+      const key = da < db ? `${da}|${db}` : `${db}|${da}`
+      pairCount.set(key, (pairCount.get(key) ?? 0) + 1)
+      cross.push([a, b, key])
+    }
+  }
+  const isolated = new Set<string>()
+  nodes.forEach((n, i) => {
+    if (kn[i] && knDeg[i] === 0) isolated.add(n.path)
+  })
+  const suspiciousByPage = new Map<string, SuspiciousEdge[]>()
+  for (const [a, b, key] of cross) {
+    if (pairCount.get(key) !== 1) continue
+    const edge: SuspiciousEdge = { from: nodes[a]!, to: nodes[b]! }
+    for (const p of [edge.from.path, edge.to.path]) {
+      const list = suspiciousByPage.get(p) ?? suspiciousByPage.set(p, []).get(p)!
+      list.push(edge)
+    }
+  }
+  return { isolated, suspiciousByPage }
+}
+
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   const [query, setQuery] = useState(viewMemory.query)
   const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(viewMemory.hiddenTypes)
@@ -591,6 +650,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   const focusNode = focusIndexFull >= 0 ? graph.nodes[focusIndexFull] : undefined
 
+  const health = useMemo(() => computeGraphHealth(graph), [graph])
+
   // ---- keyboard layer. Window-level (the canvas isn't focusable), via the same stable-
   // listener ref pattern the canvas uses for wheel/zoom keys; gated on this view being the
   // VISIBLE tab — tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
@@ -849,6 +910,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           graph={graph}
           selection={selection}
           gaps={showGaps ? graph.gaps : []}
+          health={health}
           onSelectPage={selectPage}
           onSelectGap={selectGap}
           onClose={closeExplorer}
@@ -871,6 +933,7 @@ function GraphExplorer({
   graph,
   selection,
   gaps,
+  health,
   onSelectPage,
   onSelectGap,
   onClose,
@@ -878,6 +941,7 @@ function GraphExplorer({
   graph: VaultGraph
   selection: Selection
   gaps: VaultGraph['gaps']
+  health: GraphHealth
   onSelectPage: (path: string) => void
   onSelectGap: (title: string) => void
   onClose: () => void
@@ -893,7 +957,7 @@ function GraphExplorer({
         <Icon name="x" />
       </button>
       {selection?.kind === 'page' ? (
-        <PageExplorer graph={graph} path={selection.path} onSelectPage={onSelectPage} />
+        <PageExplorer graph={graph} path={selection.path} health={health} onSelectPage={onSelectPage} />
       ) : selection?.kind === 'gap' ? (
         <GapExplorer graph={graph} title={selection.title} onSelectPage={onSelectPage} />
       ) : (
@@ -906,10 +970,12 @@ function GraphExplorer({
 function PageExplorer({
   graph,
   path,
+  health,
   onSelectPage,
 }: {
   graph: VaultGraph
   path: string
+  health: GraphHealth
   onSelectPage: (path: string) => void
 }): React.ReactElement {
   const idx = useMemo(() => graph.nodes.findIndex((n) => n.path === path), [graph, path])
@@ -940,6 +1006,47 @@ function PageExplorer({
       .slice(0, 6)
   }, [graph, node, path, backlinks, outgoing])
 
+  // ---- graph repair (deterministic findings for THIS page → one bounded agent run) ----
+  const qc = useQueryClient()
+  const isolated = health.isolated.has(path)
+  const suspicious = health.suspiciousByPage.get(path) ?? []
+  const [repairId, setRepairId] = useState<string | null>(null)
+  useEffect(() => setRepairId(null), [path])
+  const startRepair = useMutation({
+    mutationFn: (tasks: RepairTask[]) => api.graphRepair(tasks),
+    onSuccess: (run) => setRepairId(run.id),
+  })
+  const repairQ = useQuery({
+    queryKey: ['maintenance-run', repairId],
+    queryFn: () => api.maintenanceRun(repairId!),
+    enabled: repairId !== null,
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'running' ? false : 2000),
+  })
+  const repairRun = repairQ.data
+  const repairRunning = repairId !== null && (repairRun === undefined || repairRun.status === 'running')
+  useEffect(() => {
+    if (repairRun?.status === 'done') {
+      // The run edited pages and committed — refresh everything derived from the vault.
+      qc.invalidateQueries({ queryKey: ['graph'] })
+      qc.invalidateQueries({ queryKey: ['stats'] })
+    }
+  }, [repairRun?.status, qc])
+  const repairTasks = (): RepairTask[] => {
+    const tasks: RepairTask[] = []
+    if (isolated) {
+      tasks.push({ kind: 'connect', path, reason: 'isolated: no links to or from any knowledge page' })
+    }
+    for (const e of suspicious) {
+      tasks.push({
+        kind: 'edge',
+        from: e.from.path,
+        to: e.to.path,
+        reason: `the only link between the domains "${e.from.domain ?? '?'}" and "${e.to.domain ?? '?'}"`,
+      })
+    }
+    return tasks.slice(0, 10)
+  }
+
   if (!node) return <div className="gx-empty">This page is no longer in the graph.</div>
 
   return (
@@ -962,6 +1069,55 @@ function PageExplorer({
         <div className="gx-metric"><span className="v">{node.in}</span><span className="l">backlinks</span></div>
         <div className="gx-metric"><span className="v">{node.out}</span><span className="l">links out</span></div>
       </div>
+      {(isolated || suspicious.length > 0) && (
+        <div className="gx-health" role="status">
+          <div className="gx-health-head">Graph health</div>
+          {isolated && (
+            <p>
+              Isolated: no knowledge page links here or is linked from here — the page is
+              invisible to graph exploration.
+            </p>
+          )}
+          {suspicious.map((e) => (
+            <p key={`${e.from.path}→${e.to.path}`}>
+              <button className="gx-link inline" onClick={() => onSelectPage(e.from.path)}>{e.from.title}</button>
+              {' → '}
+              <button className="gx-link inline" onClick={() => onSelectPage(e.to.path)}>{e.to.title}</button>
+              {' is the only link between '}
+              <strong>{e.from.domain}</strong> and <strong>{e.to.domain}</strong> — possibly an
+              incidental aside rather than knowledge.
+            </p>
+          ))}
+          {repairId === null && (
+            <div className="gx-health-act">
+              <button
+                className="btn"
+                disabled={startRepair.isPending}
+                onClick={() => startRepair.mutate(repairTasks())}
+                title="A bounded agent run: weaves an isolated page into the graph and/or reviews the flagged link. Edits only the pages involved — one revertable commit."
+              >
+                {startRepair.isPending ? 'Starting…' : 'Repair (agent run)'}
+              </button>
+              {startRepair.isError && (
+                <span className="gx-health-err">{(startRepair.error as Error).message}</span>
+              )}
+            </div>
+          )}
+          {repairRunning && <p className="dim">Repair is running — the agent edits only the pages involved…</p>}
+          {repairRun?.status === 'done' && (
+            <p>
+              Repair finished: {repairRun.result?.pages.length ?? 0} page
+              {(repairRun.result?.pages.length ?? 0) === 1 ? '' : 's'} changed (one revertable commit).
+            </p>
+          )}
+          {repairRun?.status === 'error' && (
+            <div className="gx-health-act">
+              <span className="gx-health-err">Repair failed: {repairRun.error ?? 'unknown error'}</span>
+              <button className="btn" onClick={() => setRepairId(null)}>Retry</button>
+            </div>
+          )}
+        </div>
+      )}
       <div className="gx-body">
         <LinkSection title="Backlinks" list={backlinks} onSelect={onSelectPage} />
         <LinkSection title="Links to" list={outgoing} onSelect={onSelectPage} />
