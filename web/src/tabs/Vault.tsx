@@ -278,7 +278,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
   // graph — that is also what keeps the force layout small in local mode on a huge vault.
   // When the gaps view is on, the unresolved targets are appended as synthetic ghost nodes.
-  const { nodes, edges, focusIndex, ghostIndices, realCount, realEdgeCount } = useMemo(() => {
+  const { nodes, edges, focusIndex, ghostIndices, realCount, realEdgeCount, matches } = useMemo(() => {
     let keep: boolean[] = graph.nodes.map(
       (n) =>
         !hiddenTypes.has(n.type) &&
@@ -309,6 +309,32 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       }
       keep = keep.map((k, i) => k && within.has(i))
       keep[focusIndexFull] = true // the focus survives its own type/domain filter
+    }
+
+    // Search NARROWS the graph, it does not merely highlight (the old behaviour): with a
+    // query present, keep only the pages related to it — the ones that match, plus their
+    // direct neighbours so a match keeps its context — intersected with the filters already
+    // applied above. Emptying the query restores the full (filtered) graph. Multi-word
+    // queries are AND: every term must hit the title, a tag, or the domain.
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    const hit = (n: GraphNode): boolean =>
+      terms.every(
+        (t) =>
+          n.title.toLowerCase().includes(t) ||
+          n.tags.some((tag) => tag.toLowerCase().includes(t)) ||
+          (n.domain?.toLowerCase().includes(t) ?? false),
+      )
+    const matchFull = new Set<number>()
+    if (terms.length > 0) {
+      graph.nodes.forEach((n, i) => {
+        if (keep[i] && hit(n)) matchFull.add(i)
+      })
+      const related = new Set<number>(matchFull)
+      for (const [a, b] of graph.edges) {
+        if (matchFull.has(a) && keep[b]) related.add(b)
+        if (matchFull.has(b) && keep[a]) related.add(a)
+      }
+      keep = keep.map((k, i) => k && related.has(i))
     }
 
     const remap = new Map<number, number>()
@@ -351,20 +377,17 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       }
     }
 
-    return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null, ghostIndices, realCount, realEdgeCount }
-  }, [graph, hiddenTypes, selectedDomains, localDepth, focusIndexFull, showGaps])
+    // The exact matches, in SUBGRAPH indices, for the ring highlight and the results list.
+    // Neighbours pulled in for context are deliberately NOT matches — they render as plain
+    // context around the ringed hits.
+    const matches = new Set<number>()
+    for (const f of matchFull) {
+      const r = remap.get(f)
+      if (r !== undefined) matches.add(r)
+    }
 
-  // Search matches titles AND frontmatter tags — "finance" finds every page tagged
-  // german-finance even though no title contains the word.
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (q === '') return new Set<number>()
-    const hit = (n: GraphNode): boolean =>
-      n.title.toLowerCase().includes(q) || n.tags.some((t) => t.toLowerCase().includes(q))
-    // Real pages only — a ghost has no page to open, and its title matching would put a
-    // dead entry in the results list.
-    return new Set(nodes.map((n, i) => (i < realCount && hit(n) ? i : -1)).filter((i) => i >= 0))
-  }, [nodes, realCount, query])
+    return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null, ghostIndices, realCount, realEdgeCount, matches }
+  }, [graph, hiddenTypes, selectedDomains, localDepth, focusIndexFull, showGaps, query])
 
   // Subgraph index of the explorer selection, for the canvas ring + spotlight. Null when the
   // selected page/gap is currently filtered out of view (the panel still shows regardless).
@@ -389,9 +412,15 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // than tag-only hits), capped so the dropdown stays a shortcut rather than a browser.
   const RESULT_CAP = 8
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const list = [...matches].map((i) => nodes[i]!)
-    if (q !== '') list.sort((a, b) => Number(b.title.toLowerCase().includes(q)) - Number(a.title.toLowerCase().includes(q)))
+    // Title hits read as more direct than tag/domain-only hits — surface them first.
+    if (terms.length > 0)
+      list.sort(
+        (a, b) =>
+          Number(terms.some((t) => b.title.toLowerCase().includes(t))) -
+          Number(terms.some((t) => a.title.toLowerCase().includes(t))),
+      )
     return list.slice(0, RESULT_CAP)
   }, [matches, nodes, query])
 
@@ -428,6 +457,11 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           if (e.key === 'Enter' && matches.size === 1) {
             const only = nodes[[...matches][0]!]
             if (only) navigate(pageRoute(only.path))
+          }
+          // Escape restores the full graph without reaching for the mouse.
+          if (e.key === 'Escape' && query !== '') {
+            e.preventDefault()
+            setQuery('')
           }
         }}
         aria-label="Search the graph for a page or tag"
@@ -489,7 +523,10 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             )}
           </div>
         )}
-        <span className="spacer" />
+        {/* The view controls travel together as one right-aligned group, so a widening
+            domain-filter row can never strand a single control (the lens button) alone on
+            the next line — the whole group wraps as a unit and stays right-aligned. */}
+        <div className="vtool-right">
         <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
         {graph.gaps.length > 0 && (
           <button
@@ -530,6 +567,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             </>
           )}
         </span>
+        </div>
       </div>
 
       {/* Focus mode as its own row: the neighborhood depth is ONE state, so it reads as one
@@ -567,13 +605,21 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           clusters={clusterIds}
           clusterLabels={clusterLabels}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
-          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}`}
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${query.trim()}`}
           onSelect={(n) =>
             n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
           }
           overlay={
             <>
               {searchOverlay}
+              {query.trim() !== '' && realCount === 0 && (
+                <div className="graph-empty" role="status">
+                  No pages match “{query.trim()}”.
+                  <button className="linklike" onClick={() => setQuery('')}>
+                    Clear search
+                  </button>
+                </div>
+              )}
               {hasDomains && <LensLegend lens={lens} />}
               {trail.length > 1 && (
                 <div className="graph-trail" role="navigation" aria-label="Exploration trail">
