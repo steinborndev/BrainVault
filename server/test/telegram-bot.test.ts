@@ -7,6 +7,7 @@ import { startTelegramBot } from '../src/telegram/bot.js'
 import type { TelegramClient, TgMessage, TgUpdate } from '../src/telegram/client.js'
 import type { IngestQueue } from '../src/pipeline/queue.js'
 import type { JobRow, JobStore } from '../src/db/jobs.js'
+import type { MaintenanceRun } from '../src/pipeline/maintenance.js'
 import { EventBus } from '../src/pipeline/events.js'
 
 const ALLOWED_USER = 111
@@ -75,6 +76,17 @@ const fakeStore = {
   ],
 } as unknown as JobStore
 
+/** A `running` research run stub — tests drive its completion via the captured `onSettled`. */
+function makeResearchRun(): MaintenanceRun {
+  return {
+    id: 'RUNRESEARCH01',
+    kind: 'research',
+    channel: 'maintenance:research',
+    status: 'running',
+    startedAt: '2026-07-22T00:00:00.000Z',
+  }
+}
+
 function makeBot(over: {
   batches?: TgUpdate[][]
   setupMode?: boolean
@@ -82,12 +94,15 @@ function makeBot(over: {
   budget?: () => { limit: number | null; unit: 'jobs' | 'usd'; spent: number; exceeded: boolean; resetsAt: string }
   store?: JobStore
   events?: EventBus
+  /** Omit the research wiring to test the "not available" branch. */
+  noResearch?: boolean
 }) {
   const fake = makeFakeClient(over.batches ?? [])
   const q = makeFakeQueue()
   const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tg-bot-test-'))
   const logs: Array<{ level: string; message: string }> = []
   const dropCalls: Array<[number, string | undefined]> = []
+  const researchCalls: Array<{ topic: string; onSettled: (run: MaintenanceRun) => void }> = []
   const bot = startTelegramBot({
     telegram: { botToken: 't', allowedUserIds: [ALLOWED_USER] },
     queue: q.queue,
@@ -95,6 +110,14 @@ function makeBot(over: {
     setupMode: over.setupMode ?? false,
     ...(over.budget ? { budget: over.budget } : {}),
     ...(over.events ? { events: over.events } : {}),
+    ...(over.noResearch
+      ? {}
+      : {
+          startResearch: (topic: string, onSettled: (run: MaintenanceRun) => void) => {
+            researchCalls.push({ topic, onSettled })
+            return makeResearchRun()
+          },
+        }),
     client: fake.client,
     log: (level, message) => {
       logs.push({ level, message })
@@ -107,7 +130,7 @@ function makeBot(over: {
     albumWindowMs: over.albumWindowMs ?? 30,
     stagingDir,
   })
-  return { bot, ...fake, ...q, stagingDir, logs, dropCalls }
+  return { bot, ...fake, ...q, stagingDir, logs, dropCalls, researchCalls }
 }
 
 /** A full JobRow for notification tests. */
@@ -226,6 +249,79 @@ describe('telegram bot — commands', () => {
     await b.bot.stop()
     expect(b.sent[0]!.text).toContain('/status')
     expect(b.enqueueFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('telegram bot — /research', () => {
+  it('starts a research run with the bare topic and acknowledges with the run id', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research ionizable lipids' })]] })
+    await vi.waitFor(() => expect(b.sent.length).toBe(1))
+    await b.bot.stop()
+    expect(b.researchCalls).toHaveLength(1)
+    expect(b.researchCalls[0]!.topic).toBe('ionizable lipids')
+    expect(b.sent[0]!.text).toContain('ionizable lipids')
+    expect(b.sent[0]!.text).toContain('RCH01'.slice(-6)) // last 6 of RUNRESEARCH01
+    expect(b.enqueueFile).not.toHaveBeenCalled() // NOT filed as a note
+  })
+
+  it('strips an @botname suffix from the command before the topic', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research@MyVaultBot lipid nanoparticles' })]] })
+    await vi.waitFor(() => expect(b.sent.length).toBe(1))
+    await b.bot.stop()
+    expect(b.researchCalls[0]!.topic).toBe('lipid nanoparticles')
+  })
+
+  it('an empty topic gets usage help and starts nothing', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research' })]] })
+    await vi.waitFor(() => expect(b.sent.length).toBe(1))
+    await b.bot.stop()
+    expect(b.sent[0]!.text).toMatch(/usage/i)
+    expect(b.researchCalls).toHaveLength(0)
+  })
+
+  it('notifies the chat with page titles when the run settles done', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research ionizable lipids' })]] })
+    await vi.waitFor(() => expect(b.researchCalls.length).toBe(1))
+    b.researchCalls[0]!.onSettled({
+      ...makeResearchRun(),
+      status: 'done',
+      result: {
+        ok: true,
+        kind: 'research',
+        pages: ['wiki/concepts/Ionizable Lipid.md', 'wiki/index.md'],
+        usage: undefined as never,
+      },
+    })
+    await vi.waitFor(() => expect(b.sent.length).toBe(2)) // ack + completion
+    await b.bot.stop()
+    const done = b.sent[1]!.text
+    expect(done).toContain('Ionizable Lipid')
+    expect(done).not.toContain('wiki/') // paths never leak; titles only (§9)
+    expect(done).not.toContain('index') // bookkeeping page filtered out
+  })
+
+  it('reports a failed run with its error', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research something' })]] })
+    await vi.waitFor(() => expect(b.researchCalls.length).toBe(1))
+    b.researchCalls[0]!.onSettled({ ...makeResearchRun(), status: 'error', error: 'agent timed out' })
+    await vi.waitFor(() => expect(b.sent.length).toBe(2))
+    await b.bot.stop()
+    expect(b.sent[1]!.text).toContain('agent timed out')
+  })
+
+  it('setup mode refuses /research and starts nothing', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research anything' })]], setupMode: true })
+    await vi.waitFor(() => expect(b.sent.length).toBe(1))
+    await b.bot.stop()
+    expect(b.sent[0]!.text).toContain('setup mode')
+    expect(b.researchCalls).toHaveLength(0)
+  })
+
+  it('without research wiring, /research says it is unavailable', async () => {
+    const b = makeBot({ batches: [[update({ text: '/research x' })]], noResearch: true })
+    await vi.waitFor(() => expect(b.sent.length).toBe(1))
+    await b.bot.stop()
+    expect(b.sent[0]!.text).toMatch(/not available/i)
   })
 })
 

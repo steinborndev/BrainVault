@@ -169,6 +169,13 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
         // Same provider pattern (and the same budget module) as the queue and the stats
         // route, so all three always agree (SPEC.md §11.3).
         budget: () => budgetStatus(config, settings.effective(config), store),
+        // `/research <topic>` runs through the maintenance runner (web-egress research profile),
+        // not the ingest queue; the callback reports the settled run back to the chat.
+        startResearch: (topic, onSettled) => {
+          const run = maintenance.startResearch(topic)
+          maintenance.onRunSettled(run.id, onSettled)
+          return run
+        },
         log: (level, message) => app.log[level](`[telegram] ${message}`),
       })
     : null

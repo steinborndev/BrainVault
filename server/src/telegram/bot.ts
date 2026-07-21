@@ -20,8 +20,9 @@ import { FINISHED_STATES, type JobRow, type JobStore } from '../db/jobs.js'
 import type { TelegramConfig } from '../config.js'
 import type { BudgetStatus } from '../pipeline/budget.js'
 import type { EventBus, BusEvent } from '../pipeline/events.js'
+import type { MaintenanceRun } from '../pipeline/maintenance.js'
 import type { TelegramDropStore } from '../db/telegram-drops.js'
-import { formatJobOutcome, formatBatchOutcome } from './format.js'
+import { formatJobOutcome, formatBatchOutcome, formatResearchOutcome } from './format.js'
 import {
   TelegramClient,
   startPolling,
@@ -46,6 +47,7 @@ const SETUP_MODE_REPLY =
 const HELP_REPLY =
   'Send me a file, a URL, or plain text to queue it for ingestion.\n' +
   'Commands:\n' +
+  '/research <topic> — research a topic on the web and file it into the vault\n' +
   '/status — service, queue and budget state\n' +
   '/jobs — the most recent jobs'
 
@@ -73,6 +75,13 @@ export interface StartTelegramBotOptions {
   readonly drops?: Pick<TelegramDropStore, 'record'>
   /** Budget provider for /status; a provider so settings changes apply live (like the queue's). */
   readonly budget?: () => BudgetStatus
+  /**
+   * Starts an autoresearch run for `/research <topic>` and registers `onSettled` so the chat is
+   * notified when it finishes. Optional: absent in tests/CLIs (and in setup mode the bot gates
+   * the command before this is reached). The maintenance runner — not the ingest queue — owns
+   * research, so it is injected rather than derived from the queue.
+   */
+  readonly startResearch?: (topic: string, onSettled: (run: MaintenanceRun) => void) => MaintenanceRun
   readonly log?: LogFn
   /** Injected by tests. */
   readonly client?: TelegramClient
@@ -158,6 +167,30 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
     if (!options.setupMode) return true
     await reply(chatId, SETUP_MODE_REPLY)
     return false
+  }
+
+  /**
+   * `/research <topic>`: starts a web-egress research run (the one flow allowed the web) and
+   * reports back when it settles. Gated behind the setup-mode check by the caller like every
+   * other agent-spawning path. The completion notice is plain text (page titles only, §9).
+   */
+  const handleResearch = async (chatId: number, topic: string): Promise<void> => {
+    if (options.startResearch === undefined) {
+      await reply(chatId, 'Research is not available on this service.')
+      return
+    }
+    if (topic === '') {
+      await reply(chatId, 'Usage: /research <topic> — e.g. /research ionizable lipids')
+      return
+    }
+    const run = options.startResearch(topic, (settled) => {
+      void runSafely(() => reply(chatId, formatResearchOutcome(topic, settled)))
+    })
+    await reply(
+      chatId,
+      `Started research on "${topic}" (run ${run.id.slice(-6)}). It searches the web, can run ` +
+        `for several minutes and uses a chunk of today's budget — I'll report back when it's done.`,
+    )
   }
 
   const handleUrl = async (chatId: number, url: string): Promise<void> => {
@@ -386,6 +419,12 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
       if (command === '/status') return reply(chatId, statusText())
       if (command === '/jobs') return reply(chatId, jobsText())
       if (command === '/start' || command === '/help') return reply(chatId, HELP_REPLY)
+      if (command === '/research') {
+        // Strip the command (and an optional @botname suffix) to leave the bare topic.
+        const topic = text.slice(command.length).replace(/^@\S+/, '').trim()
+        if (!(await ingestAllowed(chatId))) return
+        return handleResearch(chatId, topic)
+      }
       return reply(chatId, `Unknown command ${command}.\n\n${HELP_REPLY}`)
     }
 

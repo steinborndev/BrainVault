@@ -5,9 +5,11 @@ import {
   pageTitle,
   formatJobOutcome,
   formatBatchOutcome,
+  formatResearchOutcome,
   MAX_MESSAGE_CHARS,
 } from '../src/telegram/format.js'
 import type { JobRow } from '../src/db/jobs.js'
+import type { MaintenanceRun } from '../src/pipeline/maintenance.js'
 
 function makeJob(over: Partial<JobRow> = {}): JobRow {
   return {
@@ -141,5 +143,38 @@ describe('formatBatchOutcome', () => {
   it('all done → ✅, none done → ❌', () => {
     expect(formatBatchOutcome([makeJob()])).toContain('✅')
     expect(formatBatchOutcome([makeJob({ status: 'failed' })])).toContain('❌')
+  })
+})
+
+describe('formatResearchOutcome', () => {
+  const run = (over: Partial<MaintenanceRun> = {}): MaintenanceRun => ({
+    id: 'RUNRESEARCH01',
+    kind: 'research',
+    channel: 'maintenance:research',
+    status: 'done',
+    startedAt: '2026-07-22T00:00:00.000Z',
+    ...over,
+  })
+
+  it('done → title list with bookkeeping pages filtered, no paths (§9)', () => {
+    const text = formatResearchOutcome('ionizable lipids', run({
+      result: {
+        ok: true,
+        kind: 'research',
+        pages: ['wiki/concepts/Ionizable Lipid.md', 'wiki/index.md', 'wiki/hot.md'],
+        usage: undefined as never,
+      },
+    }))
+    expect(text).toContain('ionizable lipids')
+    expect(text).toContain('• Ionizable Lipid')
+    expect(text).toContain('1 page(s)')
+    expect(text).not.toContain('wiki/')
+  })
+
+  it('error → the reason plus a dashboard retry hint', () => {
+    const text = formatResearchOutcome('x', run({ status: 'error', error: 'agent timed out' }))
+    expect(text).toContain('❌')
+    expect(text).toContain('agent timed out')
+    expect(text).toMatch(/dashboard/i)
   })
 })

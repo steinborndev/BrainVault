@@ -163,6 +163,12 @@ export class MaintenanceRunner {
   private readonly runMutex = new Mutex()
   /** In-memory registry of async runs, keyed by run id (insertion-ordered for eviction). */
   private readonly runs = new Map<string, MaintenanceRun>()
+  /**
+   * One-shot per-run completion callbacks for out-of-band notifiers (the telegram bot, so a
+   * research run it started reports back to the chat). The dashboard polls `getRun` instead and
+   * needs none of this. Keyed by run id; fired once in `settle()`, then dropped.
+   */
+  private readonly settledCallbacks = new Map<string, (run: MaintenanceRun) => void>()
 
   constructor(opts: MaintenanceRunnerOptions) {
     this.vaultRoot = opts.vaultRoot
@@ -530,11 +536,36 @@ export class MaintenanceRunner {
     }
   }
 
+  /**
+   * Registers a callback fired once when the given run settles to done/error, for out-of-band
+   * notifiers (the telegram bot). If the run has already settled — or is unknown/evicted — the
+   * callback still fires on the next tick with the current record so a caller can't hang waiting.
+   */
+  onRunSettled(id: string, cb: (run: MaintenanceRun) => void): void {
+    const existing = this.runs.get(id)
+    if (existing !== undefined && existing.status !== 'running') {
+      queueMicrotask(() => cb(existing))
+      return
+    }
+    this.settledCallbacks.set(id, cb)
+  }
+
   /** Transitions a tracked run to its terminal state (records may already be evicted — no-op then). */
   private settle(id: string, status: MaintenanceRunStatus, patch: { result?: MaintenanceResult; error?: string }): void {
     const prev = this.runs.get(id)
     if (!prev) return
-    this.runs.set(id, { ...prev, status, finishedAt: new Date().toISOString(), ...patch })
+    const settled: MaintenanceRun = { ...prev, status, finishedAt: new Date().toISOString(), ...patch }
+    this.runs.set(id, settled)
+    const cb = this.settledCallbacks.get(id)
+    if (cb !== undefined) {
+      this.settledCallbacks.delete(id)
+      // A notifier throwing must never corrupt the settled run record.
+      try {
+        cb(settled)
+      } catch {
+        /* swallowed */
+      }
+    }
   }
 
   /** Bounds the registry so long-lived services don't accumulate run records without limit. */
@@ -543,6 +574,7 @@ export class MaintenanceRunner {
       const oldest = this.runs.keys().next().value
       if (oldest === undefined) break
       this.runs.delete(oldest)
+      this.settledCallbacks.delete(oldest)
     }
   }
 

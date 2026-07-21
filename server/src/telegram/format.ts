@@ -9,6 +9,7 @@
 
 import path from 'node:path'
 import type { JobRow } from '../db/jobs.js'
+import type { MaintenanceRun } from '../pipeline/maintenance.js'
 
 /** Telegram's hard cap per message. */
 export const MAX_MESSAGE_CHARS = 4096
@@ -74,6 +75,24 @@ export function formatJobOutcome(job: JobRow): string {
   }
   return truncateMessage(
     `⏸ *${name}* was deferred — this type is not supported yet\\. It is parked in the dashboard\\.`,
+  )
+}
+
+/**
+ * One settled research run → one plain-text message. Sent via the bot's plain `reply` (not
+ * MarkdownV2), so no escaping: the topic is user-supplied and page titles love reserved
+ * characters. Carries page TITLES only, never content (§9).
+ */
+export function formatResearchOutcome(topic: string, run: MaintenanceRun): string {
+  if (run.status === 'error') {
+    const reason = run.error ?? run.result?.error ?? 'unknown error'
+    return truncateMessage(`❌ Research on "${topic}" failed: ${reason}\n\nRetry it from the dashboard.`)
+  }
+  const pages = (run.result?.pages ?? []).filter((p) => !isMaintenancePage(p))
+  const titles = [...new Set(pages.map(pageTitle))]
+  const list = titles.length > 0 ? `\nPages:\n${titles.map((t) => `• ${t}`).join('\n')}` : ''
+  return truncateMessage(
+    `✅ Research on "${topic}" done — ${titles.length} page(s) created or updated.${list}`,
   )
 }
 
