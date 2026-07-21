@@ -30,6 +30,7 @@ import { readDomainRegistry, domainSystemPrompt, DOMAIN_REGISTRY_PATH, UNASSIGNE
 import { parseDomainReview, DOMAIN_REVIEW_FORMAT, type DomainReview } from './domain-review.js'
 import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
+import { findRelatedPages, renderOverlapBlock } from './related-pages.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -253,8 +254,16 @@ export class MaintenanceRunner {
    * The steps below mirror the vault's own `commands/autoresearch.md`, so behaviour is preserved
    * without depending on a namespaced command name or editing the vault (hard rule 5): load the
    * skill's research program, run the loop, then update the wiki's index/log/hot pages.
+   *
+   * Overlap steering: a deterministic title match (`findRelatedPages`) surfaces the pages the
+   * vault ALREADY has on this topic and injects them into the prompt, so a research run on an
+   * established theme (e.g. "ionizable lipids", where a whole LNP cluster already exists) extends
+   * those pages instead of filing a parallel synthesis. The skill's own "check the index first"
+   * rule is otherwise only a soft instruction and the service prompt never named the existing
+   * pages; this makes the preferred "extend, don't duplicate" path the explicit default.
    */
   startResearch(topic: string): MaintenanceRun {
+    const overlap = renderOverlapBlock(findRelatedPages(this.vaultRoot, topic))
     return this.start(
       'research',
       'Use the autoresearch skill to research this topic and file the findings into the wiki: ' +
@@ -264,7 +273,8 @@ export class MaintenanceRunner {
         'synthesize, and file structured pages into the wiki. ' +
         'Afterwards update wiki/index.md, wiki/log.md and wiki/hot.md. ' +
         'Finally report how many pages you created and the key findings. ' +
-        'Stay focused on the stated topic rather than broadening the scope.',
+        'Stay focused on the stated topic rather than broadening the scope.' +
+        overlap,
       'research',
     )
   }
