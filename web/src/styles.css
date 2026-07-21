@@ -2343,8 +2343,11 @@ details.hot-cache[open] .hc-summary::before {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: var(--shadow);
-  max-height: 320px;
+  /* Show as many matches as the canvas has room for, then scroll — the whole point is
+     that no match is out of reach. Bounded so it never runs off the drawing area. */
+  max-height: min(60vh, 540px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .graph-search-results button {
   display: flex;
@@ -2367,11 +2370,6 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 10px;
   text-transform: uppercase;
   flex-shrink: 0;
-}
-.graph-search-results .more {
-  color: var(--text-faint);
-  font-size: 12px;
-  padding: 4px 8px;
 }
 .graph-search input {
   border: none;

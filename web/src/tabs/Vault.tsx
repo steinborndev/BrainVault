@@ -604,20 +604,22 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   }, [showClusters, nodes, edges, realCount])
 
   // The clickable result list under the search box — the rings in the graph show WHERE the
-  // matches are, this shows WHAT they are. Title matches first (they read as more direct
-  // than tag-only hits), capped so the dropdown stays a shortcut rather than a browser.
-  const RESULT_CAP = 8
+  // matches are, this shows WHAT they are. Every match is listed (the dropdown scrolls);
+  // capping it forced the user to hunt the rest in the graph, which is the exact friction
+  // a result list should remove. Title matches first (they read as more direct than
+  // tag-only hits), then alphabetical so the order is stable as you scroll.
   const results = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
     const list = [...matches].map((i) => nodes[i]!)
-    // Title hits read as more direct than tag/domain-only hits — surface them first.
-    if (terms.length > 0)
-      list.sort(
-        (a, b) =>
-          Number(terms.some((t) => b.title.toLowerCase().includes(t))) -
-          Number(terms.some((t) => a.title.toLowerCase().includes(t))),
-      )
-    return list.slice(0, RESULT_CAP)
+    list.sort((a, b) => {
+      if (terms.length > 0) {
+        const ta = terms.some((t) => a.title.toLowerCase().includes(t)) ? 0 : 1
+        const tb = terms.some((t) => b.title.toLowerCase().includes(t)) ? 0 : 1
+        if (ta !== tb) return ta - tb
+      }
+      return a.title.localeCompare(b.title)
+    })
+    return list
   }, [matches, nodes, query])
 
   const toggleType = (t: string): void => {
@@ -731,9 +733,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               </button>
             </li>
           ))}
-          {matches.size > results.length && (
-            <li className="more">…{matches.size - results.length} more highlighted in the graph</li>
-          )}
         </ul>
       )}
     </div>
