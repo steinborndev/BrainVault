@@ -151,11 +151,20 @@ const ARTIFACT_NAME = /report|session|benchmark|snapshot|frontier|rollout|audit/
  * Classifies one page (see NodeKind). Directory alone is NOT enough — the `_index` MOCs
  * live inside the knowledge folders and `wiki/meta/` mixes the domain registry with lint
  * reports — so the frontmatter `type:` leads and the location/name break the ties.
+ * `domain: meta` overrides even a knowledge `type:`: the vault marks every system page
+ * with it, and ops notes reuse knowledge types (a rollout note filed as `type: decision`).
  */
-export function classifyKind(fmType: string | null, bucket: string, title: string): NodeKind {
-  if (fmType !== null && KNOWLEDGE_TYPES.has(fmType)) return 'knowledge'
+export function classifyKind(
+  fmType: string | null,
+  domain: string | null,
+  bucket: string,
+  title: string,
+): NodeKind {
+  const metaDomain = domain === 'meta'
+  if (!metaDomain && fmType !== null && KNOWLEDGE_TYPES.has(fmType)) return 'knowledge'
   if (fmType !== null && ARTIFACT_TYPES.has(fmType)) return 'artifact'
   const system =
+    metaDomain ||
     fmType === 'meta' ||
     bucket === 'meta' ||
     bucket === 'folds' ||
@@ -265,7 +274,7 @@ export class GraphBuilder {
         type: f.type,
         tags: entry?.tags ?? [],
         domain: entry?.domain ?? null,
-        kind: classifyKind(entry?.fmType ?? null, f.type, f.title),
+        kind: classifyKind(entry?.fmType ?? null, entry?.domain ?? null, f.type, f.title),
         out: outDeg[i]!,
         in: inDeg[i]!,
         mtimeMs: f.mtimeMs,

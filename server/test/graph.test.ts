@@ -86,24 +86,26 @@ describe('GraphBuilder', () => {
 
   it('classifies pages as knowledge, structural or artifact', () => {
     // Frontmatter type leads.
-    expect(classifyKind('concept', 'concepts', 'Compound Interest')).toBe('knowledge')
-    expect(classifyKind('session', 'meta', '2026-04-15-release-report-session')).toBe('artifact')
-    expect(classifyKind('fold', 'folds', 'fold-k3-from-2026-04-23')).toBe('artifact')
+    expect(classifyKind('concept', 'finance', 'concepts', 'Compound Interest')).toBe('knowledge')
+    expect(classifyKind('session', 'meta', 'meta', '2026-04-15-release-report-session')).toBe('artifact')
+    expect(classifyKind('fold', 'meta', 'folds', 'fold-k3-from-2026-04-23')).toBe('artifact')
     // `type: meta` splits by name/location: registries and hubs are structure, reports are runs.
-    expect(classifyKind('meta', 'meta', 'domains')).toBe('structural')
-    expect(classifyKind('meta', 'root', 'index')).toBe('structural')
-    expect(classifyKind('meta', 'concepts', '_index')).toBe('structural') // MOC inside a knowledge folder
-    expect(classifyKind('meta', 'concepts', 'Hot Cache')).toBe('structural')
-    expect(classifyKind('meta', 'meta', 'lint-report-2026-07-19')).toBe('artifact')
-    expect(classifyKind('meta', 'meta', 'retrieval-benchmark-v1.7')).toBe('artifact')
-    expect(classifyKind('meta', 'meta', '2026-04-14-community-cta-rollout')).toBe('artifact')
+    expect(classifyKind('meta', 'meta', 'meta', 'domains')).toBe('structural')
+    expect(classifyKind('meta', 'meta', 'root', 'index')).toBe('structural')
+    expect(classifyKind('meta', 'meta', 'concepts', '_index')).toBe('structural') // MOC inside a knowledge folder
+    expect(classifyKind('meta', 'meta', 'concepts', 'Hot Cache')).toBe('structural')
+    expect(classifyKind('meta', 'meta', 'meta', 'lint-report-2026-07-19')).toBe('artifact')
+    expect(classifyKind('meta', 'meta', 'meta', 'retrieval-benchmark-v1.7')).toBe('artifact')
+    // `domain: meta` overrides a knowledge type — ops notes reuse them (`type: decision`).
+    expect(classifyKind('decision', 'meta', 'meta', '2026-04-14-community-cta-rollout')).toBe('artifact')
+    expect(classifyKind('decision', 'ai-tooling', 'concepts', 'Stack Choice')).toBe('knowledge')
     // No frontmatter type at all: location decides, defaulting to knowledge.
-    expect(classifyKind(null, 'concepts', 'Osmosis')).toBe('knowledge')
-    expect(classifyKind(null, 'root', 'getting-started')).toBe('structural')
-    expect(classifyKind(null, 'meta', 'boundary-frontier-2026-04-24')).toBe('artifact')
+    expect(classifyKind(null, null, 'concepts', 'Osmosis')).toBe('knowledge')
+    expect(classifyKind(null, null, 'root', 'getting-started')).toBe('structural')
+    expect(classifyKind(null, 'meta', 'meta', 'boundary-frontier-2026-04-24')).toBe('artifact')
     // The artifact-name heuristic never touches ordinary knowledge pages.
-    expect(classifyKind('concept', 'concepts', 'Retrieval Benchmark')).toBe('knowledge')
-    expect(classifyKind(null, 'concepts', 'Security Audit')).toBe('knowledge')
+    expect(classifyKind('concept', 'ai-tooling', 'concepts', 'Retrieval Benchmark')).toBe('knowledge')
+    expect(classifyKind(null, null, 'concepts', 'Security Audit')).toBe('knowledge')
   })
 
   it('carries kind on built nodes', () => {
