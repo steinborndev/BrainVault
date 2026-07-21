@@ -926,7 +926,12 @@ function DomainBand({
   const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
   const dot = (d: string): string => (d === NO_DOMAIN ? 'var(--muted)' : domainColor(d))
   const q = filter.trim().toLowerCase()
-  const panelRows = q === '' ? domains : domains.filter(([d]) => label(d).toLowerCase().includes(q))
+  // The band orders by size (biggest domains first); the panel is for FINDING a domain,
+  // so it orders alphabetically — the no-domain pseudo-bucket stays last either way.
+  const alphabetical = [...domains].sort(([a], [b]) =>
+    a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b),
+  )
+  const panelRows = q === '' ? alphabetical : alphabetical.filter(([d]) => label(d).toLowerCase().includes(q))
 
   return (
     <div className="domainband">

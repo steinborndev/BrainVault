@@ -2178,15 +2178,20 @@ details.hot-cache[open] .hc-summary::before {
 }
 .db-panel .p-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr): without the explicit 0 minimum, a long domain name's min-content
+     width wins over the fr split, pushes the columns past the panel and forces a
+     horizontal scrollbar — the names must ellipsize instead. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
   max-height: 260px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 .p-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   border-radius: 6px;
   padding: 6px 8px;
   font-size: 12.5px;
