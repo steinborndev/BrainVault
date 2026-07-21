@@ -1188,7 +1188,8 @@ function GapList({
   onSelectGap: (title: string) => void
 }): React.ReactElement {
   const total = gaps.reduce((s, g) => s + g.refBy.length, 0)
-  const max = gaps[0]?.refBy.length ?? 1
+  // Server ranks by knowledge referrers first, so the top row need not have the most links.
+  const max = gaps.reduce((m, g) => Math.max(m, g.refBy.length), 1)
   return (
     <>
       <div className="gx-head">
@@ -1202,7 +1203,7 @@ function GapList({
       </div>
       <div className="gx-note">
         Every dashed node is a page other pages link to but that doesn’t exist yet — ranked by how
-        many links are waiting. A ready-made research backlog.
+        many content pages are waiting. A ready-made research backlog.
       </div>
       <div className="gx-body">
         <ol className="gx-gaplist">

@@ -180,7 +180,7 @@ export interface VaultGraph {
   /** Directed edges as [fromIndex, toIndex] into `nodes`. */
   edges: Array<[number, number]>
   unresolved: number
-  /** Distinct unresolved link targets, most-referenced first. */
+  /** Distinct unresolved link targets — most knowledge-page referrers first. */
   gaps: GraphGap[]
   builtAt: string
 }

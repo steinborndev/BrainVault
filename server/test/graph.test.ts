@@ -150,15 +150,76 @@ describe('GraphBuilder', () => {
     expect(g.gaps[1]!.refBy).toHaveLength(1)
   })
 
-  it('counts path-qualified navigation links as unresolved but excludes them from gaps', () => {
-    // The claude-obsidian vault links its folder hubs as [[concepts/_index]] — dangling
-    // under the basename resolver, but navigation, not a missing content page.
+  it('counts dangling path-qualified links as unresolved but excludes them from gaps', () => {
+    // Path targets whose page really doesn't exist stay dangling — and stay out of the
+    // gap list (navigation/staging references, not missing content pages).
     page('wiki/concepts/A.md', 'nav [[concepts/_index]] and content gap [[Osmosis]]')
-    page('wiki/concepts/B.md', 'more nav [[sources/_index]]')
+    page('wiki/concepts/B.md', 'more nav [[notes/Foo]]')
     const g = new GraphBuilder(vaultRoot).build()
     expect(g.unresolved).toBe(3) // all three dangling links still count
     expect(g.gaps).toHaveLength(1) // only the real content gap surfaces
     expect(g.gaps[0]!.title).toBe('Osmosis')
+  })
+
+  it('resolves path-qualified links against the actual page path, with or without wiki/ prefix', () => {
+    // The vault links its folder hubs as [[concepts/_index]] — the basename index can't
+    // match a path, but the page exists, so it must resolve to a real edge, not a gap.
+    page('wiki/concepts/_index.md', '---\ntype: meta\ndomain: meta\n---\nhub')
+    page('wiki/concepts/A.md', 'nav [[concepts/_index]]')
+    page('wiki/concepts/B.md', 'nav [[wiki/concepts/_index]] spelled from the vault root')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(0)
+    expect(g.gaps).toHaveLength(0)
+    const hub = g.nodes.find((n) => n.title === '_index')!
+    expect(hub.in).toBe(2)
+  })
+
+  it('resolves links to non-markdown wiki files without creating nodes or gaps', () => {
+    // Canvases are linked without their extension, bases with it — both spellings exist
+    // in the vault. Neither is a missing page.
+    page('wiki/index.md', 'see [[Wiki Map]], [[dashboard.base]] and [[canvases/presentation]]')
+    fs.writeFileSync(path.join(vaultRoot, 'wiki/Wiki Map.canvas'), '{}')
+    fs.mkdirSync(path.join(vaultRoot, 'wiki/meta'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki/meta/dashboard.base'), '{}')
+    fs.mkdirSync(path.join(vaultRoot, 'wiki/canvases'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki/canvases/presentation.canvas'), '{}')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(0)
+    expect(g.gaps).toHaveLength(0)
+    expect(g.nodes).toHaveLength(1) // assets resolve links but never become nodes
+    expect(g.edges).toHaveLength(0)
+  })
+
+  it('rebuilds when an asset appears — a former gap resolves', () => {
+    page('wiki/index.md', '[[Wiki Map]]')
+    const builder = new GraphBuilder(vaultRoot)
+    expect(builder.build().unresolved).toBe(1)
+    fs.writeFileSync(path.join(vaultRoot, 'wiki/Wiki Map.canvas'), '{}')
+    expect(builder.build().unresolved).toBe(0) // asset set is part of the cache signature
+  })
+
+  it('never counts artifact pages as gap referrers — they quote dangling links', () => {
+    page('wiki/concepts/A.md', '---\ntype: concept\ndomain: bio\n---\nwants [[Osmosis]]')
+    page(
+      'wiki/meta/lint-report-2026-07-19.md',
+      '---\ntype: meta\ndomain: meta\n---\ndangling: [[Osmosis]], [[...]], [[Rankenstein]]',
+    )
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(4) // the report's dangling links still count as unresolved
+    expect(g.gaps).toHaveLength(1) // but mint no gaps ("..." and "Rankenstein" vanish)
+    expect(g.gaps[0]!.title).toBe('Osmosis')
+    // ...and don't inflate a real gap's referrer list either.
+    expect(g.gaps[0]!.refBy.map((i) => g.nodes[i]!.title)).toEqual(['A'])
+  })
+
+  it('ranks gaps wanted by knowledge pages above ones only system pages mention', () => {
+    // "Espresso" has MORE referrers, but both are structural (log + index); "Osmosis" has
+    // one knowledge referrer and must outrank it — the list is a research backlog.
+    page('wiki/concepts/A.md', '---\ntype: concept\ndomain: bio\n---\nwants [[Osmosis]]')
+    page('wiki/log.md', 'ingested [[Espresso]]')
+    page('wiki/index.md', 'todo [[Espresso]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.gaps.map((x) => x.title)).toEqual(['Osmosis', 'Espresso'])
   })
 
   it('returns the identical graph object while nothing changed (whole-graph cache)', () => {

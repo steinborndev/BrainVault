@@ -50,6 +50,10 @@ export interface GraphNode {
  * A knowledge gap: a wikilink target no page satisfies. The vault's own record of what
  * to write next — pages already cite it, it just doesn't exist yet. Feeds the dashboard's
  * ghost nodes and the ranked "most-wanted missing pages" list (SPEC §12.4).
+ *
+ * Artifact pages (lint reports, session logs, folds) never count as referrers: they QUOTE
+ * dangling links while reporting on them rather than wanting the page written, so one lint
+ * report would otherwise inflate every gap and mint pure-noise entries.
  */
 export interface GraphGap {
   /** The missing page's name, cased as first written in a wikilink. */
@@ -64,7 +68,7 @@ export interface VaultGraph {
   readonly edges: Array<[number, number]>
   /** Wikilink targets that resolved to no page (dangling links), counted per source of truth. */
   readonly unresolved: number
-  /** Distinct unresolved targets, most-referenced first. */
+  /** Distinct unresolved targets — most knowledge-page referrers first, see the gap sort. */
   readonly gaps: GraphGap[]
   readonly builtAt: string
 }
@@ -186,10 +190,13 @@ export class GraphBuilder {
 
   /** Builds (or returns the cached) graph. Never throws on unreadable single files. */
   build(): VaultGraph {
-    const files = this.listPages()
+    const { pages: files, assets } = this.listFiles()
 
-    // Whole-graph short-circuit: same file set, same mtimes/sizes → same graph.
-    const signature = files.map((f) => `${f.rel}:${f.mtimeMs}:${f.size}`).join('\n')
+    // Whole-graph short-circuit: same file set, same mtimes/sizes → same graph. Assets
+    // join by path only — their content never matters, but adding/removing one changes
+    // what resolves.
+    const signature =
+      files.map((f) => `${f.rel}:${f.mtimeMs}:${f.size}`).join('\n') + '\0' + assets.join('\n')
     if (this.lastGraph !== undefined && signature === this.lastSignature) return this.lastGraph
 
     // Drop cache entries for pages that no longer exist.
@@ -223,12 +230,41 @@ export class GraphBuilder {
       })
     }
 
-    // Resolve: case-insensitive basename index, first occurrence wins (same rule the
-    // citation resolver uses, so chat chips and graph edges can never disagree).
+    // Resolve, three layers (checked in order):
+    //  1. Case-insensitive basename index, first occurrence wins — the primary rule, shared
+    //     with the citation resolver (chat chips resolve a subset of what the graph does:
+    //     layers 2 and 3 are graph-only, so a chip may show unresolved where the graph links).
+    //  2. Path-qualified targets (`[[concepts/_index]]`) against the page's wiki-relative
+    //     path — the basename index structurally can't match them, but the pages exist;
+    //     without this layer the vault's `_index` nav links dominate the unresolved count.
+    //  3. Non-markdown vault files (`.canvas`, `.base`, …): resolution-only — a link to an
+    //     existing canvas is not a missing page, but assets never become nodes.
     const byName = new Map<string, number>()
     files.forEach((f, i) => {
       const key = f.title.toLowerCase()
       if (!byName.has(key)) byName.set(key, i)
+    })
+    const byPath = new Map<string, number>()
+    files.forEach((f, i) => {
+      // `wiki/concepts/_index.md` → `concepts/_index` (links are written wiki-relative).
+      const key = f.rel.slice('wiki/'.length, -'.md'.length).toLowerCase()
+      if (!byPath.has(key)) byPath.set(key, i)
+    })
+    const assetKeys = new Set<string>()
+    for (const rel of assets) {
+      const sub = rel.slice('wiki/'.length).toLowerCase()
+      const base = sub.split('/').pop()!
+      // Writers link assets by name with ([[dashboard.base]]) or without ([[Wiki Map]])
+      // the extension, bare or path-qualified — accept all four spellings.
+      for (const k of [sub, sub.replace(/\.[^./]+$/, ''), base, base.replace(/\.[^./]+$/, '')]) {
+        assetKeys.add(k)
+      }
+    }
+
+    // Page kinds, needed before the link loop: artifact pages don't nominate gaps.
+    const kinds: NodeKind[] = files.map((f) => {
+      const entry = this.cache.get(f.abs)
+      return classifyKind(entry?.fmType ?? null, entry?.domain ?? null, f.type, f.title)
     })
 
     const outDeg = new Array<number>(files.length).fill(0)
@@ -241,17 +277,20 @@ export class GraphBuilder {
     const gapByKey = new Map<string, { title: string; refBy: Set<number> }>()
     files.forEach((f, from) => {
       for (const target of this.cache.get(f.abs)?.links ?? []) {
-        const to = byName.get(target.toLowerCase())
+        const lower = target.toLowerCase()
+        // A leading `wiki/` is tolerated everywhere: paths and asset keys are stored
+        // wiki-relative, and both link spellings occur in agent-written pages.
+        const wikiRel = lower.startsWith('wiki/') ? lower.slice('wiki/'.length) : lower
+        const to = byName.get(lower) ?? (target.includes('/') ? byPath.get(wikiRel) : undefined)
         if (to === undefined) {
+          if (assetKeys.has(wikiRel)) continue // an existing canvas/base — resolved, no node
           unresolved++
-          // A path-qualified target (`[[concepts/_index]]`) is a navigation link the
-          // basename resolver structurally can't match — not a missing CONTENT page. Count
-          // it as unresolved (it is a dangling link) but keep it out of the gaps list, or
-          // the vault's `_index` hubs would drown out the real "pages to write".
-          if (!target.includes('/')) {
-            const key = target.toLowerCase()
-            const gap = gapByKey.get(key)
-            if (gap === undefined) gapByKey.set(key, { title: target, refBy: new Set([from]) })
+          // Path-qualified stragglers (`[[notes/Foo]]`, `.raw/…`) stay out of the gap list:
+          // they are navigation or staging references, not missing CONTENT pages. Artifact
+          // sources count as unresolved but never as gap referrers (see GraphGap).
+          if (!target.includes('/') && kinds[from] !== 'artifact') {
+            const gap = gapByKey.get(lower)
+            if (gap === undefined) gapByKey.set(lower, { title: target, refBy: new Set([from]) })
             else gap.refBy.add(from)
           }
           continue
@@ -274,7 +313,7 @@ export class GraphBuilder {
         type: f.type,
         tags: entry?.tags ?? [],
         domain: entry?.domain ?? null,
-        kind: classifyKind(entry?.fmType ?? null, entry?.domain ?? null, f.type, f.title),
+        kind: kinds[i]!,
         out: outDeg[i]!,
         in: inDeg[i]!,
         mtimeMs: f.mtimeMs,
@@ -282,9 +321,25 @@ export class GraphBuilder {
       }
     })
 
+    // Rank by how many KNOWLEDGE pages wait for the target, then by total referrers: the
+    // list is a research backlog, and a gap two content pages want beats one that only
+    // hubs and logs mention.
     const gaps: GraphGap[] = [...gapByKey.values()]
-      .map((g) => ({ title: g.title, refBy: [...g.refBy].sort((a, b) => a - b) }))
-      .sort((a, b) => b.refBy.length - a.refBy.length || a.title.localeCompare(b.title))
+      .map((g) => {
+        const refBy = [...g.refBy].sort((a, b) => a - b)
+        return {
+          title: g.title,
+          refBy,
+          fromKnowledge: refBy.filter((i) => kinds[i] === 'knowledge').length,
+        }
+      })
+      .sort(
+        (a, b) =>
+          b.fromKnowledge - a.fromKnowledge ||
+          b.refBy.length - a.refBy.length ||
+          a.title.localeCompare(b.title),
+      )
+      .map(({ title, refBy }) => ({ title, refBy }))
 
     const graph: VaultGraph = { nodes, edges, unresolved, gaps, builtAt: new Date().toISOString() }
     this.lastSignature = signature
@@ -292,10 +347,18 @@ export class GraphBuilder {
     return graph
   }
 
-  /** All wiki pages with the stat data the cache keys on. Sorted for a stable signature. */
-  private listPages(): Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }> {
+  /**
+   * All wiki pages with the stat data the cache keys on, plus the vault-relative paths of
+   * non-markdown wiki files (canvases, bases, …) that participate in link resolution only.
+   * Both sorted for a stable signature.
+   */
+  private listFiles(): {
+    pages: Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }>
+    assets: string[]
+  } {
     const wikiRoot = path.join(this.vaultRoot, 'wiki')
-    const out: Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }> = []
+    const pages: Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }> = []
+    const assets: string[] = []
     const walk = (dir: string): void => {
       let entries: fs.Dirent[]
       try {
@@ -315,7 +378,7 @@ export class GraphBuilder {
           }
           const rel = toPosix(path.relative(this.vaultRoot, abs))
           const parts = rel.split('/') // wiki/<bucket>/... or wiki/<file>.md
-          out.push({
+          pages.push({
             abs,
             rel,
             title: e.name.slice(0, -3),
@@ -323,11 +386,14 @@ export class GraphBuilder {
             mtimeMs: stat.mtimeMs,
             size: stat.size,
           })
+        } else if (e.isFile()) {
+          assets.push(toPosix(path.relative(this.vaultRoot, abs)))
         }
       }
     }
     walk(wikiRoot)
-    out.sort((a, b) => a.rel.localeCompare(b.rel))
-    return out
+    pages.sort((a, b) => a.rel.localeCompare(b.rel))
+    assets.sort()
+    return { pages, assets }
   }
 }
