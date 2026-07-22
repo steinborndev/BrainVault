@@ -285,6 +285,18 @@ function detectClusters(
 /** Missing `kind` (ghost nodes, old cached responses) counts as knowledge — never hide it. */
 const isKnowledge = (n: GraphNode): boolean => (n.kind ?? 'knowledge') === 'knowledge'
 
+/**
+ * Tags that mirror a page's `type:`/kind rather than its subject — they say WHAT a page is,
+ * not what it's ABOUT, so they carry no thematic signal for "Related by tag". Every source
+ * page shares `#source`, so matching on it drags in the whole source corpus. Mirrors the
+ * server's KNOWLEDGE_TYPES/ARTIFACT_TYPES plus structural markers (server/src/pipeline/graph.ts).
+ */
+const STRUCTURAL_TAGS: ReadonlySet<string> = new Set([
+  'concept', 'entity', 'source', 'reference', 'comparison', 'question', 'synthesis', 'decision',
+  'session', 'fold', 'report', 'release', 'index', 'log', 'meta', 'moc',
+])
+const isThematicTag = (t: string): boolean => !STRUCTURAL_TAGS.has(t.toLowerCase())
+
 /** localStorage key for the System toggle — a lasting preference, not a session whim. */
 const SHOW_SYSTEM_KEY = 'vault.showSystem'
 
@@ -993,17 +1005,44 @@ function PageExplorer({
         : graph.edges.filter(([from]) => from === idx).map(([, to]) => graph.nodes[to]!).sort(byTitle),
     [graph, idx],
   )
+  // Tag rarity across the vault: a tag on half the pages is near-worthless as a "related"
+  // signal, one on three pages is a strong one. IDF weight = log(N / df); a tag on every page
+  // scores 0 and drops out on its own, so no fixed denylist has to keep pace with the vault.
+  const tagIdf = useMemo(() => {
+    const df = new Map<string, number>()
+    let n = 0
+    for (const nd of graph.nodes) {
+      if (!isKnowledge(nd)) continue
+      n++
+      for (const t of new Set(nd.tags.filter(isThematicTag))) df.set(t, (df.get(t) ?? 0) + 1)
+    }
+    const idf = new Map<string, number>()
+    for (const [t, count] of df) idf.set(t, Math.log(n / count))
+    return idf
+  }, [graph])
+
   // Related by shared tag, excluding pages already linked either way — the tag axis surfaces
-  // neighbors the wikilinks don't. Capped so the panel stays a summary.
+  // neighbors the wikilinks don't. Structural tags (`#source`, …) carry no subject and are
+  // dropped; candidates are ranked by summed IDF of the shared thematic tags so the closest
+  // neighbors win, not the alphabetically-first ones. Capped so the panel stays a summary.
   const related = useMemo(() => {
-    if (!node || node.tags.length === 0) return []
+    if (!node) return []
+    const own = node.tags.filter(isThematicTag)
+    if (own.length === 0) return []
+    const weight = new Map(own.map((t) => [t, tagIdf.get(t) ?? 0]))
     const linked = new Set([path, ...backlinks.map((n) => n.path), ...outgoing.map((n) => n.path)])
-    const tags = new Set(node.tags)
     return graph.nodes
-      .filter((n) => !linked.has(n.path) && n.tags.some((t) => tags.has(t)))
-      .sort(byTitle)
+      .filter((n) => !linked.has(n.path))
+      .map((n) => {
+        let score = 0
+        for (const t of new Set(n.tags)) score += weight.get(t) ?? 0
+        return { node: n, score }
+      })
+      .filter((c) => c.score > 0)
+      .sort((a, b) => b.score - a.score || byTitle(a.node, b.node))
       .slice(0, 6)
-  }, [graph, node, path, backlinks, outgoing])
+      .map((c) => c.node)
+  }, [graph, node, path, backlinks, outgoing, tagIdf])
 
   // ---- graph repair (deterministic findings for THIS page → one bounded agent run) ----
   const qc = useQueryClient()
