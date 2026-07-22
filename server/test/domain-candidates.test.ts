@@ -4,9 +4,6 @@
  * parser.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { findDomainCandidates, MIN_CANDIDATE_PAGES } from '../src/pipeline/domain-candidates.js'
 import { parseDomainReview } from '../src/pipeline/domain-review.js'
 import { appendDomainSection, parseDomainRegistry, isValidDomainKey, UNASSIGNED } from '../src/pipeline/domains.js'

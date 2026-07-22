@@ -414,7 +414,7 @@ export function validateAddressMap(vaultRoot: string): ValidationFinding[] {
       })
       continue
     }
-    let onPage = ''
+    let onPage: string
     try {
       onPage = parseFrontmatter(fs.readFileSync(abs, 'utf8')).fields.get('address') ?? ''
     } catch {
