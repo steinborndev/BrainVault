@@ -409,11 +409,13 @@ export class MaintenanceRunner {
         '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
         'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
         '- Frontmatter edits are limited to the `domain:` field and the domain tag mirrored into ' +
-        `the \`tags:\` list: on every page you re-file, remove a stale \`${UNASSIGNED}\` tag (and ` +
-        'any tag that merely mirrors a previous domain key) and make sure the new domain key is ' +
-        `present as a tag. Pages left as \`${UNASSIGNED}\` keep the \`${UNASSIGNED}\` tag. Leave ` +
-        'every other tag, all other frontmatter fields, page bodies, titles, and wikilinks ' +
-        'untouched. Do not create, delete, rename or merge any page.\n' +
+        'the `tags:` list — and the two must be CONSISTENT on every page, not only on pages you ' +
+        `re-file: a page whose \`domain:\` is a real listed key must not carry a stale ` +
+        `\`${UNASSIGNED}\` tag. Remove it and make sure the current domain key is present as a ` +
+        'tag. When you re-file a page, also drop the tag mirroring its previous domain key. ' +
+        `Pages whose domain is \`${UNASSIGNED}\` keep the \`${UNASSIGNED}\` tag. Leave every ` +
+        'other tag, all other frontmatter fields, page bodies, titles, and wikilinks untouched. ' +
+        'Do not create, delete, rename or merge any page.\n' +
         `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
         'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
         'Work through the pages systematically so none is skipped. When done, report the total ' +
