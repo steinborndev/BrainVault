@@ -23,7 +23,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseWikilinks } from './citations.js'
-import type { VaultGraph } from './graph.js'
+import { parseFrontmatterMeta, type VaultGraph } from './graph.js'
 
 export type ValidationRule =
   | 'frontmatter'
@@ -140,10 +140,14 @@ function linkTargets(markdown: string): string[] {
 }
 
 /**
- * Case-insensitive name index over EVERY vault file, keyed by basename and by basename minus
- * extension. Deliberately wider than the graph's wiki-only page index: Obsidian resolves
- * `[[fold-template]]` to skills/…/fold-template.md and `[[Wiki Map]]` to Wiki Map.canvas, and
- * flagging those as dead was the lint report's main false-positive class.
+ * Case-insensitive name index over EVERY vault file, keyed by basename, by basename minus
+ * extension, AND — for markdown pages — by frontmatter `title:` and `aliases:`. Deliberately
+ * wider than a pure filename index: Obsidian resolves `[[fold-template]]` to
+ * skills/…/fold-template.md and `[[Wiki Map]]` to Wiki Map.canvas, and a page linked by a
+ * title that differs from its filename (e.g. `transport-fallback.md` titled "Transport Fallback
+ * Decision Tree") resolves too. The title/alias layer mirrors the graph resolver
+ * (graph.ts `byTitle`) so the two agree — otherwise the graph links a page the validator calls
+ * dead, which was a recurring false-positive class on every run that touched wiki/index.md.
  */
 function buildFileIndex(vaultRoot: string): Set<string> {
   const index = new Set<string>()
@@ -165,6 +169,18 @@ function buildFileIndex(vaultRoot: string): Set<string> {
       index.add(e.name.toLowerCase())
       const stem = e.name.replace(/\.[^.]+$/, '')
       if (stem !== '') index.add(stem.toLowerCase())
+      // Frontmatter title/aliases let a link resolve by a name the filename does not carry.
+      // Same source the graph resolver reads, so a link is never "dead here, live there".
+      if (e.name.toLowerCase().endsWith('.md')) {
+        try {
+          const meta = parseFrontmatterMeta(fs.readFileSync(abs, 'utf8'))
+          for (const name of [meta.title, ...meta.aliases]) {
+            if (name) index.add(name.toLowerCase())
+          }
+        } catch {
+          /* unreadable page — its filename-derived keys still apply */
+        }
+      }
     }
   }
   walk(vaultRoot)

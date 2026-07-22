@@ -163,6 +163,25 @@ describe('dead links', () => {
     expect(findings[1]!.message).toContain('[[wiki-cli]]')
   })
 
+  it('resolves a link written as a page frontmatter title or alias, not just its filename', () => {
+    // A reference page whose filename ("transport-fallback") differs from its title. The graph
+    // resolver treats [[Transport Fallback Decision Tree]] as resolved; the validator must agree.
+    page(
+      'wiki/references/transport-fallback.md',
+      { type: 'reference', title: 'Transport Fallback Decision Tree', aliases: '[Transport Fallback]' },
+      'Reference body.\n',
+    )
+    page('wiki/index.md', { type: 'meta' }, [
+      'By title: [[Transport Fallback Decision Tree]].',
+      'By alias: [[Transport Fallback]].',
+      'By filename still works: [[transport-fallback]].',
+      'Genuinely dead: [[No Such Page At All]].',
+    ].join('\n'))
+    const findings = validatePages(vaultRoot, ['wiki/index.md']).filter((f) => f.rule === 'dead-link')
+    expect(findings).toHaveLength(1)
+    expect(findings[0]!.message).toContain('[[No Such Page At All]]')
+  })
+
   it('never checks links on lint reports or the append-only log/hot pages', () => {
     page('wiki/meta/lint-report-2026-07-19.md', { type: 'meta' }, 'Finding: [[Deleted Page]] is dead.\n')
     // log.md gets appended to by EVERY ingest — flagging its historical links would repeat
