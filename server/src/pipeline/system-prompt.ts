@@ -78,6 +78,41 @@ flags violations to the operator):
 `.trim()
 
 /**
+ * Entity-notability policy appended to every vault-WRITING run, alongside the hygiene
+ * checklist. Motivating case (2026-07-22, "Fokki" / earlier "0xCodez"): the ingest skill
+ * creates an entity page for every named author, so single-post social-media creators end
+ * up as bio-transcription pages with no reusable knowledge. The runs already CLASSIFY these
+ * correctly (the gap notes call them single-source promotional content) — what was missing
+ * is the license to act on that classification. Prevention side; the deterministic
+ * single-source-entity check in validator.ts is the backstop, keep the two in sync.
+ */
+export const ENTITY_NOTABILITY_RULES = `
+<entity_notability>
+Not every named person, account, or company deserves its own entity page. Entity pages are
+for entities the vault expects to meet again; transcribing an author's social-media bio adds
+noise, not knowledge. Before creating an entity page, apply this test:
+
+Create the entity page ONLY when at least one of these holds:
+- Multiple independent sources already in the vault reference this entity.
+- The entity is the SUBJECT of the source (a profile, interview, case study about them) —
+  not merely its author or a passing mention.
+- The source provides substantial verifiable facts about the entity beyond a bio,
+  follower counts, and self-description.
+
+Otherwise use inline attribution instead: on the source page, credit the author in one line
+(handle, platform, short characterization — e.g. 'by @handle, X creator, promotional
+growth-hacking genre') and do NOT create an entity page. Still process the source's concepts
+normally — the ideas are welcome; the author shell page is not.
+
+Promote instead of stockpiling: when a LATER source independently references the same
+entity, create the page then and fold in the earlier inline attributions (they are findable
+by search). If you recognize a source as engagement-bait or growth-hacking content, state
+that in the source page's assessment — that classification is exactly the case the
+inline-attribution path exists for.
+</entity_notability>
+`.trim()
+
+/**
  * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
  * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
  * tells the model why so it doesn't waste turns trying to "file the answer back" (a default

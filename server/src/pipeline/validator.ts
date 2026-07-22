@@ -5,7 +5,9 @@
  * addresses, dead links, orphans, stale `.raw/.manifest.json` address_map entries) are
  * mechanically decidable and were all introduced *between* two expensive agent-lint runs.
  * Checking the touched pages right after each mutation surfaces them in the job log while
- * the context is fresh, instead of weeks later in the next full lint.
+ * the context is fresh, instead of weeks later in the next full lint. The one editorial
+ * check, single-source-entity, backstops the ENTITY_NOTABILITY_RULES prompt extension
+ * (system-prompt.ts) — deterministic proxy, advisory like everything else here.
  *
  * READ-ONLY by design (hard rule 1): this module never writes to the vault. Findings are
  * warnings for the operator; fixes remain agent runs or user-initiated edits. Judgment-shaped
@@ -31,6 +33,7 @@ export type ValidationRule =
   | 'orphan'
   | 'address-map'
   | 'stale-counter'
+  | 'single-source-entity'
 
 export interface ValidationFinding {
   readonly rule: ValidationRule
@@ -230,6 +233,7 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
   let fileIndex: Set<string> | undefined
   let addresses: Map<string, string[]> | undefined
   let inbound: number[] | undefined
+  let inboundSources: number[] | undefined
 
   for (const rel of pages) {
     let markdown: string
@@ -330,10 +334,45 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
             message: 'no other page links here — add a link from the index or a related page',
           })
         }
+
+        // Entity-notability backstop (prevention side: ENTITY_NOTABILITY_RULES in
+        // system-prompt.ts). Deterministic proxy for "single-source entity": a seed-status
+        // entity referenced by at most one source page. Bumping status past seed is the
+        // operator's deliberate keep-anyway override.
+        if (bucket === 'entities' && idx >= 0 && (fm.fields.get('status') ?? '').toLowerCase() === 'seed') {
+          inboundSources ??= countInboundSourcePages(graph)
+          const n = inboundSources[idx]!
+          if (n <= 1) {
+            findings.push({
+              rule: 'single-source-entity',
+              path: rel,
+              message:
+                `seed entity is referenced by ${n === 0 ? 'no' : 'only one'} source page — ` +
+                'prefer an inline attribution on the source page unless the entity is independently ' +
+                'notable (entity notability rules); bump status past seed to keep it deliberately',
+            })
+          }
+        }
       }
     }
   }
   return findings
+}
+
+/** Distinct source pages (wiki/sources/*, `_index` hubs excluded) linking TO each node —
+ * the single-source-entity check's evidence base. Concept/index backlinks deliberately do
+ * not count: concepts minted from the same ingest all link their author, so counting them
+ * would launder a single-source entity into an apparently well-referenced one. */
+function countInboundSourcePages(graph: VaultGraph): number[] {
+  const isSource = graph.nodes.map((n) => {
+    const parts = n.path.split('/')
+    return parts.length > 2 && parts[1] === 'sources' && !parts[parts.length - 1]!.startsWith('_')
+  })
+  const linkingSources = graph.nodes.map(() => new Set<number>())
+  for (const [from, to] of graph.edges) {
+    if (isSource[from]) linkingSources[to]!.add(from)
+  }
+  return linkingSources.map((s) => s.size)
 }
 
 /** Per-node in-degree over the graph's edges, not counting links FROM lint-report pages. */

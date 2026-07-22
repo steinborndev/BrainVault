@@ -194,6 +194,7 @@ describe('ingest runs receive the registry', () => {
     const extra = await ingestOnce()
     expect(extra).not.toContain('<domain_registry>')
     expect(extra).toContain('<page_hygiene>')
+    expect(extra).toContain('<entity_notability>')
   })
 })
 

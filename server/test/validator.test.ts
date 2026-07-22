@@ -204,6 +204,63 @@ describe('orphans (graph-backed)', () => {
   })
 })
 
+describe('single-source entities (graph-backed)', () => {
+  /** A seed entity plus one source page linking it — the Fokki/0xCodez class. */
+  function seedEntityWithOneSource(): void {
+    page('wiki/entities/Fokki.md', { type: 'entity', status: 'seed' })
+    page('wiki/sources/Viral Post.md', { type: 'source' }, 'By [[Fokki]].\n')
+  }
+
+  it('flags a seed entity referenced by only one source page', () => {
+    seedEntityWithOneSource()
+    const graph = new GraphBuilder(vaultRoot).build()
+    const findings = validatePages(vaultRoot, ['wiki/entities/Fokki.md'], graph)
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ rule: 'single-source-entity', path: 'wiki/entities/Fokki.md' })
+    expect(findings[0]!.message).toContain('only one source page')
+  })
+
+  it('flags a seed entity linked only from concept pages — concept backlinks do not launder it', () => {
+    page('wiki/entities/Fokki.md', { type: 'entity', status: 'seed' })
+    page('wiki/concepts/Outlier Score.md', {}, 'Coined by [[Fokki]].\n')
+    page('wiki/concepts/Faceless Pipeline.md', {}, 'See [[Fokki]].\n')
+    const graph = new GraphBuilder(vaultRoot).build()
+    const findings = validatePages(vaultRoot, ['wiki/entities/Fokki.md'], graph)
+    expect(rules(findings)).toEqual(['single-source-entity'])
+    expect(findings[0]!.message).toContain('no source page')
+  })
+
+  it('stays quiet once a second independent source references the entity', () => {
+    seedEntityWithOneSource()
+    page('wiki/sources/Second Source.md', { type: 'source' }, 'Also features [[Fokki]].\n')
+    const graph = new GraphBuilder(vaultRoot).build()
+    expect(validatePages(vaultRoot, ['wiki/entities/Fokki.md'], graph)).toEqual([])
+  })
+
+  it('a source _index hub does not count as an independent source', () => {
+    seedEntityWithOneSource()
+    page('wiki/sources/_index.md', { type: 'meta' }, '- [[Fokki]]\n')
+    const graph = new GraphBuilder(vaultRoot).build()
+    expect(rules(validatePages(vaultRoot, ['wiki/entities/Fokki.md'], graph))).toEqual(['single-source-entity'])
+  })
+
+  it('bumping status past seed is the deliberate keep-anyway override', () => {
+    page('wiki/entities/Fokki.md', { type: 'entity', status: 'developing' })
+    page('wiki/sources/Viral Post.md', { type: 'source' }, 'By [[Fokki]].\n')
+    const graph = new GraphBuilder(vaultRoot).build()
+    expect(validatePages(vaultRoot, ['wiki/entities/Fokki.md'], graph)).toEqual([])
+  })
+
+  it('skips the check when no graph is provided, and never fires outside entities/', () => {
+    seedEntityWithOneSource()
+    page('wiki/concepts/Seedling.md', { status: 'seed' })
+    page('wiki/index.md', { type: 'meta' }, '[[Seedling]]\n')
+    expect(validatePages(vaultRoot, ['wiki/entities/Fokki.md'])).toEqual([])
+    const graph = new GraphBuilder(vaultRoot).build()
+    expect(validatePages(vaultRoot, ['wiki/concepts/Seedling.md'], graph)).toEqual([])
+  })
+})
+
 describe('address_map consistency (2c)', () => {
   it('flags entries whose page was deleted, and map/frontmatter divergence', () => {
     page('wiki/concepts/Matching.md', { address: 'c-000010' })

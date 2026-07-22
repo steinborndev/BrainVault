@@ -131,7 +131,7 @@ describe('pure helpers', () => {
 })
 
 describe('system-prompt extension', () => {
-  it('every ingest run carries the page-hygiene checklist', async () => {
+  it('every ingest run carries the page-hygiene checklist and entity-notability rules', async () => {
     let extra = ''
     const q = makeQueue({
       runIngest: async (opts) => {
@@ -143,6 +143,7 @@ describe('system-prompt extension', () => {
     await q.enqueueFile({ sourcePath: writeSource('note.md'), source: 'drop' })
     await q.onIdle()
     expect(extra).toContain('<page_hygiene>')
+    expect(extra).toContain('<entity_notability>')
   })
 })
 

@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
-import { PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
+import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
 import { formatMessage } from './format-message.js'
 import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { RunRegistry } from './run-registry.js'
@@ -595,7 +595,9 @@ export class MaintenanceRunner {
       // on ingest runs: any of these runs may write pages.
       const systemPromptExtra =
         opts.systemPromptExtra ??
-        [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST].filter(Boolean).join('\n\n')
+        [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST, ENTITY_NOTABILITY_RULES]
+          .filter(Boolean)
+          .join('\n\n')
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
       // can still be committed — but only if we turn out to be the sole writer (F4).
       const dirtyBefore = await dirtyPaths(this.vaultRoot)

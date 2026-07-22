@@ -1117,8 +1117,10 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(prompt).toContain('"Milk Steaming"')
     expect(prompt).toContain('log.md')
     expect(prompt).toContain('address_map')
-    // Write runs carry the page-hygiene checklist (prevention side of the validator).
+    // Write runs carry the page-hygiene checklist and entity-notability rules (prevention
+    // side of the validator).
     expect(extra).toContain('<page_hygiene>')
+    expect(extra).toContain('<entity_notability>')
   })
 
   it('repair validates tasks against the live graph and bounds the run to them', async () => {
