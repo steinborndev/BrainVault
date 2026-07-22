@@ -1191,6 +1191,60 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(run.result?.ok).toBe(true)
   })
 
+  it('lists research lenses and rejects an unknown lens', async () => {
+    const list = await fetch(`${baseUrl}/api/v1/maintenance/research/profiles`)
+    expect(list.status).toBe(200)
+    const body = (await list.json()) as { profiles: { key: string }[]; default: string }
+    expect(body.default).toBe('broad')
+    expect(body.profiles.map((p) => p.key)).toEqual(expect.arrayContaining(['broad', 'sota', 'patents', 'startups']))
+
+    const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: 'lipids', profileKey: 'not-a-lens' }),
+    })
+    expect(bad.status).toBe(400)
+  })
+
+  it('injects the selected lens block (deterministic title) into the research prompt', async () => {
+    let prompt = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      return okResult('research done')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: 'ionizable lipids', profileKey: 'patents' }),
+    })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:research')
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    // The service pins the synthesis title deterministically; the agent does not choose it.
+    expect(prompt).toContain('research_lens')
+    expect(prompt).toContain('Research: ionizable lipids — Patent Landscape')
+    expect(prompt).toMatch(/does NOT\s+override the page-hygiene/)
+  })
+
+  it('omitting the lens keeps the base research prompt (no lens block)', async () => {
+    let prompt = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      return okResult('research done')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic: 'ionizable lipids' }),
+    })
+    expect(res.status).toBe(202)
+    const run = await pollRun(((await res.json()) as StartedRun).id)
+    expect(run.status).toBe('done')
+    expect(prompt).not.toContain('research_lens')
+  })
+
   it('returns 404 for an unknown run id', async () => {
     const res = await fetch(`${baseUrl}/api/v1/maintenance/runs/does-not-exist`)
     expect(res.status).toBe(404)

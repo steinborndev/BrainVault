@@ -16,6 +16,7 @@ import type {
   Citation,
   MaintenanceRun,
   RepairTask,
+  ResearchProfilesResponse,
   DomainsResponse,
   CandidatesResponse,
   SettingsResponse,
@@ -193,11 +194,15 @@ export const api = {
       body: JSON.stringify({ tasks }),
     }).then(json<MaintenanceRun>),
 
-  research: (topic: string): Promise<MaintenanceRun> =>
+  /** The closed research-lens list for the composer's profile picker ("Achse A"). */
+  researchProfiles: (): Promise<ResearchProfilesResponse> =>
+    fetch(`${BASE}/maintenance/research/profiles`).then(json<ResearchProfilesResponse>),
+
+  research: (topic: string, profileKey?: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/research`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ topic }),
+      body: JSON.stringify(profileKey ? { topic, profileKey } : { topic }),
     }).then(json<MaintenanceRun>),
 
   domainBackfill: (): Promise<MaintenanceRun> =>

@@ -24,7 +24,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
-import type { AuthMode, ChatMessage, Session } from '../api/types.ts'
+import type { AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
@@ -75,11 +75,19 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     },
   })
 
-  // Autoresearch: the topic lives in a ref because useMaintenanceRun's starter is read at
-  // click time; `lastTopic` is what the result block displays.
+  // Research lenses ("Achse A"): the closed profile list for the composer picker.
+  const profilesQ = useQuery({ queryKey: ['research-profiles'], queryFn: api.researchProfiles })
+  const profiles = profilesQ.data?.profiles ?? []
+  const [profileKey, setProfileKey] = useState<string>('broad')
+  const selectedProfile = profiles.find((p) => p.key === profileKey)
+
+  // Autoresearch: topic + lens live in refs because useMaintenanceRun's starter is read at
+  // click time; `lastTopic`/`lastProfile` are what the result block displays.
   const topicRef = useRef('')
+  const profileKeyRef = useRef('broad')
   const [lastTopic, setLastTopic] = useState('')
-  const research = useMaintenanceRun(() => api.research(topicRef.current))
+  const [lastProfile, setLastProfile] = useState<string | null>(null)
+  const research = useMaintenanceRun(() => api.research(topicRef.current, profileKeyRef.current))
 
   const threadRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -128,7 +136,9 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     } else {
       if (research.running) return
       topicRef.current = text
+      profileKeyRef.current = profileKey
       setLastTopic(text)
+      setLastProfile(profileKey === 'broad' ? null : selectedProfile?.label ?? null)
       setDraft('')
       research.start()
     }
@@ -220,6 +230,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 <span>
                   Research: <strong>{lastTopic}</strong>
                 </span>
+                {lastProfile && <span className="lens-tag">{lastProfile}</span>}
                 <span className="spacer" />
                 {!research.running && (
                   <button className="btn ghost" onClick={research.reset} title="Dismiss" aria-label="Dismiss research result">
@@ -267,10 +278,20 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
 
         <div className={`composer${mode === 'research' ? ' research-mode' : ''}`}>
           {mode === 'research' && (
-            <div className="comp-hint">
-              <strong>Research mode</strong> — searches the web and <strong>writes new vault pages</strong>. Not a
-              chat turn.
-            </div>
+            <>
+              <div className="comp-hint">
+                <strong>Research mode</strong> — searches the web and <strong>writes new vault pages</strong>. Not a
+                chat turn.
+              </div>
+              {profiles.length > 0 && (
+                <ResearchLens
+                  profiles={profiles}
+                  selected={profileKey}
+                  onSelect={setProfileKey}
+                  topic={draft}
+                />
+              )}
+            </>
           )}
           <div className="comp-main">
             <div className="composer-modes" role="tablist" aria-label="Composer mode">
@@ -316,6 +337,82 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * The research-lens picker + run-plan preview ("Achse A"). Lenses are a closed list from the
+ * server; selecting one previews what will actually happen BEFORE the run: the source
+ * preferences, the deterministic synthesis-page title the service pins (topic + the lens's
+ * `titleSuffix`), and the rough web-fetch cost. `broad` renders the classic `Research: <topic>`.
+ */
+function ResearchLens({
+  profiles,
+  selected,
+  onSelect,
+  topic,
+}: {
+  profiles: ResearchProfile[]
+  selected: string
+  onSelect: (key: string) => void
+  topic: string
+}): React.ReactElement {
+  const active = profiles.find((p) => p.key === selected) ?? profiles[0]
+  const shownTopic = topic.trim() || 'your topic'
+  const targetTitle = `Research: ${shownTopic}${active?.titleSuffix ?? ''}`
+
+  return (
+    <div className="lens-wrap">
+      <div className="lens-row">
+        <span className="lens-label">Lens</span>
+        <div className="lens-chips" role="radiogroup" aria-label="Research lens">
+          {profiles.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              role="radio"
+              aria-checked={p.key === selected}
+              className={`lens${p.key === selected ? ' active' : ''}`}
+              onClick={() => onSelect(p.key)}
+              title={p.blurb}
+            >
+              {p.label}
+              {p.badge && <span className="badge">{p.badge}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      {active && (
+        <div className="runplan">
+          <div className="rp-row">
+            <span className="rp-k">Lens</span>
+            <span className="rp-v">{active.blurb}</span>
+          </div>
+          <div className="rp-row">
+            <span className="rp-k">Prefers</span>
+            <span className="rp-v">
+              {active.sources.map((s) => (
+                <span key={s} className="srcpill">
+                  {s}
+                </span>
+              ))}
+            </span>
+          </div>
+          <div className="rp-row">
+            <span className="rp-k">Files as</span>
+            <span className="rp-v">
+              <span className="target">{targetTitle}</span>
+            </span>
+          </div>
+          <div className="rp-row">
+            <span className="rp-k">Est. cost</span>
+            <span className="rp-v rp-cost">
+              up to <b>{active.fetchEstimate}</b> web fetches · 1 git commit
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

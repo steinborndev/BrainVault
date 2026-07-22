@@ -287,6 +287,26 @@ export interface LintReport {
 }
 
 /** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
+/**
+ * One research lens ("Achse A") from `GET /maintenance/research/profiles`. A closed set the
+ * composer offers; the selected `key` rides along on `POST /maintenance/research`. `titleSuffix`
+ * lets the UI preview the deterministic synthesis-page title the service will pin.
+ */
+export interface ResearchProfile {
+  key: string
+  label: string
+  blurb: string
+  badge?: string
+  sources: string[]
+  fetchEstimate: string
+  titleSuffix: string
+}
+
+export interface ResearchProfilesResponse {
+  profiles: ResearchProfile[]
+  default: string
+}
+
 export type MaintenanceKind =
   | 'lint'
   | 'lint-fix'

@@ -31,6 +31,7 @@ import { parseDomainReview, DOMAIN_REVIEW_FORMAT, type DomainReview } from './do
 import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
 import { findRelatedPages, renderOverlapBlock } from './related-pages.js'
+import { getResearchProfile, renderProfileBlock } from './research-profiles.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -267,9 +268,17 @@ export class MaintenanceRunner {
    * those pages instead of filing a parallel synthesis. The skill's own "check the index first"
    * rule is otherwise only a soft instruction and the service prompt never named the existing
    * pages; this makes the preferred "extend, don't duplicate" path the explicit default.
+   *
+   * Lens steering ("Achse A"): an optional `profileKey` selects a closed research lens (state of
+   * the art, patents, startups) that refines what is searched and how the synthesis is framed,
+   * and — crucially — pins the synthesis page title deterministically (per-lens suffix) so two
+   * lenses on one topic do not collide. The lens block is subordinate to the hygiene/notability/
+   * domain rules; `broad` (the default) renders no block, so a plain run is unchanged.
    */
-  startResearch(topic: string): MaintenanceRun {
+  startResearch(topic: string, profileKey?: string): MaintenanceRun {
     const overlap = renderOverlapBlock(findRelatedPages(this.vaultRoot, topic))
+    const profile = getResearchProfile(profileKey)
+    const lens = renderProfileBlock(profile, topic)
     return this.start(
       'research',
       'Use the autoresearch skill to research this topic and file the findings into the wiki: ' +
@@ -280,6 +289,7 @@ export class MaintenanceRunner {
         'Afterwards update wiki/index.md, wiki/log.md and wiki/hot.md. ' +
         'Finally report how many pages you created and the key findings. ' +
         'Stay focused on the stated topic rather than broadening the scope.' +
+        lens +
         overlap,
       'research',
     )

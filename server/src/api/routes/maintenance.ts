@@ -15,6 +15,11 @@ import type { DismissalStore } from '../../db/domain-dismissals.js'
 import { DomainRegistryMissingError, LintReportMissingError, type RepairTask } from '../../pipeline/maintenance.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
+import {
+  researchProfileList,
+  isResearchProfileKey,
+  DEFAULT_PROFILE_KEY,
+} from '../../pipeline/research-profiles.js'
 
 export function registerMaintenanceRoute(
   app: FastifyInstance,
@@ -155,12 +160,27 @@ export function registerMaintenanceRoute(
     return reply.code(202).send(maintenance.startDomainReview(candidates))
   })
 
+  // The closed lens list for the composer's profile picker ("Achse A"). Static — served so the
+  // UI never hardcodes what the service accepts, and the POST below validates against the same set.
+  app.get('/api/v1/maintenance/research/profiles', async (_req, reply) => {
+    return reply.send({ profiles: researchProfileList(), default: DEFAULT_PROFILE_KEY })
+  })
+
   app.post('/api/v1/maintenance/research', async (req, reply) => {
     if (credentialMissing(reply)) return reply
-    const body = (req.body ?? {}) as { topic?: unknown }
+    const body = (req.body ?? {}) as { topic?: unknown; profileKey?: unknown }
     const topic = typeof body.topic === 'string' ? body.topic.trim() : ''
     if (topic === '') return reply.code(400).send({ error: 'provide a non-empty "topic"' })
-    return reply.code(202).send(maintenance.startResearch(topic))
+    // A lens is optional (omit → default "broad"), but a PROVIDED one must be on the closed list:
+    // free-text lenses are exactly the free-for-all the closed set exists to prevent.
+    let profileKey: string | undefined
+    if (body.profileKey !== undefined) {
+      if (typeof body.profileKey !== 'string' || !isResearchProfileKey(body.profileKey)) {
+        return reply.code(400).send({ error: `unknown research profile: ${String(body.profileKey)}` })
+      }
+      profileKey = body.profileKey
+    }
+    return reply.code(202).send(maintenance.startResearch(topic, profileKey))
   })
 
   // Poll a run's state/result. Returns 404 once the run has been evicted from history.
