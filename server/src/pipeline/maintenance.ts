@@ -408,8 +408,12 @@ export class MaintenanceRunner {
         `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
         '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
         'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
-        '- Edit ONLY the frontmatter `domain:` field. Do not touch page bodies, other frontmatter ' +
-        'fields, titles, or wikilinks. Do not create, delete, rename or merge any page.\n' +
+        '- Frontmatter edits are limited to the `domain:` field and the domain tag mirrored into ' +
+        `the \`tags:\` list: on every page you re-file, remove a stale \`${UNASSIGNED}\` tag (and ` +
+        'any tag that merely mirrors a previous domain key) and make sure the new domain key is ' +
+        `present as a tag. Pages left as \`${UNASSIGNED}\` keep the \`${UNASSIGNED}\` tag. Leave ` +
+        'every other tag, all other frontmatter fields, page bodies, titles, and wikilinks ' +
+        'untouched. Do not create, delete, rename or merge any page.\n' +
         `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
         'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
         'Work through the pages systematically so none is skipped. When done, report the total ' +
