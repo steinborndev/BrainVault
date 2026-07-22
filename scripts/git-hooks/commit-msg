@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# commit-msg hook — stop private vault content from leaking into this PUBLIC repo's history.
+#
+# The tooling repo is public; the vault it operates on is private. A commit message must never
+# name a specific vault subject (an entity, a person's handle, a source title) — that reveals
+# what the private knowledge base contains. The motivating leak (2026-07-22): a commit body
+# named two X handles from an entity page.
+#
+# What it does: builds a denylist of the distinctive names in the vault's entities/ and
+# sources/ pages (page titles, plus @handles / 0x_ handles found inside them) and rejects the
+# commit if the message contains any of them. Concept pages are intentionally NOT on the list:
+# they hold generic, reusable knowledge (e.g. "Compound Interest") that is not vault-revealing
+# and would false-positive against ordinary technical wording.
+#
+# Scope: the check only knows about the vault at VAULT_ROOT (env, else ~/vault). No vault
+# present (fresh clone, CI, setup mode) -> the hook passes silently, blocking nothing.
+#
+# Escape hatch: set ALLOW_VAULT_NAMES=1 for the rare legitimate case (then double-check it
+# really is not a leak). Install with scripts/install-git-hooks.sh.
+set -euo pipefail
+
+MSG_FILE="$1"
+[ -n "${ALLOW_VAULT_NAMES:-}" ] && exit 0
+
+VAULT_ROOT="${VAULT_ROOT:-$HOME/vault}"
+[ -d "$VAULT_ROOT/wiki/entities" ] || [ -d "$VAULT_ROOT/wiki/sources" ] || exit 0
+command -v python3 >/dev/null 2>&1 || exit 0
+
+python3 - "$MSG_FILE" "$VAULT_ROOT" <<'PY'
+import os, re, sys
+
+msg_file, vault_root = sys.argv[1], sys.argv[2]
+
+# The commit message minus comment lines (git strips these anyway) — matching against them
+# would false-positive on the hook's own explanatory text if it were ever pasted in.
+msg = "".join(l for l in open(msg_file, encoding="utf-8", errors="replace") if not l.startswith("#"))
+msg_low = msg.lower()
+
+# Short/common tokens that are entity names in the vault but also ordinary words: matching
+# them would block legitimate commits. Distinctive names (handles, multi-word titles) carry
+# the real leak signal, so the cost of skipping these is low.
+STOP = {"data", "code", "test", "page", "user", "index", "log", "hot", "meta", "core", "self"}
+
+deny = {}  # lowercased term -> canonical form (for the error message)
+
+def add(term: str) -> None:
+    t = term.strip()
+    if len(t) < 4:
+        return
+    low = t.lower()
+    if low in STOP:
+        return
+    deny.setdefault(low, t)
+
+HANDLE_RE = re.compile(r"@[A-Za-z0-9_]{2,}|0x_[A-Za-z0-9]+")
+
+for bucket in ("entities", "sources"):
+    d = os.path.join(vault_root, "wiki", bucket)
+    if not os.path.isdir(d):
+        continue
+    for name in os.listdir(d):
+        if not name.endswith(".md") or name.startswith("_"):
+            continue
+        add(name[:-3])  # the page title (filename stem)
+        try:
+            body = open(os.path.join(d, name), encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        for h in HANDLE_RE.findall(body):
+            add(h)
+
+hits = []
+for low, canon in deny.items():
+    # whole-token, case-insensitive: no leading/trailing word char around the match.
+    if re.search(r"(?<!\w)" + re.escape(low) + r"(?!\w)", msg_low):
+        hits.append(canon)
+
+if hits:
+    uniq = sorted(set(hits), key=str.lower)
+    sys.stderr.write(
+        "\ncommit-msg blocked: the message names private vault content, which must not\n"
+        "leak into this public repo's history:\n"
+    )
+    for h in uniq:
+        sys.stderr.write(f"  - {h}\n")
+    sys.stderr.write(
+        "\nDescribe the change generically (the mechanism, not the subject). If this is a\n"
+        "false positive, re-commit with ALLOW_VAULT_NAMES=1.\n"
+    )
+    sys.exit(1)
+PY

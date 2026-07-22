@@ -78,6 +78,8 @@ step 5 "Domain registry seed (non-destructive)"
 
 step 6 "Install dependencies and build"
 ( cd "$REPO" && npm ci && npm run build )
+# Local git hooks (core.hooksPath is not committed, so every clone installs them here).
+"$REPO/scripts/install-git-hooks.sh"
 
 step 7 "systemd user unit + start"
 "$REPO/scripts/install-systemd.sh" "$VAULT_ROOT"
