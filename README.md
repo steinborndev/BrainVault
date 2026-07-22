@@ -344,7 +344,8 @@ labelled **"estimate (subscription)"** - it is an API-price equivalent, not mone
 A phone-first input channel (SPEC.md §4.3): send the bot a PDF, a photo, a URL or a plain-text
 note and it lands in the regular ingestion queue; when the ingest finishes, the bot reports back
 with the created page titles. `/status` answers with queue, job and budget state, `/jobs` lists
-recent jobs.
+recent jobs, and `/research <topic>` starts a web research run that files the result into the
+vault and reports the created pages back.
 
 The transport is **outbound long polling** - the service calls `api.telegram.org`, nothing calls
 the service. No port is opened, the localhost bind stays untouched, and it works from anywhere
@@ -378,6 +379,9 @@ Behavior and limits:
   content), so probing - or your own mistyped id - is visible to you.
 - **Files up to 20 MB.** Telegram lets bots download at most 20 MB (senders may attach up to
   2 GB); larger files get a hint pointing at the dropzone or the watch folder.
+- **`/research` is the one bot action that reaches the web.** It runs the same web-egress
+  autoresearch flow as the dashboard (the only flow allowed the web, see the security model);
+  every other bot message ingests material you send and stays confined like a normal ingest.
 - **Albums become one batch.** Files sent together as an album are ingested in a single
   combined run, like a multi-file drop in the dashboard.
 - **Notifications carry titles only.** The completion message names the created wiki pages,
