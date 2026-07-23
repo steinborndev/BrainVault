@@ -91,28 +91,76 @@ the design: Stage 1 (BM25-only, zero new dependencies) must be live and accepted
       otherwise, `--no-rerank` present, read-only contract preserved (`test/retrieve-index.test.ts`,
       +2 tests → 533 total green; typecheck + lint clean; server rebuilt + service restarted).
 
-## 3. Stage 2 — cosine rerank (local ollama) — GATED ON STAGE 1 ACCEPTED
+## 3. Stage 2 — cosine rerank, SERVICE-SIDE — DONE 2026-07-23
 
-- [ ] Embed-cache warmup in the index build: after `bm25Build()`, warm
-      `.vault-meta/embed-cache.json` for changed chunks (ollama `nomic-embed-text` at
-      `127.0.0.1:11434`) so query time needs no cache WRITES. Verify first what `rerank.py`
-      actually writes at query time when the cache is warm; if it still writes (e.g. the query
-      embedding), either (a) add exactly `.vault-meta/embed-cache.json` to the query profile's
-      sandbox `allowWrite`, or (b) keep `--no-rerank` at query time and rerank is build-time
-      only. Decide from evidence, record here.
-- [ ] Sandbox network: the `query` profile has no egress; rerank needs `127.0.0.1:11434`. Add
-      the NARROWEST possible localhost exception the SDK sandbox supports — and after ANY
-      change to the permission wiring, re-run `server/src/cli/permprobe.ts` (hard rule 4);
-      expected: canary outside vault still blocked, web still blocked, only the ollama port
-      reachable. If the sandbox cannot scope network that narrowly, STOP and reassess (option:
-      build-time-only rerank) rather than widening egress.
-- [ ] Graceful degradation: ollama down ⇒ `retrieve.py` falls back to BM25 order (verify the
-      no-op strategy via `rerank.py --peek`); the query must not fail or hang. Startup probes
-      ollama and logs the active retrieval tier.
-- [ ] Ops: document the ollama dependency (WSL host, model pull, systemd ordering) in README
-      setup + troubleshooting.
-- [ ] Tests: warmup invoked only for changed chunks (fake process layer); prompt drops
-      `--no-rerank` iff Stage 2 active; degradation path.
+**Redesigned before implementation (F-R9, user decision): the two sandbox exceptions this
+section originally called for are NOT needed and were NOT made.** Retrieval moved out of the
+agent entirely — the service runs `retrieve.py` itself, before the agent starts, and hands the
+agent ranked PAGES on the prompt. The read-only `query` profile is byte-for-byte unchanged.
+
+- [x] ~~Embed-cache warmup / sandbox `allowWrite` exception~~ — **not needed.** `rerank.py`
+      writes `.vault-meta/embed-cache.json` at query time and always will (the cache key is
+      `model:body_hash`, so the QUERY embedding is a guaranteed miss every time — warmup cannot
+      remove it). Since retrieval now runs in the service process, that write is simply an
+      ordinary service write to derived, git-excluded state, exactly like the index build.
+- [x] ~~Sandbox localhost/network exception for ollama~~ — **not made, and must not be.** The
+      ollama API is UNAUTHENTICATED and far wider than "embed this string": `/api/pull` fetches
+      models from the internet, `/api/create`/`/api/delete` mutate them, `/api/generate` runs
+      inference. Opening it to a sandboxed run would hand a prompt-injected agent an indirect
+      egress channel — precisely what the no-egress profile exists to prevent. The service talks
+      to ollama; the sandbox never does.
+- [x] `retrieveCandidates()` (`pipeline/retrieve-index.ts`): runs `python3 scripts/retrieve.py
+      "<q>" --top N` via the same injectable `ProcessRunner` seam as the index build; parses
+      STDOUT ONLY (stderr carries "bm25: N hits", F-R5); collapses multi-chunk hits to their
+      page keeping best rank; caps the question at 1000 chars before argv; returns
+      `{candidates, strategy}` and degrades to empty on ANY failure (unprovisioned, script
+      error, bad JSON) — a query must never fail because retrieval did.
+- [x] Prompt: `QUERY_SYSTEM_PROMPT` is static again (no `retrieve.py` instruction at all) and
+      names both read paths; per-question hits render as a `<retrieved_context>` block appended
+      to the question (`renderRetrievalBlock`). Ranked starting point, explicitly NOT an
+      exclusive whitelist — a hard "only these" would turn a retrieval miss into a false "not in
+      the vault" answer.
+- [x] `runQuery` performs retrieval then calls `runAgent`; `onRetrieval` callback lets the route
+      log the engaged tier. Retriever injectable so tests never spawn python.
+- [x] Graceful degradation: ollama down ⇒ `retrieve.py` returns `noop-no-ollama` and falls back
+      to BM25 order (verified via `rerank.py --peek` before install); retrieval failure ⇒ empty
+      block ⇒ legacy read path. The query neither fails nor hangs.
+- [x] Ops: ollama installed userspace (no sudo on this host) as systemd --user
+      `ollama.service`, loopback-only, lingering on. See F-R10.
+- [x] Tests (+11 → 544 green): `retrieveCandidates` ranking/dedupe/argv-shape/truncation/three
+      degradation paths; prompt has no `retrieve.py` and renders empty for no hits; `runQuery`
+      appends the block, leaves the question untouched on empty, and — the load-bearing one —
+      asserts the run still carries `sandbox.enabled === true` and
+      `allowUnsandboxedCommands === false` with the static system prompt.
+- [x] Sandbox-unchanged proof: `permissions.ts` untouched (`git diff --quiet`), and the
+      `agent-runner.ts` diff contains no `sandbox`/`network`/`allowWrite`/`allowUnsandboxed`/
+      `WEB_TOOLS`/`disallowedTools` line — only the prompt-constant swap. **No permprobe run was
+      required because no permission wiring changed** (hard rule 4 triggers on SDK upgrades and
+      permission-wiring changes; this was neither).
+- [x] Live: the §7 acceptance question answered correctly with the exact figures and 4
+      citations; journal shows `[query] retrieval: 5 page(s),
+      strategy=bm25+rerank:cosine:nomic-embed-text`.
+
+## 3b. Findings from the stage-2 redesign
+
+- **F-R9 (2026-07-23) — the sandbox exceptions were an artifact of the §2 design, not a
+  requirement of retrieval.** §2 shipped "the agent runs `retrieve.py` itself", which dragged
+  everything the script needs *into* the read-only sandbox (ollama network + embed-cache write).
+  Moving the call into the SERVICE removes both needs at zero cost to sandbox strictness — and
+  is strictly better on two other axes: (1) retrieval becomes DETERMINISTIC (the agent no longer
+  decides whether to retrieve, which was the F-R7 variance problem), and (2) it reuses the
+  §12.6-sanctioned "service runs the vault's deterministic scripts" mechanism already used for
+  the index build. Lesson worth keeping: when a capability seems to require loosening a
+  boundary, check whether the work can move to the trusted side of it instead.
+- **F-R10 (2026-07-23) — ollama install notes (this host).** No passwordless sudo, so the
+  official `curl | sudo sh` installer is unusable here. Installed userspace instead: the release
+  asset format changed to `.tar.zst` (the old `ollama.com/download/*.tgz` endpoint now 404s),
+  and no `zstd` binary exists on the host, so extraction went through the pip `zstandard` module
+  into `~/.local` (bin+lib siblings — the binary finds `../lib/ollama` on its own). Runs as
+  systemd --user `ollama.service` with `OLLAMA_HOST=127.0.0.1:11434` (loopback-only by
+  construction, not just by default), enabled, lingering on so it survives a WSL restart like
+  vault-service. Model: `nomic-embed-text` (274 MB), CPU-only is fast enough for one query
+  embedding plus cached chunk embeddings.
 
 ## 4. Stage 3 — LLM contextual prefixes (egress, opt-in) — GATED ON STAGE 2 ACCEPTED
 

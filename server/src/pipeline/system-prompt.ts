@@ -1,5 +1,3 @@
-import { isRetrieveProvisioned } from './retrieve-index.js'
-
 /**
  * System-prompt extension appended to the claude_code preset for every agent run.
  *
@@ -114,33 +112,29 @@ inline-attribution path exists for.
 </entity_notability>
 `.trim()
 
-/** The v1.6 page-granular read path — the fallback whenever no retrieval index exists. */
-const QUERY_READ_PATH_LEGACY =
-  `- Prefer the wiki-query skill's read path (hot cache → index → relevant pages). You have
-  no web access — answer only from what the vault contains.`
-
 /**
- * The chunk-level read path used once the wiki-retrieve index is provisioned (SPEC.md
- * §12.6 stage 1). `--no-rerank` is pinned: the rerank stage needs ollama network access
- * and cache writes the read-only query sandbox does not grant (stage 2 lifts this).
+ * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
+ * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
+ * tells the model why so it doesn't waste turns trying to "file the answer back" (a default
+ * behaviour of the wiki-query skill). Citations are required so the dashboard can render
+ * clickable page chips (the M4 DoD).
+ *
+ * Static by design (SPEC.md §12.6 stage 2): chunk-level retrieval runs in the SERVICE, before
+ * the agent starts, and arrives as a `<retrieved_context>` block on the question itself. The
+ * agent is never asked to run retrieval — that is what lets the read-only sandbox stay exactly
+ * as strict as it is (no network hole for ollama, no embed-cache write exception).
  */
-const QUERY_READ_PATH_RETRIEVE =
-  `- This vault has a provisioned retrieval index. FIRST run
-  \`python3 scripts/retrieve.py "<your question>" --top 5 --no-rerank\` and read ONLY the
-  candidate pages it returns (wiki/hot.md may be read for quick context) — do not scan
-  wiki/index.md instead. If the script fails, fall back to the legacy read path
-  (hot cache → index → relevant pages). You have no web access — answer only from what
-  the vault contains.`
-
-const queryPromptWith = (readPath: string): string =>
-  `
+export const QUERY_SYSTEM_PROMPT = `
 <read_only_query>
 You are answering a question against a read-only knowledge vault in a headless pipeline.
 No human will answer a clarifying question, and you have NO write access.
 
 - Do not create, edit, or "file back" any wiki page. The vault is read-only for this run;
   attempts to write are denied by the sandbox. Just answer the question.
-${readPath}
+- If the question carries a <retrieved_context> block, chunk-level retrieval has ALREADY run
+  for it: read those pages first. Otherwise use the wiki-query skill's read path (hot cache →
+  index → relevant pages). Either way you have no web access — answer only from what the
+  vault contains.
 - ALWAYS cite the vault pages your answer draws on, inline, as Obsidian wikilinks:
   [[Page Name]]. The reader turns these into clickable links, so name real pages exactly.
 - If the wiki does not contain the answer, say so plainly rather than inventing one. Do not
@@ -150,21 +144,22 @@ ${readPath}
 `.trim()
 
 /**
- * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
- * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
- * tells the model why so it doesn't waste turns trying to "file the answer back" (a default
- * behaviour of the wiki-query skill). Citations are required so the dashboard can render
- * clickable page chips (the M4 DoD). Kept exported for callers that cannot know a vault
- * root (and as the legacy shape); prefer `querySystemPrompt(vaultRoot)`.
+ * Renders the service's retrieval hits onto the question (SPEC.md §12.6 stage 2). Empty string
+ * when retrieval found nothing or was unavailable, so the prompt is then byte-for-byte the
+ * plain question and the system prompt's legacy read path applies.
+ *
+ * Deliberately names pages rather than pasting chunk snippets: the snippets are truncated, and
+ * the agent can read the full pages itself. Ranked, not exclusive — a hard "only these" would
+ * turn a retrieval miss into a wrong "the vault does not contain this" answer.
  */
-export const QUERY_SYSTEM_PROMPT = queryPromptWith(QUERY_READ_PATH_LEGACY)
-
-/**
- * The read-path decision is made fresh per run (SPEC.md §12.6): once the retrieval index
- * is provisioned — including mid-service-lifetime by the first manual rebuild — queries
- * switch to chunk-level retrieval with no restart; an unprovisioned (or pre-v1.7) vault
- * keeps the legacy prompt byte-for-byte.
- */
-export function querySystemPrompt(vaultRoot: string): string {
-  return isRetrieveProvisioned(vaultRoot) ? queryPromptWith(QUERY_READ_PATH_RETRIEVE) : QUERY_SYSTEM_PROMPT
+export function renderRetrievalBlock(pagePaths: readonly string[]): string {
+  if (pagePaths.length === 0) return ''
+  const list = pagePaths.map((p, i) => `${i + 1}. ${p}`).join('\n')
+  return `\n\n<retrieved_context>
+Chunk-level retrieval already ran for this question. These vault pages rank highest, best first:
+${list}
+Read these first. They are a ranked starting point, not a limit: read other pages if the answer
+needs them, and if none of them actually answer the question, say so plainly. Do not run
+retrieval yourself.
+</retrieved_context>`
 }

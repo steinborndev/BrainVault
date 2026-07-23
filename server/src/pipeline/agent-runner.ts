@@ -14,7 +14,7 @@ import {
   type SpawnOptions as SdkSpawnOptions,
   type SpawnedProcess,
 } from '@anthropic-ai/claude-agent-sdk'
-import { AUTOMATION_SYSTEM_PROMPT, querySystemPrompt } from './system-prompt.js'
+import { AUTOMATION_SYSTEM_PROMPT, QUERY_SYSTEM_PROMPT } from './system-prompt.js'
 import { createDetachedSpawn } from './agent-spawn.js'
 import {
   decidePermission,
@@ -187,13 +187,13 @@ export function buildOptions(
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',
-      // A read-only query gets the read-only prompt (read path resolved per run — chunk
-      // retrieval once the index is provisioned, SPEC.md §12.6); ingest/research keep the
-      // automation prompt (both write pages and must not stall on a question). Vault-derived
-      // extras (the domain registry) ride along on the writing profiles only.
+      // A read-only query gets the read-only prompt; ingest/research keep the automation prompt
+      // (both write pages and must not stall on a question). Vault-derived extras (the domain
+      // registry) ride along on the writing profiles only. Retrieval hits are NOT a system-prompt
+      // concern — they are per-question and arrive on the prompt itself (SPEC.md §12.6).
       append:
         profile === 'query'
-          ? querySystemPrompt(opts.vaultRoot)
+          ? QUERY_SYSTEM_PROMPT
           : [AUTOMATION_SYSTEM_PROMPT, opts.systemPromptExtra?.trim()].filter(Boolean).join('\n\n'),
     },
     /**

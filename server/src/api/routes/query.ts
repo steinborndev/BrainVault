@@ -61,6 +61,11 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
         vaultRoot: config.vaultRoot,
         question,
         auth,
+        // Operational visibility for the service-side read path (SPEC.md §12.6): which retrieval
+        // tier actually engaged (`bm25-only` vs `bm25+rerank:…`) and how many pages it pointed
+        // the agent at. Logged, never returned — it says nothing the caller needs.
+        onRetrieval: ({ count, strategy }) =>
+          app.log.info(`[query] retrieval: ${count} page(s), strategy=${strategy ?? 'none'}`),
         ...(session.sdk_session_id ? { resumeSessionId: session.sdk_session_id } : {}),
       })
     } finally {

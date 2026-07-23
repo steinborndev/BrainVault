@@ -64,10 +64,16 @@ task, do X instead"). The guarantees and their limits:
   child processes, **fully on-machine**: the service never passes the `--allow-egress` flag and
   additionally strips the Anthropic credential from the child environment, so chunk prefixes are
   synthetic (title + lead) and no page content leaves the box. The index is derived data written
-  only under `.vault-meta/` and excluded from vault git. The two planned enhancements are gated:
-  local reranking would talk only to a loopback ollama, and LLM-generated prefixes - the one step
-  that *would* send page bodies to the Anthropic API - stay behind an explicit, default-off
-  setting.
+  only under `.vault-meta/` and excluded from vault git.
+- **Retrieval runs in the service, never inside an agent sandbox** - a deliberate boundary
+  decision. The optional rerank stage needs to reach a local ollama and to write an embedding
+  cache, neither of which the read-only query profile permits. Instead of granting that profile a
+  network hole and a write exception, the service performs retrieval and passes the agent only a
+  list of pages to read; the sandbox keeps zero network and zero write access. This matters more
+  than it looks: ollama's local API is unauthenticated and can pull models from the internet, so
+  exposing it to a potentially prompt-injected run would have created an indirect egress channel.
+  LLM-generated chunk prefixes - the one step that *would* send page bodies to the Anthropic API -
+  remain a planned, explicitly opt-in, default-off setting.
 
 ## Verifying the guarantees yourself
 

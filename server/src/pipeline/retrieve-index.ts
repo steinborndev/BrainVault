@@ -183,6 +183,84 @@ export const buildRetrieveIndex: RetrieveIndexBuilder = async ({
   }
 }
 
+/** One retrieved page, best first. Chunk hits are collapsed to their page. */
+export interface RetrievedCandidate {
+  /** Vault-relative wiki path (`wiki/concepts/Foo.md`) — what the agent is told to read. */
+  readonly pagePath: string
+  readonly rank: number
+}
+
+export interface RetrievalResult {
+  readonly candidates: RetrievedCandidate[]
+  /** `retrieve.py`'s own label, e.g. `bm25-only` or `bm25+rerank:cosine:nomic-embed-text`. */
+  readonly strategy: string | null
+}
+
+export interface RetrieveQueryOptions {
+  readonly vaultRoot: string
+  readonly question: string
+  readonly topK?: number
+  readonly timeoutMs?: number
+  readonly run?: ProcessRunner
+}
+
+export type CandidateRetriever = (opts: RetrieveQueryOptions) => Promise<RetrievalResult>
+
+const EMPTY_RETRIEVAL: RetrievalResult = { candidates: [], strategy: null }
+
+/** A question longer than this is truncated before it reaches argv — retrieval over an essay
+ * is pointless, and it keeps the child's argument list bounded. */
+const MAX_QUESTION_CHARS = 1000
+
+/**
+ * Runs chunk-level retrieval for ONE question — **in the service process, never inside an agent
+ * sandbox** (SPEC.md §12.6). This is what keeps the read-only `query` profile untouched: the
+ * rerank stage needs to reach the local ollama and to write the embed cache, and doing that here
+ * means the sandbox needs neither a network hole nor a write exception. The agent only ever reads
+ * the pages this returns.
+ *
+ * Degrades to `EMPTY_RETRIEVAL` on ANY failure (not provisioned, script error, unparseable
+ * output, timeout): a query must never fail because retrieval did — the caller then falls back
+ * to the legacy hot-cache → index read path.
+ */
+export const retrieveCandidates: CandidateRetriever = async ({
+  vaultRoot,
+  question,
+  topK = 5,
+  timeoutMs = 30_000,
+  run = runProcess,
+}) => {
+  if (!isRetrieveProvisioned(vaultRoot)) return EMPTY_RETRIEVAL
+  const q = question.trim().slice(0, MAX_QUESTION_CHARS)
+  if (q === '') return EMPTY_RETRIEVAL
+  try {
+    // `shell: false` in the runner, so the question is one argv element — never a second command.
+    const { stdout } = await run('python3', ['scripts/retrieve.py', q, '--top', String(topK)], {
+      cwd: vaultRoot,
+      timeoutMs,
+    })
+    // STDOUT ONLY: retrieve.py prints progress ("bm25: N hits") to stderr, and merging the two
+    // corrupts the JSON parse (finding F-R5).
+    const parsed = JSON.parse(stdout) as {
+      strategy?: unknown
+      candidates?: ReadonlyArray<{ page_path?: unknown }>
+    }
+    const seen = new Set<string>()
+    const candidates: RetrievedCandidate[] = []
+    for (const c of parsed.candidates ?? []) {
+      // Several chunks of one page can rank — the agent reads whole pages, so collapse them,
+      // keeping each page at its best rank.
+      const pagePath = typeof c.page_path === 'string' ? c.page_path : ''
+      if (pagePath === '' || seen.has(pagePath)) continue
+      seen.add(pagePath)
+      candidates.push({ pagePath, rank: candidates.length + 1 })
+    }
+    return { candidates, strategy: typeof parsed.strategy === 'string' ? parsed.strategy : null }
+  } catch {
+    return EMPTY_RETRIEVAL
+  }
+}
+
 export interface RetrieveIndexScheduler {
   close(): void
 }

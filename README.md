@@ -303,15 +303,27 @@ and the service provisions and maintains its index:
   time. The build is deterministic (no agent run, no credential needed) and stays fully
   on-machine: page bodies are chunked with a synthetic title-and-lead prefix, nothing is sent
   anywhere.
-- Once built, the query path automatically switches to `retrieve.py` and answers from the ranked
-  passages; an unbuilt (or pre-v1.7) vault silently keeps the classic read order. The vault's own
-  query and autoresearch skills feature-detect the index the same way.
+- Once built, the **service** runs retrieval for each question before the agent starts and hands
+  it the ranked pages; an unbuilt (or pre-v1.7) vault silently keeps the classic read order.
 - It **rebuilds itself** after ingests (a debounced maintenance run), so new pages become
   retrievable without any manual step; the card shows the chunk count and when it was last built.
 
-Local cosine reranking (ollama) and LLM-generated chunk prefixes are planned follow-ups, each
-gated behind explicit setup - the second one is the only step that would send page content off
-the machine, and it stays off by default.
+**Optional local reranking.** If [ollama](https://ollama.com) is running with `nomic-embed-text`
+pulled, retrieval adds a semantic rerank on top of BM25: the question and the candidate chunks
+are embedded locally and re-sorted by cosine similarity, which finds passages whose wording
+differs from the question. Without ollama this degrades silently to BM25 order - it is a quality
+layer, not a dependency. Nothing leaves the machine: the embeddings are computed by your local
+ollama, and chunk embeddings are cached by content hash so only the question is embedded per query.
+
+**Why retrieval runs in the service, not in the agent.** The read-only query sandbox has no
+network and no write access, and reranking needs both (reach ollama, write the embedding cache).
+Rather than punching two holes in that sandbox, the service does the retrieval itself and passes
+the agent a ranked list of pages to read. The agent's sandbox stays exactly as strict as it is -
+and as a bonus retrieval becomes deterministic instead of depending on the model choosing to run
+it. See the security model.
+
+LLM-generated chunk prefixes (instead of the synthetic ones) are a planned follow-up; that is the
+only step that would send page content off the machine, and it will stay off by default.
 
 ## Configuration
 

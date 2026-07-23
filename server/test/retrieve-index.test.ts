@@ -21,7 +21,8 @@ import {
   type RetrieveIndexBuilder,
 } from '../src/pipeline/retrieve-index.js'
 import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
-import { querySystemPrompt, QUERY_SYSTEM_PROMPT } from '../src/pipeline/system-prompt.js'
+import { QUERY_SYSTEM_PROMPT, renderRetrievalBlock } from '../src/pipeline/system-prompt.js'
+import { retrieveCandidates } from '../src/pipeline/retrieve-index.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { Mutex } from '../src/util/mutex.js'
 import type { JobRow } from '../src/db/jobs.js'
@@ -259,25 +260,124 @@ describe('startRetrieveIndexScheduler', () => {
   })
 })
 
-describe('querySystemPrompt (stage 1 read-path flip)', () => {
-  it('keeps the legacy prompt byte-for-byte while unprovisioned', () => {
-    const root = makeVault() // scripts present, index not built
-    expect(querySystemPrompt(root)).toBe(QUERY_SYSTEM_PROMPT)
-    expect(querySystemPrompt(root)).toContain('hot cache → index → relevant pages')
-    expect(querySystemPrompt(root)).not.toContain('retrieve.py')
+describe('query prompt (stage 2: retrieval runs service-side, sandbox untouched)', () => {
+  it('never tells the agent to run retrieval itself', () => {
+    // The whole point of stage 2: the agent gets pages, not a script to execute — so the
+    // read-only sandbox needs no ollama network hole and no embed-cache write exception.
+    expect(QUERY_SYSTEM_PROMPT).not.toContain('retrieve.py')
+    expect(QUERY_SYSTEM_PROMPT).not.toContain('--no-rerank')
+    // Read-only contract + citation rules intact, and both read paths named.
+    expect(QUERY_SYSTEM_PROMPT).toContain('NO write access')
+    expect(QUERY_SYSTEM_PROMPT).toContain('[[Page Name]]')
+    expect(QUERY_SYSTEM_PROMPT).toContain('<retrieved_context>')
+    expect(QUERY_SYSTEM_PROMPT).toContain('hot cache →')
   })
 
-  it('switches to chunk retrieval once the index is provisioned — with rerank pinned off', () => {
+  it('renders nothing for an empty hit list, so the question goes through unchanged', () => {
+    expect(renderRetrievalBlock([])).toBe('')
+  })
+
+  it('renders ranked pages as a starting point, not an exclusive whitelist', () => {
+    const block = renderRetrievalBlock(['wiki/concepts/A.md', 'wiki/sources/B.md'])
+    expect(block).toContain('<retrieved_context>')
+    expect(block).toContain('1. wiki/concepts/A.md')
+    expect(block).toContain('2. wiki/sources/B.md')
+    // A hard "only these" would turn a retrieval miss into a false "not in the vault" answer.
+    expect(block).toContain('not a limit')
+    expect(block).toContain('Do not run\nretrieval yourself')
+  })
+})
+
+describe('retrieveCandidates (service-side, outside any sandbox)', () => {
+  const stdout = (candidates: Array<Record<string, unknown>>, strategy = 'bm25+rerank:cosine:nomic-embed-text') =>
+    JSON.stringify({ query: 'q', strategy, top_k: 5, candidates })
+
+  it('returns ranked page paths and the strategy label', async () => {
     const root = makeVault()
     provision(root)
-    const prompt = querySystemPrompt(root)
-    expect(prompt).toContain('scripts/retrieve.py')
-    expect(prompt).toContain('--no-rerank')
-    // The rest of the read-only contract must survive the flip unchanged.
-    expect(prompt).toContain('read-only')
-    expect(prompt).toContain('[[Page Name]]')
-    // The fallback still names the legacy order for the script-failure case.
-    expect(prompt).toContain('hot cache → index → relevant pages')
+    const run: ProcessRunner = async () => ({
+      stdout: stdout([
+        { page_path: 'wiki/concepts/A.md', rerank_score: 0.9 },
+        { page_path: 'wiki/sources/B.md', rerank_score: 0.7 },
+      ]),
+      stderr: 'bm25: 20 hits\n', // stderr must never reach the JSON parse (F-R5)
+    })
+    const res = await retrieveCandidates({ vaultRoot: root, question: 'why?', run })
+    expect(res.strategy).toBe('bm25+rerank:cosine:nomic-embed-text')
+    expect(res.candidates).toEqual([
+      { pagePath: 'wiki/concepts/A.md', rank: 1 },
+      { pagePath: 'wiki/sources/B.md', rank: 2 },
+    ])
+  })
+
+  it('collapses several chunk hits of one page, keeping its best rank', async () => {
+    const root = makeVault()
+    provision(root)
+    const run: ProcessRunner = async () => ({
+      stdout: stdout([
+        { page_path: 'wiki/concepts/A.md' },
+        { page_path: 'wiki/concepts/A.md' },
+        { page_path: 'wiki/sources/B.md' },
+      ]),
+      stderr: '',
+    })
+    const res = await retrieveCandidates({ vaultRoot: root, question: 'q', run })
+    expect(res.candidates.map((c) => c.pagePath)).toEqual(['wiki/concepts/A.md', 'wiki/sources/B.md'])
+    expect(res.candidates[1]?.rank).toBe(2)
+  })
+
+  it('passes the question as ONE argv element with the requested top-k', async () => {
+    const root = makeVault()
+    provision(root)
+    let seen: readonly string[] = []
+    const run: ProcessRunner = async (_bin, args) => {
+      seen = args
+      return { stdout: stdout([]), stderr: '' }
+    }
+    await retrieveCandidates({ vaultRoot: root, question: 'a "quoted"; rm -rf /', topK: 3, run })
+    expect(seen).toEqual(['scripts/retrieve.py', 'a "quoted"; rm -rf /', '--top', '3'])
+  })
+
+  it('degrades to empty (never throws) when unprovisioned, on script failure, or on bad JSON', async () => {
+    const bare = makeVault() // scripts present, index NOT built
+    const never: ProcessRunner = async () => {
+      throw new Error('must not run when unprovisioned')
+    }
+    expect(await retrieveCandidates({ vaultRoot: bare, question: 'q', run: never })).toEqual({
+      candidates: [],
+      strategy: null,
+    })
+
+    const root = makeVault()
+    provision(root)
+    const boom: ProcessRunner = async () => {
+      throw new Error('python3 exploded')
+    }
+    expect(await retrieveCandidates({ vaultRoot: root, question: 'q', run: boom })).toEqual({
+      candidates: [],
+      strategy: null,
+    })
+
+    const garbage: ProcessRunner = async () => ({ stdout: 'bm25: 20 hits\nnot json', stderr: '' })
+    expect(await retrieveCandidates({ vaultRoot: root, question: 'q', run: garbage })).toEqual({
+      candidates: [],
+      strategy: null,
+    })
+
+    const empty: ProcessRunner = async () => ({ stdout: stdout([]), stderr: '' })
+    expect((await retrieveCandidates({ vaultRoot: root, question: '   ', run: empty })).candidates).toEqual([])
+  })
+
+  it('truncates an essay-length question before it reaches argv', async () => {
+    const root = makeVault()
+    provision(root)
+    let seen: readonly string[] = []
+    const run: ProcessRunner = async (_bin, args) => {
+      seen = args
+      return { stdout: stdout([]), stderr: '' }
+    }
+    await retrieveCandidates({ vaultRoot: root, question: 'x'.repeat(5000), run })
+    expect(seen[1]).toHaveLength(1000)
   })
 })
 
