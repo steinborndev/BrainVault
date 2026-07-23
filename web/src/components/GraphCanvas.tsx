@@ -61,6 +61,18 @@ export interface GraphCanvasProps {
   /** Cluster id → short label (its dominant shared tags), drawn at the hull centroid. */
   clusterLabels?: ReadonlyMap<number, string>
   /**
+   * Draw the tinted cluster hulls + region labels. Split from `clusters` because the network
+   * lens needs the cluster ids to classify edges (intra vs bridge) WITHOUT drawing hulls — so
+   * `clusters` may be present while hulls stay off.
+   */
+  showHulls?: boolean
+  /**
+   * Network lens (SPEC §12.4): lift the connection lines out of the point-cloud read. Intra-
+   * cluster edges brighten subtly; cross-cluster BRIDGES render in a from→to node-color
+   * gradient with a direction arrowhead. Needs `clusters` to classify; a no-op without it.
+   */
+  network?: boolean
+  /**
    * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
    * depth) — each change re-fits the view so the filtered graph fills the canvas again.
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
@@ -189,7 +201,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, showHulls = false, network = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -354,7 +366,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // tinted blob and cleared against one another; their boxes then seed the node-label
     // collision list below so a page title can't overwrite a group label either.
     const regionLabelBoxes: Array<[number, number, number, number]> = []
-    if (clusters !== null) {
+    if (clusters !== null && showHulls) {
       const members = new Map<number, Array<[number, number]>>()
       for (let i = 0; i < nodes.length; i++) {
         const cid = clusters[i]
@@ -400,6 +412,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Edges first, faint; highlighted edges stronger. NaN endpoints (a node the worker
     // hasn't placed yet, mid live-update) simply don't draw this frame.
+    //
+    // Network lens: same 1px thickness (deliberately — brightness/colour carry the emphasis,
+    // not weight). Intra-cluster edges lift from 0.35 to 0.5 so the mesh reads; cross-cluster
+    // BRIDGES render in a from→to node-colour gradient with a direction arrowhead, turning the
+    // point-cloud into a legible network. Classification needs cluster ids and is skipped for
+    // ghost links (those keep their dashed "points at a missing page" treatment).
     ctx.lineWidth = 1 / t.k
     for (const [a, b] of edges) {
       const x1 = pos[a * 2]!
@@ -411,13 +429,49 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const lit = highlight !== null && highlight.has(a) && highlight.has(b)
       // Links into a gap are drawn dashed — they point at a page that isn't there yet.
       const toGhost = ghostIndices !== undefined && (ghostIndices.has(a) || ghostIndices.has(b))
+      const netOn = network && clusters !== null && !toGhost
+      const ca = clusters?.[a] ?? -1
+      const cb = clusters?.[b] ?? -1
+      const isBridge = netOn && ca >= 0 && cb >= 0 && ca !== cb
+
+      let stroke: string | CanvasGradient = edgeColor
+      if (isBridge) {
+        const grad = ctx.createLinearGradient(x1, y1, x2, y2)
+        grad.addColorStop(0, colorFor(nodes[a]!))
+        grad.addColorStop(1, colorFor(nodes[b]!))
+        stroke = grad
+      }
+      let alpha: number
+      if (highlight !== null) alpha = lit ? 0.9 : dimEdge
+      else if (isBridge) alpha = 0.85
+      else if (netOn) alpha = 0.5 // intra-cluster mesh, subtly more present than the 0.35 default
+      else alpha = toGhost ? 0.45 : 0.35
+
       ctx.setLineDash(toGhost ? [3 / t.k, 3 / t.k] : [])
-      ctx.strokeStyle = edgeColor
-      ctx.globalAlpha = highlight === null ? (toGhost ? 0.45 : 0.35) : lit ? 0.9 : dimEdge
+      ctx.strokeStyle = stroke
+      ctx.globalAlpha = alpha
       ctx.beginPath()
       ctx.moveTo(x1, y1)
       ctx.lineTo(x2, y2)
       ctx.stroke()
+
+      // Direction arrowhead on bridges only (few, so cheap), suppressed when the spotlight
+      // dims this edge. Points at the link TARGET, wearing the target node's colour.
+      if (isBridge && !(highlight !== null && !lit)) {
+        const ang = Math.atan2(y2 - y1, x2 - x1)
+        const tx = x1 + (x2 - x1) * 0.62
+        const ty = y1 + (y2 - y1) * 0.62
+        const ah = 6 / t.k
+        ctx.setLineDash([])
+        ctx.fillStyle = colorFor(nodes[b]!)
+        ctx.globalAlpha = 0.9
+        ctx.beginPath()
+        ctx.moveTo(tx + Math.cos(ang) * ah, ty + Math.sin(ang) * ah)
+        ctx.lineTo(tx + Math.cos(ang + 2.5) * ah, ty + Math.sin(ang + 2.5) * ah)
+        ctx.lineTo(tx + Math.cos(ang - 2.5) * ah, ty + Math.sin(ang - 2.5) * ah)
+        ctx.closePath()
+        ctx.fill()
+      }
     }
     ctx.setLineDash([])
 
@@ -559,7 +613,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, neighbors, labelReps, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, showHulls, network, neighbors, labelReps, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)

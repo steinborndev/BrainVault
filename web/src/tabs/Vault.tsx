@@ -314,6 +314,7 @@ const viewMemory = {
   lens: 'domain' as Lens,
   showClusters: false,
   showGaps: false,
+  showNetwork: false,
   showSystem: ((): boolean => {
     try {
       return localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
@@ -403,6 +404,10 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // Gaps view: overlays the unresolved link targets as ghost nodes (SPEC §12.4). Off by
   // default — it is an exploration mode, not the resting state of the graph.
   const [showGaps, setShowGaps] = useState(viewMemory.showGaps)
+  // Network lens: lift the connection lines out of the point-cloud read (intra-cluster edges
+  // brighten, cross-cluster bridges get a directional gradient). Off by default. Reuses the
+  // community detection, so turning it on computes clusters even when the hull tint is off.
+  const [showNetwork, setShowNetwork] = useState(viewMemory.showNetwork)
   /**
    * System pages (structural hubs + maintenance artifacts, node `kind` ≠ knowledge) are
    * hidden by default: the heavily-linked index/hot/log hubs are cross-domain bridges that
@@ -430,6 +435,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       lens,
       showClusters,
       showGaps,
+      showNetwork,
       showSystem,
       selection,
       trail,
@@ -606,14 +612,15 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return i >= 0 ? i : null
   }, [nodes, selection])
 
-  // Community detection (label propagation) over the currently-visible page graph, computed
-  // only when the hulls are shown. Ghost nodes are excluded (id -1) — a missing page has no
-  // community. Small clusters (< MIN_CLUSTER) are dropped so the canvas isn't peppered with
-  // singleton blobs. Each surviving cluster is labelled by its most common shared tags.
+  // Community detection (label propagation) over the currently-visible page graph. Computed
+  // when the hulls OR the network lens are on — the network lens classifies edges as intra-
+  // cluster vs bridge and so needs the ids even when no hull is drawn. Ghost nodes are excluded
+  // (id -1) — a missing page has no community. Small clusters (< MIN_CLUSTER) are dropped so the
+  // canvas isn't peppered with singleton blobs. Each surviving cluster is labelled by its tags.
   const { clusterIds, clusterLabels } = useMemo(() => {
-    if (!showClusters) return { clusterIds: null as number[] | null, clusterLabels: new Map<number, string>() }
+    if (!showClusters && !showNetwork) return { clusterIds: null as number[] | null, clusterLabels: new Map<number, string>() }
     return detectClusters(nodes, edges, realCount)
-  }, [showClusters, nodes, edges, realCount])
+  }, [showClusters, showNetwork, nodes, edges, realCount])
 
   // The clickable result list under the search box — the rings in the graph show WHERE the
   // matches are, this shows WHAT they are. Every match is listed (the dropdown scrolls);
@@ -790,6 +797,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           >
             <Icon name="graph" /> Clusters
           </button>
+          <button
+            className={`ctl${showNetwork ? ' on' : ''}`}
+            onClick={() => setShowNetwork((v) => !v)}
+            title="Network lens: brighten the connections. Intra-cluster links lift into view; cross-cluster bridges show link direction as a colour gradient with an arrowhead."
+          >
+            <Icon name="graph" /> Network
+          </button>
         </span>
         <span className="vb-spacer" />
         <span className="vtool-stats">
@@ -872,6 +886,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           lens={hasDomains ? lens : lens === 'domain' ? 'type' : lens}
           clusters={clusterIds}
           clusterLabels={clusterLabels}
+          showHulls={showClusters}
+          network={showNetwork}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
           fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}`}
           onSelect={(n) =>
