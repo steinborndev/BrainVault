@@ -209,6 +209,36 @@ Result (21 cases, top-k 5):
   written by reading the target pages, so some vocabulary leakage is unavoidable even in the
   cases built to avoid title terms. The stronger next iteration is to seed the set from REAL
   questions already in the chat sessions table, labeling them after the fact.
+- **F-R13 (2026-07-23) — set expanded to 35 cases; the curated set was NOT flattering, and the
+  rerank verdict hardened.** The intended next step (seed from real chat questions) turned out to
+  be impossible: the `messages` table holds only 10 user rows, all of them this session's own
+  test queries — the Research tab had never been used in earnest, so there is no unbiased
+  question history yet. Instead the set was enlarged with a **blind random sample** of 14 content
+  pages (`find | sort | seeded shuffle`, system/report pages excluded), one question each, to
+  kill the cherry-picking bias specifically. Result over 35 cases:
+
+  | metric | BM25 only | BM25 + rerank |
+  |---|---|---|
+  | top-1 | 24/35 (69%) | 19/35 (54%) |
+  | top-5 | **34/35 (97%)** | 33/35 (94%) |
+  | top-5 · curated (21) | 20/21 (95%) | 19/21 (90%) |
+  | top-5 · random (14) | **14/14 (100%)** | 14/14 (100%) |
+
+  - **The cohort split clears the bias worry:** the blind-random cohort scored *higher* (100%)
+    than the curated one (95%), so the original numbers were if anything pessimistic — the
+    curated set carried the deliberately brutal cases. The 95-97% baseline is real.
+  - **Stage 3 is now definitively closed:** 97% top-5 on BM25 alone, and the single miss in the
+    entire 35-case set is `bio-5`, the intentionally brand-name-stripped F-R7 variant. Headroom
+    for contextual prefixes is ~1 case in 35, against per-rebuild cost and the design's only
+    egress path.
+  - **Rerank recommendation: turn it OFF in the production path.** At n=35 the top-1 gap is no
+    longer noise (24→19, a 21% relative drop) and top-5 still costs one case. Per-case it
+    improves 8 and worsens 10; the improvements do cluster on hard cases (four promoted to rank
+    1) but the demotions land there too (`rnd-1` 1→4, `rnd-13` 1→2). Since the agent reads all
+    five returned pages, rank movement *inside* the top-5 is largely invisible anyway — so what
+    remains is a dependency and per-query latency for no measurable gain. Keep ollama and the
+    code path; re-measure when the vault roughly doubles or if a stronger embedding model is
+    worth a try. BM25's lexical matching is simply very strong at this vault size.
 
 ## 4. Stage 3 — LLM contextual prefixes (egress, opt-in) — NOT PLANNED (see F-R11)
 

@@ -30,12 +30,20 @@ interface EvalCase {
   readonly question: string
   readonly expected: readonly string[]
   readonly difficulty: string
+  /**
+   * Which sampling the case came from. `curated` cases were written by picking pages that
+   * looked interesting, which risks flattering results (memorable pages tend to have
+   * distinctive vocabulary); `random` cases come from a blind sample of content pages. Reported
+   * separately precisely so that bias is visible instead of assumed away.
+   */
+  readonly cohort: string
   readonly note?: string
 }
 
 interface CaseOutcome {
   readonly id: string
   readonly difficulty: string
+  readonly cohort: string
   /** 1-based rank of the first expected page, or 0 when it was not returned at all. */
   readonly hitRank: number
   readonly returned: number
@@ -78,6 +86,7 @@ function loadCases(file: string): EvalCase[] {
       question: parsed.question,
       expected: parsed.expected,
       difficulty: parsed.difficulty ?? 'unrated',
+      cohort: parsed.cohort ?? 'unsorted',
       ...(parsed.note ? { note: parsed.note } : {}),
     })
   })
@@ -101,7 +110,7 @@ async function runConfig(
     })
     // Rank of the first candidate matching ANY accepted page; 0 = miss.
     const hitRank = candidates.findIndex((cand) => c.expected.includes(cand.pagePath)) + 1
-    outcomes.push({ id: c.id, difficulty: c.difficulty, hitRank, returned: candidates.length })
+    outcomes.push({ id: c.id, difficulty: c.difficulty, cohort: c.cohort, hitRank, returned: candidates.length })
   }
   return { label, outcomes }
 }
@@ -135,6 +144,17 @@ function report(summaries: readonly Summary[], cases: readonly EvalCase[]): void
     const n = cases.filter((c) => c.difficulty === d).length
     row(`  top-5 · ${d}`, (s) => {
       const hit = s.outcomes.filter((o) => o.difficulty === d && o.hitRank > 0).length
+      return `${hit}/${n}  ${pct(hit, n)}`
+    })
+  }
+
+  // Cohort split: if `curated` scores much better than `random`, the curated set was
+  // flattering and its numbers should not be quoted on their own.
+  console.log('')
+  for (const co of [...new Set(cases.map((c) => c.cohort))]) {
+    const n = cases.filter((c) => c.cohort === co).length
+    row(`  top-5 · ${co}`, (s) => {
+      const hit = s.outcomes.filter((o) => o.cohort === co && o.hitRank > 0).length
       return `${hit}/${n}  ${pct(hit, n)}`
     })
   }
