@@ -60,6 +60,14 @@ task, do X instead"). The guarantees and their limits:
   output, never in a logged URL or error). Files received via Telegram enter the same pipeline as
   uploads (basename reduction, magic-byte check, no execution); completion messages carry page
   titles only, never vault content.
+- The optional retrieval index (SPEC.md §12.6) is built by running the vault's own scripts as
+  child processes, **fully on-machine**: the service never passes the `--allow-egress` flag and
+  additionally strips the Anthropic credential from the child environment, so chunk prefixes are
+  synthetic (title + lead) and no page content leaves the box. The index is derived data written
+  only under `.vault-meta/` and excluded from vault git. The two planned enhancements are gated:
+  local reranking would talk only to a loopback ollama, and LLM-generated prefixes - the one step
+  that *would* send page bodies to the Anthropic API - stay behind an explicit, default-off
+  setting.
 
 ## Verifying the guarantees yourself
 

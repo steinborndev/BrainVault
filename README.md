@@ -255,8 +255,8 @@ Five tabs, all live over SSE:
 - **Maintenance** - lint (structured report) plus a separate "fix safe findings" run that
   automates only the report's mechanical categories (frontmatter gaps, stub pages, unlinked
   mentions, stale index entries) and leaves anything needing judgment alone, hot-cache refresh
-  with its last-refresh time, the domain registry with its backfill action, and the settings
-  editor.
+  with its last-refresh time, the retrieval-index status and rebuild, the domain registry with
+  its backfill action, and the settings editor.
 
 **Domains** are the vault's meta-categories (`biomedicine`, `ai-tooling`, `knowledge-management`,
 …), the axis the graph filters and colors by. The allowed list lives in the vault itself, as the editable
@@ -287,6 +287,31 @@ read-only check of the pages it touched: missing frontmatter, dead links, orphan
 counters. The findings are **advisory** - streamed to the run's log or shown as a banner after
 an edit - never an automatic rewrite, so the vault is only ever changed by something you or the
 agent did on purpose.
+
+### Hybrid retrieval (optional)
+
+The read-only chat/query path normally reads the hot cache, then the page index, then a handful
+of whole pages it guesses are relevant. That loses to **chunk-level** retrieval whenever the
+answer sits in one passage of a page whose title doesn't match the question. The claude-obsidian
+vault ships an opt-in `wiki-retrieve` skill (contextual chunk prefixes + BM25, following
+[Anthropic's contextual-retrieval method](https://www.anthropic.com/news/contextual-retrieval)),
+and the service provisions and maintains its index:
+
+- Build it once from **Maintenance → Retrieval index → Build index** (or `POST
+  /api/v1/maintenance/retrieve-index`). It chunks every wiki page and builds a BM25 index under
+  the vault's `.vault-meta/` - **derived data, kept out of vault git** and rebuildable at any
+  time. The build is deterministic (no agent run, no credential needed) and stays fully
+  on-machine: page bodies are chunked with a synthetic title-and-lead prefix, nothing is sent
+  anywhere.
+- Once built, the query path automatically switches to `retrieve.py` and answers from the ranked
+  passages; an unbuilt (or pre-v1.7) vault silently keeps the classic read order. The vault's own
+  query and autoresearch skills feature-detect the index the same way.
+- It **rebuilds itself** after ingests (a debounced maintenance run), so new pages become
+  retrievable without any manual step; the card shows the chunk count and when it was last built.
+
+Local cosine reranking (ollama) and LLM-generated chunk prefixes are planned follow-ups, each
+gated behind explicit setup - the second one is the only step that would send page content off
+the machine, and it stays off by default.
 
 ## Configuration
 
@@ -559,6 +584,9 @@ POST   /maintenance/{lint,lint-fix,research,hot-cache,domain-backfill,domain-rev
                                  starts an async run → { id, channel }; lint-fix 409s without a
                                  report, backfill 409s without a registry, review 409s with no
                                  candidates; repair validates its task paths against the live graph
+GET    /maintenance/retrieve-index   retrieval index status (provisioned?, chunk count, built-at)
+POST   /maintenance/retrieve-index   (re)build the retrieval index - deterministic, no
+                                 credential (works in setup mode), 409 on a pre-v1.7 vault
 GET    /maintenance/runs         recent runs
 GET    /maintenance/runs/:id     poll one run's result
 GET/PUT /settings                runtime configuration

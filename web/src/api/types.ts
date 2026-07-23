@@ -317,6 +317,18 @@ export type MaintenanceKind =
   | 'domain-review'
   | 'cleanup'
   | 'repair'
+  | 'retrieve-index'
+
+/** Retrieval-index status (GET /maintenance/retrieve-index, SPEC §12.6). */
+export interface RetrieveIndexStatus {
+  /** The vault ships the wiki-retrieve scripts at all (a v1.7+ claude-obsidian clone). */
+  scriptsPresent: boolean
+  /** Fully built — the vault's own query/research skills use the index from here on. */
+  provisioned: boolean
+  chunkCount: number
+  /** ISO mtime of the BM25 index, or null when never built. */
+  indexBuiltAt: string | null
+}
 
 /**
  * One graph-repair task (POST /maintenance/repair): `connect` weaves an isolated page into

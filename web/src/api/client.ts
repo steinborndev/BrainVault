@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  RetrieveIndexStatus,
   RepairTask,
   ResearchProfilesResponse,
   DomainsResponse,
@@ -210,6 +211,14 @@ export const api = {
 
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  /** Hybrid-retrieval index status (SPEC §12.6): provisioned?, chunk count, index age. */
+  retrieveIndexStatus: (): Promise<RetrieveIndexStatus> =>
+    fetch(`${BASE}/maintenance/retrieve-index`).then(json<RetrieveIndexStatus>),
+
+  /** Rebuild (or first-time provision) the retrieval index — deterministic, no credential. */
+  retrieveIndex: (): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/retrieve-index`, { method: 'POST' }).then(json<MaintenanceRun>),
 
   domains: (): Promise<DomainsResponse> => fetch(`${BASE}/domains`).then(json<DomainsResponse>),
 

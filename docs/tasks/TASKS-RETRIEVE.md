@@ -130,22 +130,29 @@ the design: Stage 1 (BM25-only, zero new dependencies) must be live and accepted
 - [ ] Tests: flag plumbing (egress flag reaches the process layer iff setting on), settings
       route validation, no credential in captured logs.
 
-## 5. Dashboard (Maintenance tab)
+## 5. Dashboard (Maintenance tab) — DONE 2026-07-23
 
-- [ ] "Retrieval index" card: provisioned yes/no (with a provision button when no), chunk
-      count, index age, active tier (synthetic/BM25-only vs rerank vs contextual), last build
-      outcome/duration, manual rebuild button wired to the maintenance endpoint, live via the
-      existing run-registry polling + SSE stats invalidation.
-- [ ] Chat: no UI change (same composer, same citation chips). Optionally show the retrieval
-      tier in the per-answer usage footer for debuggability.
+- [x] "Retrieval index" card (`web/src/tabs/Maintenance.tsx`, `RetrievalIndexCard`): three
+      states off `GET /maintenance/retrieve-index` — scripts absent (pre-v1.7 vault → explains,
+      no button), not provisioned (Build index button), provisioned (chunk count + built-at via
+      `timeAgo`, Rebuild button). Rebuild uses `useMaintenanceRun(api.retrieveIndex)` with the
+      live `maintenance:retrieve-index` JobLog; on settle it invalidates the status query. Placed
+      left column after Hot cache. `api.retrieveIndexStatus`/`api.retrieveIndex` +
+      `RetrieveIndexStatus` type + `MaintenanceKind` extension added to the web client.
+      Active-tier display intentionally omitted until §3 adds a second tier. web typecheck +
+      build clean; card verified present in the served bundle.
+- [x] Chat: no UI change (same composer, same citation chips), as designed.
 
-## 6. Docs
+## 6. Docs — DONE 2026-07-23
 
-- [ ] README: "Hybrid retrieval (optional)" section — what it is, the three stages, what stays
-      on-machine per stage, ollama setup, cost note for Stage 3, troubleshooting (stale index,
-      ollama down, re-provision).
-- [ ] SECURITY.md: Stage 3 changes "what leaves the box" — document the egress setting and its
-      default-off.
+- [x] README: new "Hybrid retrieval (optional)" subsection under the dashboard section — what it
+      is, on-machine build, auto-rebuild after ingests, the Maintenance card, and a note that
+      rerank + LLM prefixes are gated follow-ups (the latter the only off-machine step, default
+      off). Maintenance-tab bullet + API list updated with the two `retrieve-index` endpoints.
+- [x] SECURITY.md: operational-hardening bullet — index build is fully on-machine (never
+      `--allow-egress`, credential stripped from the child env), derived data under `.vault-meta`
+      excluded from git, and the planned stages' egress posture (loopback-only rerank; LLM
+      prefixes behind an explicit default-off setting).
 
 ## 7. Live acceptance
 
@@ -156,9 +163,11 @@ the design: Stage 1 (BM25-only, zero new dependencies) must be live and accepted
       terms: the retrieval path answered correctly with the exact quantitative values and cited
       both the source and the synthesis page (5 chips). The A/B against legacy is honest, not a
       clean win — see F-R7.
-- [ ] Post-ingest freshness: drop one file, watch the debounced `retrieve-index` run appear and
-      succeed without manual action; new page's content retrievable in chat afterwards.
-      *(Not yet exercised — deferred to the next real ingest.)*
+- [x] Post-ingest freshness — **PASSED live** (F-R8). A throwaway text-note ingest reached
+      `done`; ~5 min later the debounced `retrieve-index` run fired on its own (0 → 1 runs,
+      859 → 860 chunks, run settled `done`), no manual action. Test artifacts reverted from the
+      vault afterwards (two `git revert` commits — the agent correctly created NO wiki page for a
+      note it judged valueless, so only `.raw/` + `log.md` had to be undone).
 - [x] Token/latency delta vs the §2 baseline recorded under Findings (F-R6) — confounded, not a
       receipt.
 - [x] `npm test` green: 533 tests / 39 files. typecheck + lint clean.
@@ -229,3 +238,14 @@ the design: Stage 1 (BM25-only, zero new dependencies) must be live and accepted
     agent with the right pages deterministically via `retrieve.py`. Value = reliability /
     reduced false-negative risk, demonstrated by example (n small), not a guaranteed better
     single answer. A statistically solid claim needs a labeled question set run many times.
+- **F-R8 (2026-07-23) — post-ingest freshness verified live.** Enqueued a throwaway text note;
+  it reached `done`, and ~5 min later (the scheduler's default quiet window) the debounced
+  `retrieve-index` run fired automatically without any manual trigger — retrieve-index run count
+  0 → 1, chunk count 859 → 860, run `done`. Cleanup note: the ingest agent judged the note to
+  have no lasting value and created NO wiki page (correct), so the footprint was only `.raw/`
+  manifests + `log.md` appends; reverted with two `git revert` commits. Unrelated observation
+  surfaced during cleanup (NOT caused by this work, pre-dates the session — mtime 12:33): the
+  vault working tree carries uncommitted pages from an earlier cursor.com blog ingest (untracked
+  wiki/concepts + wiki/entities + the source page, plus modified index.md/_index.md). Flagged to
+  the operator; left untouched — sweeping unrelated pages into a commit is exactly what the
+  pathspec-strict commit rules forbid.

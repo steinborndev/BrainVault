@@ -11,7 +11,7 @@
  * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type {
@@ -140,6 +140,9 @@ export function Maintenance(): React.ReactElement {
           {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
         </div>
 
+        {/* Retrieval index (SPEC §12.6 stage 1) */}
+        <RetrievalIndexCard />
+
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
         <div className="card card-pad">
           <div className="section-head">
@@ -211,6 +214,76 @@ export function Maintenance(): React.ReactElement {
           <SettingsEditor />
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Retrieval-index card (SPEC §12.6 stage 1). The chunk/BM25 index the read-only query path uses
+ * once provisioned — deterministic, no agent, no credential, so the rebuild button works in
+ * setup mode too. Freshness is otherwise automatic (a debounced rebuild after each ingest); this
+ * surfaces the state and a manual rebuild. A pre-v1.7 vault ships no scripts → the card explains
+ * that instead of offering a build that would 409.
+ */
+function RetrievalIndexCard(): React.ReactElement {
+  const qc = useQueryClient()
+  const status = useQuery({ queryKey: ['retrieve-index-status'], queryFn: api.retrieveIndexStatus })
+  const build = useMaintenanceRun(() => api.retrieveIndex())
+
+  // A settled build changes chunk count / provisioned state — refetch the status when it lands.
+  useEffect(() => {
+    if (build.result) void qc.invalidateQueries({ queryKey: ['retrieve-index-status'] })
+  }, [build.result, qc])
+
+  const s = status.data
+  const missing = s !== undefined && !s.scriptsPresent
+
+  return (
+    <div className="card card-pad">
+      <div className="section-head">
+        <h3 className="section-title">
+          Retrieval index
+          <Tip
+            text={
+              <>
+                Chunk-level hybrid retrieval (BM25 over contextualized chunks) for the Research/chat read
+                path. Once built, questions are answered from the passages <code>retrieve.py</code> ranks
+                instead of a page-title scan — better at facts buried mid-page. Rebuilds automatically after
+                ingests; this is the manual trigger. Derived data only (kept out of vault git).
+              </>
+            }
+          />
+        </h3>
+        {!missing && (
+          <button className="btn" disabled={build.running} onClick={build.start}>
+            {build.running ? 'Building…' : s?.provisioned ? 'Rebuild' : 'Build index'}
+          </button>
+        )}
+      </div>
+
+      {missing ? (
+        <p className="tab-hint">
+          This vault ships no <code>wiki-retrieve</code> scripts — it predates claude-obsidian v1.7. Nothing to
+          index; the query path uses the classic hot-cache → index → pages read order.
+        </p>
+      ) : (
+        <div className="tool-meta">
+          {s === undefined ? (
+            <span>Checking…</span>
+          ) : s.provisioned ? (
+            <span title={s.indexBuiltAt ? new Date(s.indexBuiltAt).toLocaleString('en-US') : undefined}>
+              {s.chunkCount.toLocaleString('en-US')} chunks
+              {s.indexBuiltAt ? <> · built {timeAgo(s.indexBuiltAt)}</> : null}
+            </span>
+          ) : (
+            <span>Not built yet — the query path falls back to the classic read order until you build it.</span>
+          )}
+        </div>
+      )}
+
+      {build.running && <JobLog jobId="maintenance:retrieve-index" seed={false} />}
+      {build.error && <div className="toast err">{build.error}</div>}
+      {build.result?.ok && <div className="toast ok">{build.result.answer ?? 'Index rebuilt.'}</div>}
     </div>
   )
 }
