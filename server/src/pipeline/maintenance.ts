@@ -19,7 +19,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
-import { runAgent, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
+import { runAgent, EMPTY_USAGE, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
 import { formatMessage } from './format-message.js'
 import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
@@ -34,6 +34,7 @@ import { findRelatedPages, renderOverlapBlock } from './related-pages.js'
 import { getResearchProfile, renderProfileBlock } from './research-profiles.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
+import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
 import { Mutex } from '../util/mutex.js'
 
 /**
@@ -52,6 +53,7 @@ export type MaintenanceKind =
   | 'domain-review'
   | 'cleanup'
   | 'repair'
+  | 'retrieve-index'
 
 /**
  * One user-selected graph-repair task (SPEC.md §12.4 graph view). `connect` = an isolated
@@ -99,6 +101,8 @@ export interface MaintenanceRunnerOptions {
    * over the pages a run touched, streamed as warnings on the run's channel. Advisory only.
    */
   readonly validate?: Validator
+  /** Injectable retrieval-index builder (tests supply a fake — no real python). */
+  readonly buildIndex?: RetrieveIndexBuilder
 }
 
 export interface MaintenanceResult {
@@ -160,8 +164,15 @@ export class MaintenanceRunner {
   private readonly timeoutMs: number
   private readonly runRegistry: RunRegistry
   private readonly validate: Validator | undefined
+  private readonly buildIndex: RetrieveIndexBuilder
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
+  /**
+   * Serializes index rebuilds against each other only — NOT against the run mutex: a
+   * rebuild writes solely derived `.vault-meta` artifacts, and parking it behind a
+   * 15-minute agent run would just delay index freshness for no protection gained.
+   */
+  private readonly indexMutex = new Mutex()
   /** In-memory registry of async runs, keyed by run id (insertion-ordered for eviction). */
   private readonly runs = new Map<string, MaintenanceRun>()
   /**
@@ -181,6 +192,7 @@ export class MaintenanceRunner {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
     this.validate = opts.validate
+    this.buildIndex = opts.buildIndex ?? buildRetrieveIndex
   }
 
   /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
@@ -489,6 +501,54 @@ export class MaintenanceRunner {
         DOMAIN_REVIEW_FORMAT,
       'ingest',
     )
+  }
+
+  /**
+   * Rebuilds the hybrid-retrieval index (SPEC.md §12.6) — the one DETERMINISTIC kind: no
+   * agent, no credential (so it also works in setup mode), no commit (the artifacts are
+   * excluded from vault history). First run doubles as provisioning. Serialized on its own
+   * mutex; see `indexMutex` for why it does not take the run mutex. Throws
+   * `RetrieveScriptsMissingError` when the vault ships no wiki-retrieve scripts (409 at
+   * the route) — checked synchronously so the caller learns it before a run is registered.
+   */
+  startRetrieveIndex(): MaintenanceRun {
+    if (!hasRetrieveScripts(this.vaultRoot)) {
+      throw new RetrieveScriptsMissingError(
+        'vault has no wiki-retrieve scripts (scripts/retrieve.py, contextual-prefix.py, bm25-index.py) — the claude-obsidian clone needs v1.7+',
+      )
+    }
+    const id = randomUUID()
+    const run: MaintenanceRun = {
+      id,
+      kind: 'retrieve-index',
+      channel: maintenanceChannel('retrieve-index'),
+      status: 'running',
+      startedAt: new Date().toISOString(),
+    }
+    this.runs.set(id, run)
+    this.evictOldRuns()
+    void this.executeRetrieveIndex(id)
+    return run
+  }
+
+  /** Runs the deterministic index build, then settles the run record. Never rejects. */
+  private async executeRetrieveIndex(id: string): Promise<void> {
+    const channel = maintenanceChannel('retrieve-index')
+    const log = (level: 'info' | 'warn' | 'error', message: string): void =>
+      this.events.publish({ kind: 'log', log: { jobId: channel, ts: new Date().toISOString(), level, message } })
+    try {
+      log('info', 'maintenance: retrieve-index started')
+      const built = await this.indexMutex.runExclusive(() => this.buildIndex({ vaultRoot: this.vaultRoot, log }))
+      const answer = `retrieval index rebuilt: ${built.chunkCount} chunk(s) in ${Math.round(built.durationMs / 1000)}s`
+      log('info', `maintenance: retrieve-index complete (${built.chunkCount} chunk(s))`)
+      this.settle(id, 'done', {
+        result: { ok: true, kind: 'retrieve-index', pages: [], usage: EMPTY_USAGE, answer },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      log('error', `maintenance: retrieve-index failed: ${message}`)
+      this.settle(id, 'error', { error: message })
+    }
   }
 
   /** A tracked run by id (for the poll endpoint), or undefined once evicted. */

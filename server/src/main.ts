@@ -19,6 +19,7 @@ import { RunRegistry } from './pipeline/run-registry.js'
 import { GraphBuilder } from './pipeline/graph.js'
 import { createValidator } from './pipeline/validator.js'
 import { budgetStatus } from './pipeline/budget.js'
+import { startRetrieveIndexScheduler, isRetrieveProvisioned, type RetrieveIndexScheduler } from './pipeline/retrieve-index.js'
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
@@ -125,6 +126,15 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Live-graph signal (SPEC.md §12.4): wiki file changes → debounced `vault` SSE event.
   const vaultWatcher = startVaultWatcher({ vaultRoot: config.vaultRoot, events })
 
+  // Retrieval-index freshness (SPEC.md §12.6): finished ingests reset a quiet window; when it
+  // elapses, ONE deterministic rebuild runs. Inert until the index is provisioned — checked at
+  // fire time, so provisioning it (first manual rebuild) needs no restart.
+  const retrieveScheduler: RetrieveIndexScheduler = startRetrieveIndexScheduler({
+    events,
+    isProvisioned: () => isRetrieveProvisioned(config.vaultRoot),
+    start: () => void maintenance.startRetrieveIndex(),
+  })
+
   const app = await buildServer({
     config: effectiveConfig,
     store,
@@ -185,6 +195,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     if (telegram) await telegram.stop()
     await watcher.close()
     await vaultWatcher.close()
+    retrieveScheduler.close()
     queue.stop()
     await app.close()
     db.close()

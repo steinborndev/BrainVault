@@ -1,3 +1,5 @@
+import { isRetrieveProvisioned } from './retrieve-index.js'
+
 /**
  * System-prompt extension appended to the claude_code preset for every agent run.
  *
@@ -112,22 +114,33 @@ inline-attribution path exists for.
 </entity_notability>
 `.trim()
 
+/** The v1.6 page-granular read path — the fallback whenever no retrieval index exists. */
+const QUERY_READ_PATH_LEGACY =
+  `- Prefer the wiki-query skill's read path (hot cache → index → relevant pages). You have
+  no web access — answer only from what the vault contains.`
+
 /**
- * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
- * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
- * tells the model why so it doesn't waste turns trying to "file the answer back" (a default
- * behaviour of the wiki-query skill). Citations are required so the dashboard can render
- * clickable page chips (the M4 DoD).
+ * The chunk-level read path used once the wiki-retrieve index is provisioned (SPEC.md
+ * §12.6 stage 1). `--no-rerank` is pinned: the rerank stage needs ollama network access
+ * and cache writes the read-only query sandbox does not grant (stage 2 lifts this).
  */
-export const QUERY_SYSTEM_PROMPT = `
+const QUERY_READ_PATH_RETRIEVE =
+  `- This vault has a provisioned retrieval index. FIRST run
+  \`python3 scripts/retrieve.py "<your question>" --top 5 --no-rerank\` and read ONLY the
+  candidate pages it returns (wiki/hot.md may be read for quick context) — do not scan
+  wiki/index.md instead. If the script fails, fall back to the legacy read path
+  (hot cache → index → relevant pages). You have no web access — answer only from what
+  the vault contains.`
+
+const queryPromptWith = (readPath: string): string =>
+  `
 <read_only_query>
 You are answering a question against a read-only knowledge vault in a headless pipeline.
 No human will answer a clarifying question, and you have NO write access.
 
 - Do not create, edit, or "file back" any wiki page. The vault is read-only for this run;
   attempts to write are denied by the sandbox. Just answer the question.
-- Prefer the wiki-query skill's read path (hot cache → index → relevant pages). You have
-  no web access — answer only from what the vault contains.
+${readPath}
 - ALWAYS cite the vault pages your answer draws on, inline, as Obsidian wikilinks:
   [[Page Name]]. The reader turns these into clickable links, so name real pages exactly.
 - If the wiki does not contain the answer, say so plainly rather than inventing one. Do not
@@ -135,3 +148,23 @@ No human will answer a clarifying question, and you have NO write access.
 - Answer directly and finish; do not end with a question or a plan.
 </read_only_query>
 `.trim()
+
+/**
+ * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
+ * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
+ * tells the model why so it doesn't waste turns trying to "file the answer back" (a default
+ * behaviour of the wiki-query skill). Citations are required so the dashboard can render
+ * clickable page chips (the M4 DoD). Kept exported for callers that cannot know a vault
+ * root (and as the legacy shape); prefer `querySystemPrompt(vaultRoot)`.
+ */
+export const QUERY_SYSTEM_PROMPT = queryPromptWith(QUERY_READ_PATH_LEGACY)
+
+/**
+ * The read-path decision is made fresh per run (SPEC.md §12.6): once the retrieval index
+ * is provisioned — including mid-service-lifetime by the first manual rebuild — queries
+ * switch to chunk-level retrieval with no restart; an unprovisioned (or pre-v1.7) vault
+ * keeps the legacy prompt byte-for-byte.
+ */
+export function querySystemPrompt(vaultRoot: string): string {
+  return isRetrieveProvisioned(vaultRoot) ? queryPromptWith(QUERY_READ_PATH_RETRIEVE) : QUERY_SYSTEM_PROMPT
+}

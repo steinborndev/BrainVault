@@ -13,6 +13,7 @@ import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
 import { DomainRegistryMissingError, LintReportMissingError, type RepairTask } from '../../pipeline/maintenance.js'
+import { RetrieveScriptsMissingError, retrieveIndexStats } from '../../pipeline/retrieve-index.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
 import {
@@ -181,6 +182,27 @@ export function registerMaintenanceRoute(
       profileKey = body.profileKey
     }
     return reply.code(202).send(maintenance.startResearch(topic, profileKey))
+  })
+
+  /**
+   * Deterministic retrieval-index rebuild (SPEC.md §12.6). Deliberately NOT gated on the
+   * credential: no agent runs, so it works in setup mode too. First run provisions.
+   * 409 when the vault clone predates the wiki-retrieve skill (no scripts to run).
+   */
+  app.post('/api/v1/maintenance/retrieve-index', async (_req, reply) => {
+    try {
+      return reply.code(202).send(maintenance.startRetrieveIndex())
+    } catch (err) {
+      if (err instanceof RetrieveScriptsMissingError) {
+        return reply.code(409).send({ error: err.message })
+      }
+      throw err
+    }
+  })
+
+  // Index status for the Maintenance-tab card: provisioned?, chunk count, index age.
+  app.get('/api/v1/maintenance/retrieve-index', async (_req, reply) => {
+    return reply.send(retrieveIndexStats(ctx.config.vaultRoot))
   })
 
   // Poll a run's state/result. Returns 404 once the run has been evicted from history.
