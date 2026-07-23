@@ -337,19 +337,26 @@ export class IngestQueue {
    * two cases apart:
    *
    *   - An `ingesting` run whose final log entry is already in `wiki/log.md` had FINISHED writing;
-   *     only its commit and status update were lost to the crash. Commit exactly the wiki pages it
-   *     left dirty (via commitPaths — an explicit pathspec, never `git add -A`, so nothing outside
-   *     this run is swept in) and flip it to `done`. Commit BEFORE the status flip, so a second
-   *     crash mid-reconcile re-enters here (still `ingesting`) instead of stranding a terminal
-   *     `done` job with uncommitted pages.
-   *   - Everything else (a `preprocessing` job never reached the agent; an `ingesting` job with no
-   *     completion marker was genuinely mid-write) → `failed`, retryable, unchanged behaviour.
+   *     only its commit and status update were lost to the crash → commit its dirty pages and flip
+   *     to `done`.
+   *   - An `ingesting` run with NO completion marker was genuinely mid-write → still commit the
+   *     pages it had already written (see below), then mark `failed` (retryable). A `preprocessing`
+   *     job never reached the agent and wrote nothing → `failed`, no commit.
+   *
+   * Both `ingesting` cases commit the dirty wiki pages (via commitPaths — an explicit pathspec,
+   * never `git add -A`, so nothing outside this run is swept in), differing only in the resulting
+   * STATUS. The marker decides whether the JOB is done, not whether its on-disk pages get
+   * versioned: committing a not-completed run's pages is what stops the RETRY from orphaning them
+   * (its `dirtyBefore` snapshot would otherwise exclude them from the F4 sweep, and no later pass
+   * ever picks them up — the 2026-07-23 retry-orphan bug). Committing happens BEFORE the status
+   * flip, so a second crash mid-reconcile re-enters here (still `ingesting`) rather than stranding
+   * a terminal job with uncommitted pages.
    *
    * Residual risk (SPEC §11.3 risk 5): the dirty-wiki set can, in principle, include a page the
-   * user was editing in Obsidian at restart, which would then land in the recovered commit. This
-   * only fires when a crash actually left a COMPLETED ingest uncommitted, and the page stays fully
-   * versioned and revertable — strictly better than the old behaviour, where the next unrelated
-   * run's `git add -A` swept the same page under an even less relevant message.
+   * user was editing in Obsidian at restart, which would then land in the recovered commit. It
+   * only fires when a crash left an ingest's pages uncommitted, and the page stays fully versioned
+   * and revertable — strictly better than orphaning it, or than the old `git add -A` sweeping it
+   * into an unrelated run's commit.
    */
   private async reconcileInterrupted(): Promise<void> {
     const stuck = this.store.interruptedJobs()
@@ -362,29 +369,47 @@ export class IngestQueue {
 
     for (const job of stuck) {
       const completed = job.status === 'ingesting' && this.ingestLoggedCompletion(job)
-      if (!completed) {
+
+      // Commit any wiki pages an interrupted INGESTING run already wrote — whether or not it
+      // reached its log-marker. The marker decides the job's STATUS (done vs failed-retryable),
+      // NOT whether its on-disk pages get versioned. A run cut off after writing pages but before
+      // the marker (or before its own commit) would otherwise ORPHAN those pages permanently: the
+      // NEXT attempt cannot recover them either — its `dirtyBefore` snapshot already contains them,
+      // so the F4 sweep (`newWikiPaths`) excludes them, the retried agent sees them already on disk
+      // and does not re-Write them, and once the job reaches `done` reconcile never revisits it
+      // (it only scans non-terminal jobs). This bit a real ingest (2026-07-23): a restart mid-write
+      // left 7 content pages, the retry committed only bookkeeping, and the pages sat untracked.
+      // Committing here is the fix — the pages are versioned/revertable, and the retry (for the
+      // not-completed case) then runs on a clean tree. A `preprocessing` job wrote nothing, so
+      // there is nothing to commit. Batch members share one output set (the cache), so the first
+      // member commits the tree and its siblings reuse the list.
+      let pages: string[] = []
+      if (job.status === 'ingesting') {
+        const label = job.original_name ?? job.url ?? job.id
+        const cached = job.batch_id !== null ? committedByBatch.get(job.batch_id) : undefined
+        if (cached !== undefined) {
+          pages = cached
+        } else {
+          pages = await this.commitReconciledPages(job, label, completed)
+          if (job.batch_id !== null) committedByBatch.set(job.batch_id, pages)
+        }
+      }
+
+      if (completed) {
+        this.store.transition(job.id, 'done', {
+          patch: pages.length > 0 ? { createdPages: pages } : {},
+          log: 'reconciled to done after restart: run had completed; commit recovered',
+        })
+      } else {
         this.store.transition(job.id, 'failed', {
           patch: { error: 'interrupted by a service restart before it finished — retry to run it again' },
-          log: 'recovered after restart: mid-flight with no completion marker in wiki/log.md',
+          log:
+            pages.length > 0
+              ? `recovered after restart: mid-flight with no completion marker — committed ${pages.length} page(s) it had already written so the retry cannot orphan them (retry to finish)`
+              : 'recovered after restart: mid-flight with no completion marker in wiki/log.md',
         })
         recoveredToFailed++
-        continue
       }
-
-      const label = job.original_name ?? job.url ?? job.id
-      const cached = job.batch_id !== null ? committedByBatch.get(job.batch_id) : undefined
-      let pages: string[]
-      if (cached !== undefined) {
-        pages = cached
-      } else {
-        pages = await this.commitReconciledPages(job, label)
-        if (job.batch_id !== null) committedByBatch.set(job.batch_id, pages)
-      }
-
-      this.store.transition(job.id, 'done', {
-        patch: pages.length > 0 ? { createdPages: pages } : {},
-        log: 'reconciled to done after restart: run had completed; commit recovered',
-      })
     }
 
     if (recoveredToFailed > 0) {
@@ -401,10 +426,14 @@ export class IngestQueue {
     this.events?.publish({ kind: 'stats' })
   }
 
-  /** Commits the wiki pages a completed-but-uncommitted run left dirty; returns what landed. */
-  private async commitReconciledPages(job: JobRow, label: string): Promise<string[]> {
+  /**
+   * Commits the wiki pages an interrupted run left dirty; returns what landed. Called for both
+   * the completed branch (commit + `done`) and the not-completed branch (commit so the retry
+   * cannot orphan them + `failed`); `completed` only varies the commit subject.
+   */
+  private async commitReconciledPages(job: JobRow, label: string, completed: boolean): Promise<string[]> {
     if (!this.autoCommit()) {
-      this.store.log(job.id, 'info', 'reconcile: auto-commit disabled — completed pages left on disk, not committed')
+      this.store.log(job.id, 'info', 'reconcile: auto-commit disabled — pages left on disk, not committed')
       return []
     }
     const dirtyWiki = [...(await dirtyPaths(this.vaultRoot))].filter((p) => p.startsWith('wiki/'))
@@ -416,10 +445,11 @@ export class IngestQueue {
     // throws "pathspec did not match", which would abort the whole recovery commit.
     const rawDir = path.posix.join('.raw', job.id)
     const paths = fs.existsSync(path.join(this.vaultRoot, rawDir)) ? [...dirtyWiki, rawDir] : dirtyWiki
+    const subject = completed
+      ? `ingest: ${label} (recovered after restart)`
+      : `ingest: ${label} (recovered after restart — incomplete run, retry pending)`
     try {
-      const result = await this.commitMutex.runExclusive(() =>
-        commitPaths(this.vaultRoot, `ingest: ${label} (recovered after restart)`, paths),
-      )
+      const result = await this.commitMutex.runExclusive(() => commitPaths(this.vaultRoot, subject, paths))
       if (result.committed) {
         this.store.log(
           job.id,

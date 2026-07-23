@@ -83,10 +83,14 @@ describe('reconcileInterrupted', () => {
     expect(git('log', '--diff-filter=A', '--name-only', '--pretty=format:', '-1').split('\n')).toContain(page)
   })
 
-  it('fails a mid-write ingest with no completion marker, leaving its pages uncommitted', async () => {
+  it('fails a mid-write ingest with no marker but COMMITS its pages so the retry cannot orphan them', async () => {
     const job = seedIngesting({ sha256: 'b' })
-    // Dirty page but NO log-md marker for this job → genuinely mid-write, not finished.
-    write('wiki/concepts/Half.md', '# half\n')
+    // Dirty page but NO log-md marker for this job → genuinely mid-write, not finished. The page
+    // is nonetheless a whole file the agent already wrote; leaving it dirty is the retry-orphan
+    // bug (the retry's dirtyBefore snapshot would exclude it from the F4 sweep, and no later pass
+    // ever commits it). So reconcile commits it now, then fails the job for a retry to finish.
+    const page = 'wiki/concepts/Half.md'
+    write(page, '# half\n')
 
     const q = makeQueue()
     q.start()
@@ -95,9 +99,24 @@ describe('reconcileInterrupted', () => {
     const recovered = store.getOrThrow(job.id)
     expect(recovered.status).toBe('failed')
     expect(recovered.error).toMatch(/interrupted by a service restart/)
-    // Nothing was committed — the partial page stays dirty for a retry to redo cleanly.
+    // The page is now VERSIONED (revertable), not orphaned, and the tree is clean so the retry
+    // starts fresh. The commit subject marks it as an incomplete, retry-pending recovery.
+    expect(git('log', '--oneline', '-1')).toMatch(/ingest: a\.pdf \(recovered after restart — incomplete run, retry pending\)/)
+    expect((await dirtyPaths(repo)).has(page)).toBe(false)
+    expect(git('status', '--porcelain').trim()).toBe('')
+    expect(git('log', '--diff-filter=A', '--name-only', '--pretty=format:', '-1').split('\n')).toContain(page)
+  })
+
+  it('fails a mid-write ingest with nothing written yet, without an empty recovery commit', async () => {
+    const job = seedIngesting({ sha256: 'b2' })
+    // No dirty pages at all (crash before the first Write) → nothing to commit, just fail.
+    const q = makeQueue()
+    q.start()
+    await q.ready
+
+    expect(store.getOrThrow(job.id).status).toBe('failed')
+    // No recovery commit was fabricated over an empty tree.
     expect(git('log', '--oneline', '-1')).toMatch(/base/)
-    expect((await dirtyPaths(repo)).has('wiki/concepts/Half.md')).toBe(true)
   })
 
   it('fails a preprocessing job (never reached the agent) without touching the vault', async () => {
