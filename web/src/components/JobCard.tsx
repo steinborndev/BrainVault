@@ -89,6 +89,22 @@ export function JobCard({
     mutationFn: () => api.retry(job.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
+  // Undo of one ingest (SPEC §9). Two-step arm rather than window.confirm, matching the other
+  // destructive actions — it writes the vault, so it must not be a single stray click.
+  const [armedRevert, setArmedRevert] = useState(false)
+  const revert = useMutation({
+    mutationFn: () => api.revertJob(job.id),
+    onSuccess: () => {
+      setArmedRevert(false)
+      void qc.invalidateQueries({ queryKey: ['jobs'] })
+      void qc.invalidateQueries({ queryKey: ['stats'] })
+      void qc.invalidateQueries({ queryKey: ['graph'] })
+    },
+  })
+  // A batch commits ONCE for all its members, so undoing through any member undoes the batch.
+  const batchWarning = job.batch_id !== null ? ' This undoes the whole batch it was part of.' : ''
+  const canRevert =
+    variant === 'history' && !!job.commit_hash && !job.reverted_at && job.status === 'done'
 
   return (
     <div className="job card">
@@ -109,6 +125,23 @@ export function JobCard({
             <button className="btn" disabled={retry.isPending} onClick={() => retry.mutate()} title="Retry">
               <Icon name="retry" /> Retry
             </button>
+          )}
+          {canRevert && (
+            <button
+              className={`btn ${armedRevert ? 'armed' : 'ghost danger'}`}
+              disabled={revert.isPending}
+              onClick={() => (armedRevert ? revert.mutate() : setArmedRevert(true))}
+              onBlur={() => setArmedRevert(false)}
+              title={`Undo this ingest: reverts its vault commit as a new commit.${batchWarning}`}
+            >
+              <Icon name="retry" />{' '}
+              {revert.isPending ? 'Reverting…' : armedRevert ? 'Confirm revert' : 'Revert'}
+            </button>
+          )}
+          {variant === 'history' && job.reverted_at && (
+            <span className="chip" title={`Vault commit reverted ${new Date(job.reverted_at).toLocaleString('en-US')}`}>
+              reverted
+            </span>
           )}
           {variant !== 'queue' && (
             <button className="btn ghost" onClick={() => setShowLog((v) => !v)}>
@@ -136,6 +169,13 @@ export function JobCard({
       )}
 
       {job.error && variant !== 'active' && <div className="job-error">{job.error}</div>}
+      {revert.error && <div className="job-error">{(revert.error as Error).message}</div>}
+      {armedRevert && !revert.isPending && (
+        <div className="tab-hint">
+          Reverts this ingest&apos;s vault commit as a new commit — the pages it created go away, the
+          history stays.{batchWarning} Click again to confirm.
+        </div>
+      )}
 
       {pages.length > 0 && <PageLinks vaultName={vaultName} paths={pages} />}
 

@@ -239,6 +239,26 @@ CREATE TABLE telegram_drops (
 );
 `
 
+/**
+ * v9 — the link from a job to the ONE vault commit it produced, so "revert this ingest" (SPEC.md
+ * §9's undo mechanism) is a button rather than manual git archaeology. The hash was previously
+ * only ever written into the job's log TEXT; parsing that back out would be exactly the kind of
+ * fragile log-scraping that has bitten this pipeline before.
+ *
+ * `reverted_at` records that the undo already happened, so the UI can offer the action once and
+ * report it afterwards WITHOUT inventing a new job status — the lifecycle set in SPEC.md §8 is
+ * closed, and a reverted ingest is still a `done` ingest that ran.
+ *
+ * Both nullable and appended: a plain ADD COLUMN, not a table rebuild (contrast v7, where a CHECK
+ * constraint forced the full rebuild and cascade-deleted job_logs on the first attempt).
+ * Batch members deliberately SHARE one hash — one commit covers the batch, so reverting via any
+ * member undoes all of them; the UI has to say so.
+ */
+const V9 = `
+ALTER TABLE jobs ADD COLUMN commit_hash TEXT;
+ALTER TABLE jobs ADD COLUMN reverted_at TEXT;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -248,4 +268,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 6, up: V6 },
   { version: 7, up: V7 },
   { version: 8, up: V8 },
+  { version: 9, up: V9 },
 ]

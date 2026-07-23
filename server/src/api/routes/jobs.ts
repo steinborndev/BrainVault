@@ -18,6 +18,7 @@ import type { AppContext } from '../server.js'
 import type { BatchItem } from '../../pipeline/queue.js'
 import { JobStore, type JobStatus } from '../../db/jobs.js'
 import { isShortcut, readShortcutUrl } from '../../pipeline/shortcut.js'
+import { revertCommit } from '../../pipeline/git.js'
 
 interface EnqueuedRef {
   readonly id: string
@@ -146,6 +147,55 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
     const job = store.get(id)
     if (job === undefined) return reply.code(404).send({ error: 'no such job' })
     return { job, logs: store.logs(id) }
+  })
+
+  /**
+   * Undo one ingest (SPEC.md §9): reverts the single vault commit the job produced, as a new
+   * commit, so the undo is itself versioned and reversible. This is the button form of the
+   * mitigation SECURITY.md leans on for content poisoning — a bad ingest must be cheap to
+   * unwind, or in practice nobody unwinds it.
+   *
+   * Held behind the SAME commit mutex as ingest/maintenance/page-edit commits, so a revert can
+   * never interleave with an agent's commit. `revertCommit` additionally refuses on a dirty tree
+   * and aborts cleanly on conflict, leaving the vault untouched rather than half-reverted.
+   *
+   * Batch caveat: members share one commit, so this undoes the whole batch. The response says
+   * how many jobs were affected and the UI warns before arming.
+   */
+  app.post('/api/v1/jobs/:id/revert', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const job = store.get(id)
+    if (job === undefined) return reply.code(404).send({ error: 'no such job' })
+    if (job.commit_hash === null) {
+      return reply.code(409).send({
+        error:
+          'this job has no vault commit to revert (it never committed, or it predates commit tracking)',
+      })
+    }
+    if (job.reverted_at !== null) {
+      return reply.code(409).send({ error: `already reverted at ${job.reverted_at}` })
+    }
+    if (ctx.commitMutex === undefined) {
+      return reply.code(503).send({ error: 'commit mutex unavailable' })
+    }
+
+    const hash = job.commit_hash
+    const result = await ctx.commitMutex.runExclusive(() => revertCommit(ctx.config.vaultRoot, hash))
+    if (!result.reverted) {
+      // `already-reverted` means the vault no longer carries those changes: record it so the
+      // action stops being offered, but report it as a conflict-free no-op.
+      if (result.refusal === 'already-reverted') store.markReverted(hash)
+      const code = result.refusal === 'dirty-tree' ? 409 : result.refusal === 'conflict' ? 409 : 409
+      return reply.code(code).send({ error: result.message, refusal: result.refusal })
+    }
+
+    // Mark every job sharing the hash — one commit can cover a whole batch.
+    store.markReverted(hash)
+    const affected = store.list({ limit: 500 }).filter((j) => j.commit_hash === hash).length
+    store.log(id, 'info', `vault commit ${hash.slice(0, 8)} reverted as ${result.hash?.slice(0, 8)}`)
+    events.publish({ kind: 'stats' })
+    events.publish({ kind: 'vault' })
+    return reply.code(200).send({ reverted: true, revertCommit: result.hash, affectedJobs: affected })
   })
 
   // Clear finished jobs from the history ("Verlauf leeren", SPEC.md §6.2). With `?status=`

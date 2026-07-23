@@ -211,7 +211,10 @@ Five tabs, all live over SSE:
 - **Overview** - page counts by type, wiki growth, recently changed pages and recent commits, the
   hot cache, 7-day KPIs with week-over-week trends, token/cost totals and the daily budget.
 - **Ingestion** - dropzone (files + URLs), active jobs with a live agent log, the queue, and a
-  filterable history with created pages, duration, tokens and cost per job.
+  filterable history with created pages, duration, tokens and cost per job. A finished ingest can
+  be **reverted** from the history: since every ingest is exactly one vault commit, undoing it is
+  one click, and the undo is itself a commit - so it stays versioned and reversible. It refuses
+  rather than guessing if the vault has uncommitted changes or the revert would conflict.
 - **Research** - chat against the read-only query runner; answers cite vault pages as clickable
   chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("Save to vault"). Autoresearch runs live here
@@ -578,6 +581,9 @@ agent run answers `503` until the credential is entered.
 POST   /jobs                     upload / URL / pasted text (multi → batch)
 GET    /jobs, /jobs/:id          list + detail
 POST   /jobs/:id/retry           retry a failed or deferred job
+POST   /jobs/:id/revert          undo one ingest: reverts its vault commit as a new commit
+                                 (409 on a dirty tree, on conflict, or if already reverted;
+                                 a batch shares one commit, so this undoes the batch)
 DELETE /jobs/:id, /jobs          cancel; clear history
 GET    /events                   SSE: job updates, log streams, stats + vault invalidation
 GET    /stats                    dashboard numbers, usage totals, budget

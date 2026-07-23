@@ -131,6 +131,97 @@ export async function commitPaths(
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }
 
+/** Why a revert could not be performed — each maps to a specific, actionable message. */
+export type RevertRefusal = 'unknown-commit' | 'dirty-tree' | 'conflict' | 'already-reverted'
+
+export interface RevertResult {
+  readonly reverted: boolean
+  /** The NEW commit that undoes the original (present only on success). */
+  readonly hash?: string
+  readonly refusal?: RevertRefusal
+  readonly message?: string
+}
+
+/**
+ * Undoes exactly one vault commit (SPEC.md §9's undo mechanism, surfaced as the dashboard's
+ * "revert this ingest"). Callers MUST hold the shared commit mutex — this writes the vault.
+ *
+ * The whole value of this function is that it either fully succeeds or leaves the vault exactly
+ * as it found it. Three guards, in order:
+ *
+ *  1. The commit must exist and be an ancestor of HEAD.
+ *  2. The working tree must be CLEAN. `git revert` on a dirty tree either refuses or mixes an
+ *     in-flight agent's half-written pages into the revert; the commit mutex serializes
+ *     COMMITS but agents write files outside it, so this check is what actually protects us.
+ *  3. On conflict (a later commit touched the same lines) we `git revert --abort` and report it,
+ *     rather than leaving conflict markers in wiki pages for the next ingest to read as content.
+ */
+export async function revertCommit(vaultRoot: string, hash: string): Promise<RevertResult> {
+  try {
+    await git(vaultRoot, ['cat-file', '-e', `${hash}^{commit}`])
+  } catch {
+    return { reverted: false, refusal: 'unknown-commit', message: `no such commit in the vault: ${hash}` }
+  }
+  try {
+    await git(vaultRoot, ['merge-base', '--is-ancestor', hash, 'HEAD'])
+  } catch {
+    return {
+      reverted: false,
+      refusal: 'unknown-commit',
+      message: `commit ${hash.slice(0, 8)} is not part of the current history`,
+    }
+  }
+
+  const dirty = await dirtyPaths(vaultRoot)
+  if (dirty.size > 0) {
+    return {
+      reverted: false,
+      refusal: 'dirty-tree',
+      message:
+        'the vault has uncommitted changes — a run may still be writing. Wait for it to finish, then retry.',
+    }
+  }
+
+  const before = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
+  try {
+    await git(vaultRoot, [...AUTHOR_ARGS, 'revert', '--no-edit', '--no-commit', hash])
+  } catch (err) {
+    // Leave nothing half-applied: restore the index and tree we started from.
+    try {
+      await git(vaultRoot, ['revert', '--abort'])
+    } catch {
+      try {
+        await git(vaultRoot, ['reset', '--hard', before])
+      } catch {
+        /* nothing further we can safely do; the message below tells the operator */
+      }
+    }
+    return {
+      reverted: false,
+      refusal: 'conflict',
+      message:
+        `reverting ${hash.slice(0, 8)} conflicts with later changes — the vault was left untouched. ` +
+        `Undo it by hand if you still want it: git -C <vault> revert ${hash.slice(0, 8)}. ` +
+        `(${(err as Error).message.split('\n')[0]})`,
+    }
+  }
+
+  const staged = await git(vaultRoot, ['diff', '--cached', '--name-only'])
+  if (staged.trim() === '') {
+    // Nothing to undo — the commit's changes are already gone (reverted earlier, or overwritten).
+    await git(vaultRoot, ['reset', '--hard', before])
+    return {
+      reverted: false,
+      refusal: 'already-reverted',
+      message: `nothing to undo — ${hash.slice(0, 8)} has already been reverted or superseded`,
+    }
+  }
+
+  await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', `revert ingest ${hash.slice(0, 8)}`])
+  const newHash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
+  return { reverted: true, hash: newHash }
+}
+
 export interface CommitOptions {
   /**
    * Vault-relative paths to stage for THIS commit (F4). Staging only a job's own paths

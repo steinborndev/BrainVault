@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  RevertResponse,
   RetrieveIndexStatus,
   RepairTask,
   ResearchProfilesResponse,
@@ -208,6 +209,10 @@ export const api = {
 
   domainBackfill: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/domain-backfill`, { method: 'POST' }).then(json<MaintenanceRun>),
+
+  /** Undo one ingest: reverts its vault commit as a new commit (SPEC §9). */
+  revertJob: (id: string): Promise<RevertResponse> =>
+    fetch(`${BASE}/jobs/${id}/revert`, { method: 'POST' }).then(json<RevertResponse>),
 
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),

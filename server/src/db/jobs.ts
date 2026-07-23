@@ -98,6 +98,10 @@ export interface JobRow {
   started_at: string | null
   finished_at: string | null
   notify_channel: string | null
+  /** The one vault commit this job produced (v9) — the anchor for "revert this ingest". */
+  commit_hash: string | null
+  /** Set once that commit has been reverted; the job's own status stays whatever it was. */
+  reverted_at: string | null
 }
 
 export interface CreateJobInput {
@@ -541,6 +545,20 @@ export class JobStore {
   /** Records the wiki pages this ingest committed (read back from the commit itself). */
   setCreatedPages(id: string, pages: readonly string[]): void {
     this.db.prepare('UPDATE jobs SET created_pages = ? WHERE id = ?').run(JSON.stringify(pages), id)
+  }
+
+  /** Records the vault commit a job produced (v9). Batch members share one hash by design. */
+  setCommitHash(id: string, hash: string): void {
+    this.db.prepare('UPDATE jobs SET commit_hash = ? WHERE id = ?').run(hash, id)
+  }
+
+  /**
+   * Marks the job's commit as reverted. Applied to EVERY job sharing the hash, because one
+   * commit covers a whole batch — leaving siblings unmarked would offer a second revert of a
+   * commit that is already undone.
+   */
+  markReverted(hash: string, at: string = nowIso()): void {
+    this.db.prepare('UPDATE jobs SET reverted_at = ? WHERE commit_hash = ? AND reverted_at IS NULL').run(at, hash)
   }
 
   /** Appends a line to the job's log (agent stream + pipeline events, SPEC.md §8). */

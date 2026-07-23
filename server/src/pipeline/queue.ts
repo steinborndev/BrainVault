@@ -451,6 +451,7 @@ export class IngestQueue {
     try {
       const result = await this.commitMutex.runExclusive(() => commitPaths(this.vaultRoot, subject, paths))
       if (result.committed) {
+        if (result.hash) this.store.setCommitHash(job.id, result.hash)
         this.store.log(
           job.id,
           'info',
@@ -940,6 +941,8 @@ export class IngestQueue {
       })
       if (result.committed) {
         this.store.setCreatedPages(job.id, result.committedPages)
+        // Anchor for "revert this ingest" (v9): persisted, not scraped back out of the log text.
+        if (result.hash) this.store.setCommitHash(job.id, result.hash)
         this.store.log(
           job.id,
           'info',
@@ -1141,6 +1144,9 @@ export class IngestQueue {
       })
       if (result.committed) {
         for (const id of memberIds) this.store.setCreatedPages(id, result.committedPages)
+        // Every member gets the SAME hash: one commit covers the batch, so reverting through any
+        // one of them undoes all of them (the UI says so before arming the action).
+        if (result.hash) for (const id of memberIds) this.store.setCommitHash(id, result.hash)
         this.store.log(memberIds[0]!, 'info', `committed ${result.hash?.slice(0, 8)} (${result.committedPages.length} pages, batch of ${memberIds.length})`)
         this.events?.publish({ kind: 'stats' })
         return result.committedPages

@@ -33,6 +33,8 @@ function makeJob(over: Partial<JobRow> = {}): JobRow {
     started_at: null,
     finished_at: null,
     notify_channel: 'telegram:500',
+    commit_hash: null,
+    reverted_at: null,
     ...over,
   }
 }

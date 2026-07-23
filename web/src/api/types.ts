@@ -40,6 +40,17 @@ export interface Job {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** The vault commit this job produced — present once it committed; the revert anchor. */
+  commit_hash?: string | null
+  /** Set once that commit has been reverted (the job's own status is unchanged). */
+  reverted_at?: string | null
+}
+
+export interface RevertResponse {
+  reverted: boolean
+  revertCommit?: string
+  /** How many jobs shared the reverted commit (a batch commits once for all members). */
+  affectedJobs: number
 }
 
 export interface JobLogLine {
