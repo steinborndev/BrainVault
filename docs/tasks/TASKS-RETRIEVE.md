@@ -162,7 +162,55 @@ agent ranked PAGES on the prompt. The read-only `query` profile is byte-for-byte
   vault-service. Model: `nomic-embed-text` (274 MB), CPU-only is fast enough for one query
   embedding plus cached chunk embeddings.
 
-## 4. Stage 3 — LLM contextual prefixes (egress, opt-in) — GATED ON STAGE 2 ACCEPTED
+## 3c. Check 1 — retrieval quality baseline (the stage-3 gate) — DONE 2026-07-23
+
+Built before deciding on stage 3, because every quality claim so far was anecdotal (F-R6 was
+confounded, F-R7 was n=1). Harness: `npm run retrieval-eval --workspace server -- --data <jsonl>`
+(`src/cli/retrieval-eval.ts`), calling the SAME `retrieveCandidates` production uses, reporting
+BM25-only vs BM25+rerank side by side with per-case ranks. The labeled set is 21 cases across 5
+domains with a deliberate easy/medium/hard mix (hard = buried mid-page fact, paraphrase, or no
+title-term overlap). **The dataset lives OUTSIDE this repo** (`~/.local/share/vault-service/
+retrieval-eval.jsonl`) — its questions and expected paths are vault content (hard rule 7).
+
+Result (21 cases, top-k 5):
+
+| metric | BM25 only | BM25 + rerank |
+|---|---|---|
+| top-1 | 14/21 (67%) | 12/21 (57%) |
+| top-5 | **20/21 (95%)** | 19/21 (90%) |
+| missed | 1 | 2 |
+
+- [x] **Stage 3 verdict: DO NOT BUILD** (F-R11). BM25 alone already puts the right page in the
+      agent's top-5 in 95% of cases, so the entire headroom for contextual prefixes is ~1 case in
+      21 — against real per-rebuild cost and the only egress path in the whole retrieval design.
+      §4 below is kept for the record but is not planned work.
+- [x] Secondary finding: the rerank stage does NOT pay for itself on this set (F-R12).
+
+## 3d. Findings from check 1
+
+- **F-R11 (2026-07-23) — the stage-3 gate closed the stage.** 95% top-5 on BM25 alone is the
+  number that matters, because top-5 is exactly what the service hands the agent. The single
+  BM25 miss (`bio-5`) is a deliberately brutal variant of the F-R7 question with both brand names
+  removed. Paying per rebuild and sending page bodies off-machine to chase one case in 21 is a
+  bad trade. Revisit only if the vault grows enough that a re-run of this harness shows top-5
+  degrading.
+- **F-R12 (2026-07-23) — rerank helps exactly what it should, and it does not show up in the
+  metric that matters.** Per-case ranks: it improved 5 cases and worsened 6. But the improvements
+  are concentrated where it was supposed to help — three HARD cases promoted to rank 1
+  (`fin-2` 3→1, `fin-6` 3→1, `bio-2` 2→1) — while most regressions are cosmetic demotions of
+  cases BM25 already had at rank 1 (1→2, 1→3), which are operationally invisible because the
+  agent receives five pages either way. The one real regression is `cook-2` (rank 1 → out of
+  top-5 entirely). Net on top-5: −1 case, i.e. within noise at n=21. Honest conclusion: **on
+  current evidence rerank is neutral-to-slightly-negative in production terms** while adding an
+  ollama dependency and per-query latency; the case for keeping it rests on the hard-case rank
+  gains, not on hit rate. Decide with a bigger set rather than from this one — the harness now
+  makes that cheap.
+- **Methodological caveat, stated so nobody over-trusts these numbers:** the questions were
+  written by reading the target pages, so some vocabulary leakage is unavoidable even in the
+  cases built to avoid title terms. The stronger next iteration is to seed the set from REAL
+  questions already in the chat sessions table, labeling them after the fact.
+
+## 4. Stage 3 — LLM contextual prefixes (egress, opt-in) — NOT PLANNED (see F-R11)
 
 - [ ] New setting `retrievePrefixEgress` (default OFF) in `settings` (route + zod + UI toggle
       in `SettingsEditor`). Consent copy must say plainly: wiki page bodies are sent to the

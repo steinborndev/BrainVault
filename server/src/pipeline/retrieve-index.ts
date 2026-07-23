@@ -202,6 +202,12 @@ export interface RetrieveQueryOptions {
   readonly topK?: number
   readonly timeoutMs?: number
   readonly run?: ProcessRunner
+  /**
+   * Semantic rerank on top of BM25. Defaults to ON — that IS the production read path. Set
+   * false (⇒ `--no-rerank`) only to measure what the rerank stage is actually buying, which
+   * is what `npm run retrieval-eval` does.
+   */
+  readonly rerank?: boolean
 }
 
 export type CandidateRetriever = (opts: RetrieveQueryOptions) => Promise<RetrievalResult>
@@ -229,16 +235,15 @@ export const retrieveCandidates: CandidateRetriever = async ({
   topK = 5,
   timeoutMs = 30_000,
   run = runProcess,
+  rerank = true,
 }) => {
   if (!isRetrieveProvisioned(vaultRoot)) return EMPTY_RETRIEVAL
   const q = question.trim().slice(0, MAX_QUESTION_CHARS)
   if (q === '') return EMPTY_RETRIEVAL
   try {
     // `shell: false` in the runner, so the question is one argv element — never a second command.
-    const { stdout } = await run('python3', ['scripts/retrieve.py', q, '--top', String(topK)], {
-      cwd: vaultRoot,
-      timeoutMs,
-    })
+    const args = ['scripts/retrieve.py', q, '--top', String(topK), ...(rerank ? [] : ['--no-rerank'])]
+    const { stdout } = await run('python3', args, { cwd: vaultRoot, timeoutMs })
     // STDOUT ONLY: retrieve.py prints progress ("bm25: N hits") to stderr, and merging the two
     // corrupts the JSON parse (finding F-R5).
     const parsed = JSON.parse(stdout) as {
