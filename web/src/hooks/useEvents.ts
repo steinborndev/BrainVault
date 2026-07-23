@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { logStore } from '../lib/logStore.ts'
+import { chatStream } from '../lib/chatStream.ts'
 import type { BusEvent } from '../api/types.ts'
 
 export function useEvents(): { connected: boolean } {
@@ -66,6 +67,14 @@ export function useEvents(): { connected: boolean } {
       logStore.merge(log.jobId, [{ ts: log.ts, level: log.level, message: log.message }])
     }
 
+    // Live answer text. Advisory: the Chat swaps this preview for the authoritative message
+    // (with citations) as soon as the /query response lands, so a dropped delta costs a
+    // flicker at worst.
+    const onChat = (ev: MessageEvent): void => {
+      const { chat } = JSON.parse(ev.data) as Extract<BusEvent, { kind: 'chat' }>
+      chatStream.append(chat.sessionId, chat.delta)
+    }
+
     const onStats = (): void => {
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
@@ -79,6 +88,7 @@ export function useEvents(): { connected: boolean } {
 
     es.addEventListener('job', onJob)
     es.addEventListener('log', onLog)
+    es.addEventListener('chat', onChat)
     es.addEventListener('stats', onStats)
     es.addEventListener('vault', onVault)
 
@@ -86,6 +96,7 @@ export function useEvents(): { connected: boolean } {
       document.removeEventListener('visibilitychange', onVisible)
       es.removeEventListener('job', onJob)
       es.removeEventListener('log', onLog)
+      es.removeEventListener('chat', onChat)
       es.removeEventListener('stats', onStats)
       es.removeEventListener('vault', onVault)
       es.close()

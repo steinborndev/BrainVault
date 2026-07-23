@@ -45,7 +45,14 @@ export function registerEventsRoute(app: FastifyInstance, ctx: AppContext): void
     const send = (event: BusEvent): void => {
       // A single SSE message: an `event:` type line + one `data:` JSON line. `stats` and
       // `vault` are bare refresh hints and carry no payload.
-      const payload = event.kind === 'job' ? { job: event.job } : event.kind === 'log' ? { log: event.log } : {}
+      const payload =
+        event.kind === 'job'
+          ? { job: event.job }
+          : event.kind === 'log'
+            ? { log: event.log }
+            : event.kind === 'chat'
+              ? { chat: event.chat }
+              : {}
       res.write(`event: ${event.kind}\ndata: ${JSON.stringify(payload)}\n\n`)
     }
 

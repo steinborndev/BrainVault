@@ -257,9 +257,25 @@ fixed on `fix/deep-review`. Highlights — details in the two `fix:` commits:
   hot cache itself (M0 evidence) — no separate refresh pass; §5 documents the built-in
   HTML-to-text fallback actually shipped.
 
-Still deliberately open (unchanged): queue-reorder endpoint (M3 optional), git-revert button
-(v1.1), token streaming for chat, login screen (SPEC §12.1 Ausbaustufe), per-job-type model
-choice, multiple watch folders, live budget-pause trigger (unit-tested only).
+**SHIPPED 2026-07-23 from this list:** the git-revert button (see §4 above) and **token streaming
+for chat**. Streaming keeps the request/response shape — the HTTP reply stays the ANSWER OF
+RECORD, since it alone carries citations and usage — and layers a live preview on top:
+`includePartialMessages` is enabled for the **query profile only** (a writing run persists every
+streamed message to `job_logs`, so partials there would multiply that volume for nobody),
+`textDelta()` picks visible text out of the raw stream events (ignoring thinking blocks, tool-arg
+streaming and block boundaries), and the route **coalesces** deltas on a 120 ms window before
+publishing them as a new `chat` bus event — raw token frames would be hundreds of SSE messages
+per answer. The client buffers them per session (`lib/chatStream.ts`) and renders plain text with
+a caret; the buffer is discarded the moment the real message lands, so Markdown never flickers
+mid-parse and a dropped delta costs at most a flicker. Live-verified: one answer streamed as 4
+coalesced frames (1+103+99+86 chars) on the correct session. 558 tests.
+
+Still deliberately open (unchanged): queue-reorder endpoint (M3 optional), history time-range
+filter (SPEC §6.2 asks for it; API supports only status/type, and the `idx_jobs_finished` index
+from v4 is already there), login screen (SPEC §12.1 Ausbaustufe), per-job-type model choice
+(note: on the subscription auth mode this saves quota and wall-clock, NOT money — and it should
+wait for an ingest-quality measure, the way retrieval waited for its eval harness), multiple
+watch folders, live budget-pause trigger (unit-tested only).
 
 
 ---

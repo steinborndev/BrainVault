@@ -16,12 +16,14 @@
  *                accent + a hint line) while the mode is armed, and its live log + result
  *                render as a block in the thread area, not as a bubble.
  *
- * The backend `/query` is request/response for now (no token streaming), so a pending
- * question shows an optimistic user bubble + a "thinking…" indicator until the answer
- * lands, then the persisted thread is refetched.
+ * `/query` is still request/response — the ANSWER of record arrives with the HTTP reply — but
+ * the text is **streamed live** meanwhile: the server publishes coalesced deltas on the shared
+ * SSE stream and they render into the pending assistant bubble (`chatStream`). The preview is
+ * plain text and is discarded the moment the real message lands, so citations, usage and the
+ * persisted thread all still come from exactly one authoritative source.
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useSyncExternalStore } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
 import type { AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
@@ -32,6 +34,7 @@ import { JobLog } from '../components/JobLog.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { navigate } from '../lib/router.ts'
+import { chatStream } from '../lib/chatStream.ts'
 import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost } from '../components/Cost.tsx'
 
@@ -61,14 +64,27 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   })
   const messages = threadQ.data?.messages ?? []
 
+  // Live answer text for the session being asked (SPEC.md §6.3). A preview only: it is dropped
+  // the moment the authoritative message arrives, which is the one carrying citations and usage.
+  const streamKey = activeId ?? ''
+  const streamed = useSyncExternalStore(
+    (cb) => chatStream.subscribe(streamKey, cb),
+    () => chatStream.snapshot(streamKey),
+  )
+
   const ask = useMutation({
     mutationFn: (question: string) => api.query(question, activeId ?? undefined),
     onSuccess: (res) => {
+      // The real message replaces the preview. Clear BOTH ids: a first question streams under
+      // the session the server just created, which the client did not know when it asked.
+      chatStream.clear(res.sessionId)
+      chatStream.clear(streamKey)
       setActiveId(res.sessionId)
       qc.invalidateQueries({ queryKey: ['sessions'] })
       qc.invalidateQueries({ queryKey: ['session', res.sessionId] })
     },
     onError: (_e, question) => {
+      chatStream.clear(streamKey)
       // Give the typed question back instead of forcing a retype — but never clobber
       // something the user already started writing while the query was in flight.
       setDraft((current) => (current.trim() === '' ? question : current))
@@ -213,7 +229,14 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 <div className="bubble-body">{ask.variables}</div>
               </div>
               <div className="bubble assistant">
-                <div className="bubble-body typing">thinking…</div>
+                {streamed === '' ? (
+                  <div className="bubble-body typing">thinking…</div>
+                ) : (
+                  // Plain text while streaming, not Markdown: the buffer is mid-sentence by
+                  // definition, and half-parsed markup would flicker as it completes. The
+                  // finished message renders as Markdown with citations a moment later.
+                  <div className="bubble-body streaming">{streamed}</div>
+                )}
               </div>
             </>
           )}

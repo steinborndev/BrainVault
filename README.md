@@ -215,8 +215,9 @@ Five tabs, all live over SSE:
   be **reverted** from the history: since every ingest is exactly one vault commit, undoing it is
   one click, and the undo is itself a commit - so it stays versioned and reversible. It refuses
   rather than guessing if the vault has uncommitted changes or the revert would conflict.
-- **Research** - chat against the read-only query runner; answers cite vault pages as clickable
-  chips that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
+- **Research** - chat against the read-only query runner; answers **stream in as they are
+  written** and then settle into the finished message, which cites vault pages as clickable chips
+  that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
   sessions, each savable into the vault as a page ("Save to vault"). Autoresearch runs live here
   too.
 - **Vault** - the viewer that makes the Obsidian app optional for everyday use. An interactive

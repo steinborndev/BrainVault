@@ -184,6 +184,10 @@ export function buildOptions(
     // Resume a prior SDK session so query follow-ups keep context (SPEC.md §5). Ignored
     // (undefined) for a fresh run.
     ...(opts.resumeSessionId ? { resume: opts.resumeSessionId } : {}),
+    // Token-level deltas, for the chat's live answer (SPEC.md §6.3). QUERY ONLY: a writing run
+    // persists every streamed message to job_logs, and partial messages would multiply that
+    // volume for no benefit — nobody watches an ingest character by character.
+    ...(profile === 'query' ? { includePartialMessages: true } : {}),
     systemPrompt: {
       type: 'preset',
       preset: 'claude_code',

@@ -5,15 +5,18 @@
  * synthesized answer with resolved page citations (the clickable chips — the M4 DoD).
  * Sessions persist the conversation and the SDK session id so follow-ups keep context.
  *
- * This first cut is request/response (no token streaming); the answer is returned whole when
- * the run completes. Live streaming is layered on when the Chat UI lands (TASKS-M4 §1) — the
- * shape here (persist user msg → run → persist assistant msg) is unchanged by that.
+ * The request/response shape (persist user msg → run → persist assistant msg) is unchanged, and
+ * the HTTP reply remains the ANSWER OF RECORD — it alone carries citations and usage. Live
+ * token streaming was layered on top of it: text deltas are coalesced here and published as
+ * `chat` bus events for the SSE stream, purely as a preview the client throws away when the
+ * reply lands. Nothing downstream depends on a delta arriving.
  */
 
 import type { FastifyInstance } from 'fastify'
 import type { AppContext } from '../server.js'
 import { runQuery as defaultRunQuery, type QueryRunner } from '../../pipeline/query-runner.js'
 import { extractCitations, indexWikiPages } from '../../pipeline/citations.js'
+import { textDelta } from '../../pipeline/format-message.js'
 
 /**
  * Concurrent query ceiling. Each query spawns a full sandboxed agent subprocess; unlike the
@@ -23,8 +26,11 @@ import { extractCitations, indexWikiPages } from '../../pipeline/citations.js'
  */
 const MAX_CONCURRENT_QUERIES = 2
 
+/** Coalescing window for streamed answer text — long enough to batch, short enough to feel live. */
+const CHAT_FLUSH_MS = 120
+
 export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void {
-  const { config, chat } = ctx
+  const { config, chat, events } = ctx
   const runQuery: QueryRunner = ctx.runQuery ?? defaultRunQuery
   let activeQueries = 0
 
@@ -56,11 +62,38 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
 
     activeQueries++
     let res: Awaited<ReturnType<QueryRunner>>
+    // Live answer streaming (SPEC.md §6.3). Deltas are COALESCED: the SDK emits token-sized
+    // chunks, and forwarding each one would be hundreds of SSE frames per answer for no visible
+    // gain. A short flush window keeps the typing feel while collapsing that to a few per second.
+    // Purely advisory — the persisted message below stays the authoritative answer.
+    let pending = ''
+    let flushTimer: NodeJS.Timeout | null = null
+    const flush = (): void => {
+      if (flushTimer !== null) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      if (pending === '') return
+      events.publish({ kind: 'chat', chat: { sessionId: session.id, delta: pending } })
+      pending = ''
+    }
+    const onDelta = (delta: string): void => {
+      pending += delta
+      if (flushTimer !== null) return
+      flushTimer = setTimeout(flush, CHAT_FLUSH_MS)
+      // A buffered flush must never hold the process open at shutdown.
+      flushTimer.unref?.()
+    }
+
     try {
       res = await runQuery({
         vaultRoot: config.vaultRoot,
         question,
         auth,
+        onMessage: (m) => {
+          const delta = textDelta(m)
+          if (delta !== undefined) onDelta(delta)
+        },
         // Operational visibility for the service-side read path (SPEC.md §12.6): which retrieval
         // tier actually engaged (`bm25-only` vs `bm25+rerank:…`) and how many pages it pointed
         // the agent at. Logged, never returned — it says nothing the caller needs.
@@ -70,6 +103,10 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
       })
     } finally {
       activeQueries--
+      // Drop any buffered tail: the authoritative answer is in the response the client is
+      // about to receive, so emitting more deltas now would only race the final render.
+      if (flushTimer !== null) clearTimeout(flushTimer)
+      pending = ''
     }
 
     if (!res.ok) {

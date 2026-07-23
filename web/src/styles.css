@@ -1406,6 +1406,28 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
   font-style: italic;
 }
+/* The answer while it streams: plain text (it is mid-sentence, so Markdown would flicker as
+   it completes), with a blinking caret so it reads as still-being-written. Newlines are
+   preserved because the model's paragraph breaks arrive long before the final render. */
+.bubble-body.streaming {
+  white-space: pre-wrap;
+}
+.bubble-body.streaming::after {
+  content: '▍';
+  margin-left: 1px;
+  animation: caret-blink 1s step-end infinite;
+  color: var(--text-faint);
+}
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bubble-body.streaming::after {
+    animation: none;
+  }
+}
 /* Assistant-answer footer: sources left, timestamp/usage/copy right. */
 .bfoot {
   display: flex;

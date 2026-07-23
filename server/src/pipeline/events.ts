@@ -31,11 +31,27 @@ export interface LogEventPayload {
  *              Fires DURING an agent run as pages are written, not just at commit time —
  *              that mid-run stream is what lets the graph grow live while an ingest runs.
  */
+/**
+ * A chunk of a chat answer as it is being written (SPEC.md §6.3). Coalesced by the query route
+ * — raw token deltas would be hundreds of SSE frames per answer.
+ */
+export interface ChatDeltaPayload {
+  readonly sessionId: string
+  readonly delta: string
+}
+
 export type BusEvent =
   | { readonly kind: 'job'; readonly job: JobRow }
   | { readonly kind: 'log'; readonly log: LogEventPayload }
   | { readonly kind: 'stats' }
   | { readonly kind: 'vault' }
+  /**
+   * Streaming chat text. Advisory like every other bus event: the authoritative answer is the
+   * one the `/query` response persists (with citations and usage), and the UI replaces the
+   * streamed text with it on completion. A dropped delta therefore costs a flicker, never
+   * a wrong answer — which is why no delivery guarantee is needed here.
+   */
+  | { readonly kind: 'chat'; readonly chat: ChatDeltaPayload }
 
 export type BusListener = (event: BusEvent) => void
 

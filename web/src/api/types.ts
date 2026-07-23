@@ -508,3 +508,5 @@ export type BusEvent =
   | { kind: 'log'; log: { jobId: string; ts: string; level: LogLevel; message: string } }
   | { kind: 'stats' }
   | { kind: 'vault' }
+  /** A coalesced chunk of the answer being written, for the chat's live preview. */
+  | { kind: 'chat'; chat: { sessionId: string; delta: string } }
