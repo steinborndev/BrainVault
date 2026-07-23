@@ -203,9 +203,13 @@ export interface RetrieveQueryOptions {
   readonly timeoutMs?: number
   readonly run?: ProcessRunner
   /**
-   * Semantic rerank on top of BM25. Defaults to ON — that IS the production read path. Set
-   * false (⇒ `--no-rerank`) only to measure what the rerank stage is actually buying, which
-   * is what `npm run retrieval-eval` does.
+   * Semantic rerank (ollama cosine) on top of BM25. **Defaults to OFF**, and that default is a
+   * measurement, not a guess: over a 35-case labeled set BM25 alone returned the right page in
+   * the top 5 in 97% of cases vs 94% with rerank, and top-1 fell 69% → 54% (TASKS-RETRIEVE
+   * F-R13). Reordering *inside* a top-5 the agent reads in full is invisible anyway, so the
+   * rerank was pure dependency and latency. Flipping this back on is a one-liner — do it after
+   * re-running `npm run retrieval-eval`, e.g. once the vault has roughly doubled or with a
+   * stronger embedding model, since BM25's lexical matching is simply very strong at this size.
    */
   readonly rerank?: boolean
 }
@@ -235,7 +239,7 @@ export const retrieveCandidates: CandidateRetriever = async ({
   topK = 5,
   timeoutMs = 30_000,
   run = runProcess,
-  rerank = true,
+  rerank = false,
 }) => {
   if (!isRetrieveProvisioned(vaultRoot)) return EMPTY_RETRIEVAL
   const q = question.trim().slice(0, MAX_QUESTION_CHARS)

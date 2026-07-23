@@ -52,6 +52,8 @@ interface CaseOutcome {
 interface Summary {
   readonly label: string
   readonly outcomes: readonly CaseOutcome[]
+  /** `retrieve.py`'s own strategy label from the first case — used to catch a silent downgrade. */
+  readonly strategy: string | null
 }
 
 const TOP_K = 5
@@ -101,18 +103,27 @@ async function runConfig(
   label: string,
 ): Promise<Summary> {
   const outcomes: CaseOutcome[] = []
+  let strategy: string | null = null
   for (const c of cases) {
-    const { candidates } = await retrieveCandidates({
-      vaultRoot,
-      question: c.question,
-      topK,
-      rerank,
-    })
+    const res = await retrieveCandidates({ vaultRoot, question: c.question, topK, rerank })
+    strategy ??= res.strategy
     // Rank of the first candidate matching ANY accepted page; 0 = miss.
-    const hitRank = candidates.findIndex((cand) => c.expected.includes(cand.pagePath)) + 1
-    outcomes.push({ id: c.id, difficulty: c.difficulty, cohort: c.cohort, hitRank, returned: candidates.length })
+    const hitRank = res.candidates.findIndex((cand) => c.expected.includes(cand.pagePath)) + 1
+    outcomes.push({ id: c.id, difficulty: c.difficulty, cohort: c.cohort, hitRank, returned: res.candidates.length })
   }
-  return { label, outcomes }
+
+  // A stopped ollama makes rerank.py a no-op and retrieve.py falls back to BM25 order — which
+  // would silently turn this column into a duplicate of the baseline and invite a wrong
+  // conclusion. Fail loudly instead: an unavailable reranker is a broken measurement, not a
+  // result. (Graceful degradation is right in production; it is wrong in a benchmark.)
+  if (rerank && strategy !== null && !strategy.includes('cosine')) {
+    throw new Error(
+      `asked for rerank but retrieve.py reported strategy "${strategy}" — the reranker is not ` +
+        `running, so this comparison would be meaningless. Start ollama ` +
+        `(systemctl --user start ollama.service) and re-run, or drop the rerank column.`,
+    )
+  }
+  return { label, outcomes, strategy }
 }
 
 const pct = (n: number, total: number): string =>
@@ -122,7 +133,9 @@ function report(summaries: readonly Summary[], cases: readonly EvalCase[]): void
   const difficulties = [...new Set(cases.map((c) => c.difficulty))]
 
   console.log('\n=== Retrieval quality ===')
-  console.log(`cases: ${cases.length}  (${difficulties.map((d) => `${d}: ${cases.filter((c) => c.difficulty === d).length}`).join(', ')})\n`)
+  console.log(`cases: ${cases.length}  (${difficulties.map((d) => `${d}: ${cases.filter((c) => c.difficulty === d).length}`).join(', ')})`)
+  for (const s of summaries) console.log(`  ${s.label.padEnd(16)} strategy: ${s.strategy ?? 'n/a'}`)
+  console.log('')
 
   const header = ['metric'.padEnd(22), ...summaries.map((s) => s.label.padStart(18))].join('')
   console.log(header)

@@ -240,6 +240,29 @@ Result (21 cases, top-k 5):
     code path; re-measure when the vault roughly doubles or if a stronger embedding model is
     worth a try. BM25's lexical matching is simply very strong at this vault size.
 
+## 3e. Rerank disabled in production — DONE 2026-07-23
+
+- [x] `retrieveCandidates` default flipped to `rerank = false` (one line + the comment that
+      records WHY, pointing at F-R13). Test asserts both directions of the flag, so the default
+      cannot drift back silently. Live: `[query] retrieval: … strategy=bm25-only`.
+- [x] **ollama is no longer needed by the running service** and never was a declared dependency —
+      it appears in no setup script, no `Dockerfile`, and no requirements list (verified by grep;
+      only prose in README/SPEC/SECURITY plus code comments). Its systemd --user unit is now
+      **stopped and disabled**; binary (~2.1 GB) and model (~262 MB) are kept on disk so a
+      re-measurement needs one command: `systemctl --user start ollama.service`.
+      Verified after stopping it: the query path answers normally at `strategy=bm25-only`.
+- [x] **Benchmark guard added** (this is the trap the flip creates): with ollama down,
+      `retrieve.py` silently reports `bm25+rerank:noop-no-ollama` and returns BM25 order, which
+      would make the harness's rerank column a duplicate of the baseline and invite a wrong
+      conclusion. `retrieval-eval` now THROWS when rerank was requested but the strategy carries
+      no `cosine`, and prints each column's strategy label. Graceful degradation is right in
+      production and wrong in a benchmark.
+- [x] SPEC §12.6 corrected: stage 2 previously still described the localhost/network and
+      embed-cache sandbox exceptions as planned work. They were never built and must not be —
+      the text now records the service-side design, the unauthenticated-ollama-API reasoning,
+      the default-off rerank with its measurement, and that ollama is not a service requirement.
+      Stage 3 is marked NOT PLANNED with the reason. README updated to match.
+
 ## 4. Stage 3 — LLM contextual prefixes (egress, opt-in) — NOT PLANNED (see F-R11)
 
 - [ ] New setting `retrievePrefixEgress` (default OFF) in `settings` (route + zod + UI toggle

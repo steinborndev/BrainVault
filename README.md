@@ -308,12 +308,16 @@ and the service provisions and maintains its index:
 - It **rebuilds itself** after ingests (a debounced maintenance run), so new pages become
   retrievable without any manual step; the card shows the chunk count and when it was last built.
 
-**Optional local reranking.** If [ollama](https://ollama.com) is running with `nomic-embed-text`
-pulled, retrieval adds a semantic rerank on top of BM25: the question and the candidate chunks
-are embedded locally and re-sorted by cosine similarity, which finds passages whose wording
-differs from the question. Without ollama this degrades silently to BM25 order - it is a quality
-layer, not a dependency. Nothing leaves the machine: the embeddings are computed by your local
-ollama, and chunk embeddings are cached by content hash so only the question is embedded per query.
+**Optional local reranking - built, but off by default.** A semantic rerank can sit on top of
+BM25: the question and the candidate chunks are embedded by a local [ollama](https://ollama.com)
+(`nomic-embed-text`) and re-sorted by cosine similarity. It is **disabled by default**, and that
+is a measurement rather than an opinion - over a 35-question labeled set BM25 alone put the right
+page in the top 5 in 97% of cases against 94% with reranking, and top-1 fell from 69% to 54%.
+Since the model reads all five returned pages anyway, reordering inside that set bought nothing
+and cost a dependency. **ollama is therefore not a requirement of this service** - it appears in
+no setup script and no dependency list; you only need it if you want to re-run the comparison
+(`npm run retrieval-eval --workspace server -- --data <your-set.jsonl>`) on a larger vault or with
+a stronger embedding model, and flip the one-line default back on if the numbers justify it.
 
 **Why retrieval runs in the service, not in the agent.** The read-only query sandbox has no
 network and no write access, and reranking needs both (reach ollama, write the embedding cache).

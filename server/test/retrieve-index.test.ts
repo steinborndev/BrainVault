@@ -335,7 +335,25 @@ describe('retrieveCandidates (service-side, outside any sandbox)', () => {
       return { stdout: stdout([]), stderr: '' }
     }
     await retrieveCandidates({ vaultRoot: root, question: 'a "quoted"; rm -rf /', topK: 3, run })
-    expect(seen).toEqual(['scripts/retrieve.py', 'a "quoted"; rm -rf /', '--top', '3'])
+    // The question is one argv element (shell:false), so quoting/semicolons are inert.
+    expect(seen.slice(0, 4)).toEqual(['scripts/retrieve.py', 'a "quoted"; rm -rf /', '--top', '3'])
+  })
+
+  it('defaults to NO rerank, and only asks for it when explicitly enabled', async () => {
+    const root = makeVault()
+    provision(root)
+    let seen: readonly string[] = []
+    const run: ProcessRunner = async (_bin, args) => {
+      seen = args
+      return { stdout: stdout([]), stderr: '' }
+    }
+    // Default OFF — measured, not assumed (F-R13): BM25 alone beat BM25+rerank on the labeled
+    // set, so production must not pay for an ollama round-trip per query.
+    await retrieveCandidates({ vaultRoot: root, question: 'q', run })
+    expect(seen).toContain('--no-rerank')
+
+    await retrieveCandidates({ vaultRoot: root, question: 'q', run, rerank: true })
+    expect(seen).not.toContain('--no-rerank')
   })
 
   it('degrades to empty (never throws) when unprovisioned, on script failure, or on bad JSON', async () => {
