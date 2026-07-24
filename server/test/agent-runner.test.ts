@@ -196,8 +196,8 @@ describe('runAgent', () => {
     expect(run.timedOut).toBe(false)
   })
 
-  it('defaults to the 15-minute timeout from SPEC.md §3.1', () => {
-    expect(DEFAULT_TIMEOUT_MS).toBe(15 * 60 * 1000)
+  it('defaults to the 30-minute timeout from SPEC.md §3.1', () => {
+    expect(DEFAULT_TIMEOUT_MS).toBe(30 * 60 * 1000)
   })
 
   it('fails a run that spent zero tokens instead of reporting success', async () => {

@@ -27,8 +27,13 @@ import {
 import { createUpstreamGuard } from './upstream-guard.js'
 import { CREDENTIAL_ENV_VARS, type CredentialEnvVar } from '../config.js'
 
-/** Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 15 min)"). */
-export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000
+/**
+ * Default per-job timeout (SPEC.md §3.1: "Timeout pro Job (Default 30 min)"). A batch of
+ * dropped files is ONE combined agent run, so the budget must fit the whole batch — 15 min
+ * was measured too tight for multi-PDF batches (all members aborted at 900 s and burned a
+ * retry just to time out again).
+ */
+export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
 
 /**
  * Grace between the graceful abort and the hard, group-level SIGKILL. The SDK's own

@@ -19,7 +19,7 @@ import { runAgent, DEFAULT_TIMEOUT_MS, type AgentAuth, type AgentRunResult } fro
 import { renderRetrievalBlock } from './system-prompt.js'
 import { retrieveCandidates, type CandidateRetriever } from './retrieve-index.js'
 
-/** Query runs are interactive; a shorter default keeps a stuck chat from hanging 15 min. */
+/** Query runs are interactive; a shorter default keeps a stuck chat from hanging 30 min. */
 export const DEFAULT_QUERY_TIMEOUT_MS = 5 * 60 * 1000
 
 /** How many ranked pages the agent is pointed at. Enough to cover a question, short enough
