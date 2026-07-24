@@ -2245,6 +2245,62 @@ details.hot-cache[open] .hc-summary::before {
 .ctl.on .ctl-val {
   color: var(--accent);
 }
+
+/* Communities control: one bordered unit — a label plus two segmented toggles (Areas /
+   Bridges), the two views of the same clustering. Sized to sit flush with the .ctl buttons in
+   the overlays row: same border, radius, vertical padding (6px) and font (12.5px), so the box
+   height matches exactly and nothing rides higher. */
+.communities {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elev);
+  white-space: nowrap;
+}
+.communities.active {
+  border-color: var(--accent);
+}
+.communities .cm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border-right: 1px solid var(--border-strong);
+}
+.communities .cm-label svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.communities .cm-seg {
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+}
+.communities .cm-seg:last-child {
+  border-right: none;
+}
+.communities .cm-seg:hover {
+  color: var(--text);
+  background: var(--bg-elev-2);
+}
+.communities .cm-seg.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* View-bar dropdowns sit at the LEFT of the row now — anchor their menus left so they
    can't extend past the viewport edge (the generic .dropdown-menu anchors right). */
 .viewbar .dropdown-menu {

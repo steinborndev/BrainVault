@@ -813,6 +813,36 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         <span className="vb-sep" aria-hidden />
         <span className="overlays">
           <span className="grp-label">Overlays</span>
+          {/* Communities: one grouped control for the two views of the SAME clustering —
+              Areas (tinted hulls) and Bridges (edge emphasis). Was two loose "Clusters" and
+              "Network" buttons whose shared basis and hull-vs-edge split weren't legible. The
+              two aspects stay independent (both can be on); state is unchanged underneath. */}
+          <span className={`communities${showClusters || showNetwork ? ' active' : ''}`}>
+            <span className="cm-label"><Icon name="cluster" /> Communities</span>
+            <button
+              className={`cm-seg${showClusters ? ' on' : ''}`}
+              onClick={() => setShowClusters((v) => !v)}
+              aria-pressed={showClusters}
+              title="Areas: outline each auto-detected community as a tinted, tag-labelled hull — which pages group together."
+            >
+              Areas
+            </button>
+            <button
+              className={`cm-seg${showNetwork ? ' on' : ''}`}
+              onClick={() => setShowNetwork((v) => !v)}
+              aria-pressed={showNetwork}
+              title="Bridges: brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead — how the groups connect."
+            >
+              Bridges
+            </button>
+          </span>
+          <button
+            className={`ctl${spotlight ? ' on' : ''}`}
+            onClick={() => setSpotlight((v) => !v)}
+            title="Spotlight: hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities as it subdivides); click a node to open its page. Esc backs out one level, double-Esc resets everything. Off by default."
+          >
+            <Icon name="spotlight" /> Spotlight
+          </button>
           {graph.gaps.length > 0 && (
             <button
               className={`ctl${showGaps ? ' on' : ''}`}
@@ -826,27 +856,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               <Icon name="gap" /> Gaps
             </button>
           )}
-          <button
-            className={`ctl${showClusters ? ' on' : ''}`}
-            onClick={() => setShowClusters((v) => !v)}
-            title="Outline auto-detected communities as tinted, tag-labelled clusters"
-          >
-            <Icon name="cluster" /> Clusters
-          </button>
-          <button
-            className={`ctl${showNetwork ? ' on' : ''}`}
-            onClick={() => setShowNetwork((v) => !v)}
-            title="Network lens: brighten the connections. Intra-cluster links lift into view; cross-cluster bridges show link direction as a colour gradient with an arrowhead."
-          >
-            <Icon name="network" /> Network
-          </button>
-          <button
-            className={`ctl${spotlight ? ' on' : ''}`}
-            onClick={() => setSpotlight((v) => !v)}
-            title="Spotlight: hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities as it subdivides); click a node to open its page. Esc backs out one level, double-Esc resets everything. Off by default."
-          >
-            <Icon name="spotlight" /> Spotlight
-          </button>
         </span>
         <span className="vb-spacer" />
         <span className="vtool-stats">
