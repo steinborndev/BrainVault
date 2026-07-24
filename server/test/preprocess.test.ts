@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { preprocess, PreprocessError, type ToolAvailability } from '../src/pipeline/preprocess/index.js'
 import { assertNotExecutable, isPdf, isZip, isPng } from '../src/pipeline/preprocess/detect.js'
+import { exceedsOcrLimits, ocrTimeoutMs } from '../src/pipeline/preprocess/plugins/pdf.js'
 
 const NO_TOOLS: ToolAvailability = {
   pdftotext: false,
@@ -119,5 +120,27 @@ describe('preprocess chain', () => {
 
   it('routes a docx (zip magic + extension) to office, failing without pandoc', async () => {
     await expect(preprocess(stage('j9', 'letter.docx', ZIP_MAGIC))).rejects.toThrow(/pandoc/)
+  })
+})
+
+describe('OCR ceilings and timeout', () => {
+  const MB = 1024 * 1024
+
+  it('OCRs a mid-size textless PDF (within both limits)', () => {
+    expect(exceedsOcrLimits(50, 20 * MB)).toBe(false)
+    expect(exceedsOcrLimits(300, 100 * MB)).toBe(false) // exactly at the limits, still allowed
+  })
+
+  it('defers when either the page count OR the byte size is over the limit', () => {
+    expect(exceedsOcrLimits(301, 1 * MB)).toBe(true) // too many pages
+    expect(exceedsOcrLimits(10, 101 * MB)).toBe(true) // too large on disk
+    expect(exceedsOcrLimits(851, 179 * MB)).toBe(true) // the job that motivated this
+  })
+
+  it('scales the OCR timeout with page count and clamps to the ceiling', () => {
+    expect(ocrTimeoutMs(0)).toBe(60_000) // base only
+    expect(ocrTimeoutMs(100)).toBe(60_000 + 100 * 3_000) // base + per-page
+    expect(ocrTimeoutMs(300)).toBe(960_000) // full-size job, under the ceiling
+    expect(ocrTimeoutMs(100_000)).toBe(20 * 60_000) // clamped
   })
 })

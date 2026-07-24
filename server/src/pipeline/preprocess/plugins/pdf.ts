@@ -19,6 +19,34 @@ import { runTool } from '../tools.js'
 /** Below this many chars/page the text layer is assumed missing and OCR kicks in. */
 const OCR_YIELD_THRESHOLD = 100
 
+/**
+ * Auto-OCR ceilings. Above either, a textless PDF is `deferred` instead of OCR'd: rasterizing
+ * hundreds of pages at 400 DPI saturates the CPU for many minutes AND feeds the agent an
+ * enormous transcript (a normal PDF already costs millions of input tokens). The size cap is
+ * the robust backstop — it catches a huge "Print To PDF" even when the page count can't be read.
+ */
+const OCR_MAX_PAGES = 300
+const OCR_MAX_BYTES = 100 * 1024 * 1024
+
+/**
+ * OCR timeout scaled to the page count instead of a flat cap: a flat 5 min killed legitimate
+ * mid-size scans partway through. Budget = base + per-page, clamped to a ceiling. With the
+ * 300-page cap above, a full-size job gets ~16 min, comfortably under the ceiling.
+ */
+const OCR_TIMEOUT_BASE_MS = 60_000
+const OCR_TIMEOUT_PER_PAGE_MS = 3_000
+const OCR_TIMEOUT_MAX_MS = 20 * 60_000
+
+/** A textless PDF this big is deferred instead of OCR'd (see the constants above). */
+export function exceedsOcrLimits(pages: number, bytes: number): boolean {
+  return pages > OCR_MAX_PAGES || bytes > OCR_MAX_BYTES
+}
+
+/** Page-scaled OCR timeout in ms, clamped to the ceiling. */
+export function ocrTimeoutMs(pages: number): number {
+  return Math.min(OCR_TIMEOUT_MAX_MS, OCR_TIMEOUT_BASE_MS + Math.max(0, pages) * OCR_TIMEOUT_PER_PAGE_MS)
+}
+
 async function pageCount(pdfPath: string, hasPdfinfo: boolean): Promise<number> {
   if (hasPdfinfo) {
     try {
@@ -61,19 +89,34 @@ export const pdfPlugin: PreprocessPlugin = {
     let ocrApplied = false
 
     if (yieldPerPage < OCR_YIELD_THRESHOLD) {
-      if (ctx.tools.ocrmypdf) {
+      if (!ctx.tools.ocrmypdf) {
+        notes.push(
+          `low text yield (${yieldPerPage.toFixed(0)} chars/page) but ocrmypdf is not installed — ingesting the thin text layer`,
+        )
+      } else if (exceedsOcrLimits(estPages, ctx.probe.size)) {
+        // Too big to OCR automatically — defer rather than burn the CPU and a costly agent run.
+        const mb = (ctx.probe.size / (1024 * 1024)).toFixed(0)
+        return {
+          deferred: true,
+          notes: [
+            `textless PDF too large to OCR automatically (${estPages} pages, ${mb} MB; ` +
+              `limits ${OCR_MAX_PAGES} pages / ${OCR_MAX_BYTES / (1024 * 1024)} MB) — deferred. ` +
+              `Split it or OCR it manually, then re-drop the smaller parts.`,
+          ],
+        }
+      } else {
         const ocrPdf = path.join(ctx.jobDir, 'ocr.pdf')
+        const timeoutMs = ocrTimeoutMs(estPages)
         // --force-ocr rasterizes and re-OCRs even pages that carry a thin/garbage text
         // layer, which is exactly the low-yield case that got us here.
         await runTool('ocrmypdf', ['--force-ocr', '--language', 'deu+eng', src, ocrPdf], {
-          timeoutMs: 300_000,
+          timeoutMs,
         })
         text = await extract(ocrPdf, outPath)
         ocrApplied = true
-        notes.push(`OCR applied (yield was ${yieldPerPage.toFixed(0)} chars/page over ${estPages} pages)`)
-      } else {
         notes.push(
-          `low text yield (${yieldPerPage.toFixed(0)} chars/page) but ocrmypdf is not installed — ingesting the thin text layer`,
+          `OCR applied (yield was ${yieldPerPage.toFixed(0)} chars/page over ${estPages} pages; ` +
+            `timeout ${Math.round(timeoutMs / 1000)}s)`,
         )
       }
     }
