@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeTagReport, conflictingTag, type TagNode } from '../src/lib/tagReport.ts'
+import { computeTagReport, conflictingTag, recommendedKeys, type TagNode } from '../src/lib/tagReport.ts'
 
 const page = (tags: string[], domain: string | null = null, kind = 'knowledge'): TagNode => ({
   tags,
@@ -119,6 +119,52 @@ describe('computeTagReport', () => {
     expect(r.singletons).toEqual(['once'])
     expect(r.distinctTags).toBe(2) // the system page's tag never enters the stats
     expect(r.knowledgePages).toBe(3)
+  })
+})
+
+describe('recommendedKeys', () => {
+  it('preselects variant merges (into the more common spelling) and real-domain echo drops', () => {
+    const nodes = [
+      ...Array.from({ length: 8 }, () => page(['research'])),
+      ...Array.from({ length: 4 }, () => page(['researcher'])),
+      ...Array.from({ length: 8 }, () => page(['brewing'], 'brewing')),
+      page([], 'brewing'),
+      page([], 'brewing'),
+    ]
+    const r = computeTagReport(nodes)
+    expect(recommendedKeys(r, 20)).toEqual(new Set(['merge|researcher|research', 'drop|brewing']))
+  })
+
+  it('never preselects echoes of the unassigned bucket (missing domains, not redundancy)', () => {
+    const nodes = Array.from({ length: 6 }, () => page(['ml'], 'unassigned'))
+    const r = computeTagReport(nodes)
+    expect(r.domainEchoes).toHaveLength(1)
+    expect(recommendedKeys(r, 20)).toEqual(new Set())
+  })
+
+  it('leaves out actions that would conflict — the preselection is always runnable', () => {
+    // #method echoes its domain (drop candidate) AND is the merge target of #methods:
+    // both at once would make the agent guess an order, so only the first (the variant
+    // merge) is preselected. The invariant: the preselected plan never trips the
+    // conflictingTag guard.
+    const nodes = [
+      ...Array.from({ length: 8 }, () => page(['method'], 'methods-domain')),
+      page(['methods'], 'methods-domain'),
+    ]
+    const r = computeTagReport(nodes)
+    expect(r.variants).toHaveLength(1)
+    expect(r.domainEchoes.map((e) => e.tag)).toContain('method')
+    const keys = recommendedKeys(r, 20)
+    expect(keys.has('merge|methods|method')).toBe(true)
+    expect(keys.has('drop|method')).toBe(false)
+  })
+
+  it('caps the preselection at the per-run action limit', () => {
+    const words = ['network', 'pipeline', 'sensor', 'protein', 'market', 'engine']
+    const nodes: TagNode[] = words.flatMap((w) => [page([w]), page([w]), page([`${w}s`])])
+    const r = computeTagReport(nodes)
+    expect(r.variants).toHaveLength(6)
+    expect(recommendedKeys(r, 4).size).toBe(4)
   })
 })
 

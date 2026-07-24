@@ -1755,9 +1755,58 @@ details.hot-cache[open] .hc-summary::before {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  padding: 3px 0;
+  gap: 4px 12px;
+  padding: 3px 0 6px;
   font-size: 13px;
+  flex-wrap: wrap;
+}
+/* Plain-language reason under each actionable row (SPEC §12.7 Stufe a): full-width line,
+   indented to the row text so it reads as the row's subtitle. */
+.tagrep .trow .why {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-left: 24px;
+}
+.tagrep .trow:not(.selectable) .why {
+  padding-left: 0;
+}
+/* Non-actionable findings live collapsed: visible on demand, out of the decision path. */
+.tagrep .tag-obs {
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+}
+.tagrep .tag-obs > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  list-style: none;
+}
+.tagrep .tag-obs > summary::-webkit-details-marker {
+  display: none;
+}
+.tagrep .tag-obs > summary::before {
+  content: '▸ ';
+  color: var(--text-faint);
+}
+.tagrep .tag-obs[open] > summary::before {
+  content: '▾ ';
+}
+.tagrep .tag-obs > summary .cnt {
+  font-weight: 500;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.tagrep .tag-obs > .tab-hint {
+  margin-top: 8px;
+}
+.tagrep .tag-obs > section {
+  margin-top: 10px;
 }
 .tagrep .trow .pair {
   min-width: 0;
@@ -3590,6 +3639,38 @@ details.hot-cache[open] .hc-summary::before {
   gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
+}
+.candidate-form input,
+.candidate-form textarea {
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+}
+.candidate-form input:focus,
+.candidate-form textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.candidate-form textarea {
+  resize: vertical;
+  min-height: 52px;
+  line-height: 1.45;
+}
+.field-hint {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+/* A toast that carries its follow-up action (e.g. "domain created → start backfill"). */
+.toast.toast-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .empty-inline {
   color: var(--text-dim);

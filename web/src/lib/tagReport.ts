@@ -240,6 +240,41 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
 }
 
 /**
+ * The preselected recommendation (SPEC §12.7 Stufe a): every actionable finding whose
+ * direction is unambiguous — variant merges into the more common spelling, drops of tags
+ * that echo a real domain — selected up front so the user unchecks instead of building the
+ * plan from scratch. Greedy and conflict-free by construction: an action that would make a
+ * tag both consumed and referenced elsewhere (the `conflictingTag` rule) is left
+ * unselected, first come wins (variants before echoes, each in report order). Echoes of
+ * `unassigned` are never included — they are missing domains, not redundancy. Capped at
+ * `max` so the preselection never promises more than one fix run applies.
+ */
+export function recommendedKeys(report: TagReport, max: number): Set<string> {
+  const keys = new Set<string>()
+  const consumed = new Set<string>()
+  const referenced = new Set<string>() // any mention: consumed or merge target
+  const fits = (consumes: string, keeps?: string): boolean =>
+    !consumed.has(consumes) && !referenced.has(consumes) && (keeps === undefined || !consumed.has(keeps))
+  const take = (key: string, consumes: string, keeps?: string): void => {
+    keys.add(key)
+    consumed.add(consumes)
+    referenced.add(consumes)
+    if (keeps !== undefined) referenced.add(keeps)
+  }
+  for (const v of report.variants) {
+    if (keys.size >= max) return keys
+    const [from, to] = v.aCount <= v.bCount ? [v.a, v.b] : [v.b, v.a]
+    if (fits(from, to)) take(`merge|${from}|${to}`, from, to)
+  }
+  for (const e of report.domainEchoes) {
+    if (keys.size >= max) return keys
+    if (e.domain === 'unassigned') continue
+    if (fits(e.tag)) take(`drop|${e.tag}`, e.tag)
+  }
+  return keys
+}
+
+/**
  * A tag referenced by two selected repairs where at least one CONSUMES it (drop, or the
  * from-side of a merge), or null when the plan is consistent. Two merges may share a
  * TARGET ("#fibre → #fiber" and "#fibres → #fiber" is fine) — but a tag that is dropped

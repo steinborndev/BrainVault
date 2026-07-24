@@ -11,7 +11,7 @@
  * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
  */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type {
@@ -22,7 +22,8 @@ import type {
   DomainReviewEntry,
   CandidatesResponse,
 } from '../api/types.ts'
-import { computeTagReport, conflictingTag, type TagReport } from '../lib/tagReport.ts'
+import { computeTagReport, conflictingTag, recommendedKeys, type TagReport } from '../lib/tagReport.ts'
+import { draftDomainDescription } from '../lib/domainDraft.ts'
 import type { TagFixAction } from '../api/types.ts'
 
 /** The tag-fix route's hard cap on actions per run — mirrored so the button says what runs. */
@@ -222,7 +223,13 @@ export function Maintenance(): React.ReactElement {
           {backfill.running && <JobLog jobId="maintenance:domain-backfill" seed={false} />}
           {backfill.error && <div className="toast err">{backfill.error}</div>}
           {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Filed" />}
-          {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
+          {domains.data?.installed && (
+            <DomainCandidates
+              vaultName={vaultName}
+              onStartBackfill={backfill.start}
+              backfillRunning={backfill.running}
+            />
+          )}
         </div>
 
         {/* Tag hygiene (lint equivalent for tags + the bounded repair run) */}
@@ -252,6 +259,11 @@ export function Maintenance(): React.ReactElement {
  * (hard rule 1: the agent writes, one revertable commit). Variants repair as a merge into
  * the more common spelling; domain echoes as a drop — except echoes of the `unassigned`
  * bucket, which are missing DOMAINS, not redundancy, and get no checkbox.
+ *
+ * SPEC §12.7 Stufe a: the conflict-free recommendation is PREselected (uncheck to
+ * disagree), every row carries a plain-language reason, and the non-actionable findings
+ * (implications, singletons) are collapsed under "Observations" so they stay visible
+ * without inflating the decision surface.
  */
 function TagHygieneCard({
   nodes,
@@ -262,9 +274,21 @@ function TagHygieneCard({
 }): React.ReactElement | null {
   const qc = useQueryClient()
   const report = useMemo(() => (nodes !== undefined ? computeTagReport(nodes) : null), [nodes])
-  const [showSingletons, setShowSingletons] = useState(false)
   /** Selected repair actions, keyed "merge|from|to" / "drop|tag" (stale keys simply no-op). */
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  // The recommendation is preselected (SPEC §12.7 Stufe a): the user unchecks instead of
+  // building the plan. Re-preselect only when the set of recommendable actions actually
+  // changes (fresh findings after a fix run) — a mere refetch with identical findings must
+  // not undo the user's unchecking.
+  const recommended = useMemo(() => (report === null ? null : recommendedKeys(report, MAX_TAG_ACTIONS)), [report])
+  const preselectSig = useRef<string | null>(null)
+  useEffect(() => {
+    if (recommended === null) return
+    const sig = [...recommended].sort().join(',')
+    if (sig === preselectSig.current) return
+    preselectSig.current = sig
+    setSelected(new Set(recommended))
+  }, [recommended])
   const fix = useMaintenanceRun(() =>
     api.tagFix(
       (report === null ? [] : selectedActions(report, selected)).slice(0, MAX_TAG_ACTIONS),
@@ -298,7 +322,7 @@ function TagHygieneCard({
       <div className="section-head">
         <h3 className="section-title">
           Tags — hygiene
-          <Tip text="Deterministic tag lint, computed from the live graph — the report itself writes nothing. Variants: two tags that look like spellings of the same thing (fix = merge into the more common one). Implied: a tag whose pages (almost) always carry another tag too (informational). Domain echoes: a tag that just repeats the page's domain (fix = drop it). Single-use: tags with exactly one page. 'Fix selected' runs an agent over exactly the checked actions — frontmatter tags only, one revertable git commit." />
+          <Tip text="Deterministic tag lint, computed from the live graph - the report itself writes nothing. Repairs with an unambiguous direction come preselected: uncheck what you disagree with, then 'Fix selected' runs an agent over exactly the checked actions - frontmatter tags only, one revertable git commit. Non-actionable findings (implied tags, single-use tags) are collapsed under Observations." />
         </h3>
         <button
           className="btn primary"
@@ -324,17 +348,25 @@ function TagHygieneCard({
         {report.distinctTags} distinct tags on {report.taggedPages} of {report.knowledgePages} knowledge pages
       </div>
       {findingCount === 0 && report.singletons.length === 0 ? (
-        <p className="tab-hint">No findings — the tag set looks healthy.</p>
+        <p className="tab-hint">No findings - the tag set looks healthy.</p>
       ) : (
         <div className="tagrep">
+          {(report.variants.length > 0 || report.domainEchoes.length > 0) && (
+            <p className="tab-hint">
+              Repairs with an unambiguous direction are preselected - uncheck anything you disagree with.
+              {recommended !== null && recommended.size >= MAX_TAG_ACTIONS && (
+                <> A run applies at most {MAX_TAG_ACTIONS} actions - the rest returns with the next report.</>
+              )}
+            </p>
+          )}
           {report.variants.length > 0 && (
             <section>
               <h4>
                 Likely variants <span className="cnt">{report.variants.length}</span>
               </h4>
               {report.variants.slice(0, CAP).map((v) => {
-                const [, to] = mergeDir(v)
-                const key = `merge|${mergeDir(v).join('|')}`
+                const [from, to] = mergeDir(v)
+                const key = `merge|${from}|${to}`
                 return (
                   <label key={key} className="trow selectable">
                     <span className="pair">
@@ -351,30 +383,14 @@ function TagHygieneCard({
                       {v.aCount} + {v.bCount} pages
                       {v.both > 0 ? ` · ${v.both} carry both` : ''} · merge → <code>#{to}</code>
                     </span>
+                    <span className="why">
+                      Two spellings of one concept - <code>#{from}</code> folds into the more common{' '}
+                      <code>#{to}</code>.
+                    </span>
                   </label>
                 )
               })}
               {report.variants.length > CAP && <div className="more">+{report.variants.length - CAP} more</div>}
-            </section>
-          )}
-          {report.implications.length > 0 && (
-            <section>
-              <h4>
-                Implied tags <span className="cnt">{report.implications.length}</span>
-              </h4>
-              {report.implications.slice(0, CAP).map((v) => (
-                <div key={`${v.a}|${v.b}`} className="trow">
-                  <span className="pair">
-                    <code>#{v.a}</code> <span className="sep">{v.mutual === true ? '↔' : '→'}</span> <code>#{v.b}</code>
-                  </span>
-                  <span className="meta">
-                    together on {v.both} of {v.aCount} pages
-                  </span>
-                </div>
-              ))}
-              {report.implications.length > CAP && (
-                <div className="more">+{report.implications.length - CAP} more</div>
-              )}
             </section>
           )}
           {report.domainEchoes.length > 0 && (
@@ -405,6 +421,19 @@ function TagHygieneCard({
                       {e.inDomain} of {e.domainSize} pages in the domain · {e.tagCount} uses overall
                       {missing ? ' · likely a missing domain' : ' · drop'}
                     </span>
+                    <span className="why">
+                      {missing ? (
+                        <>
+                          Not redundancy: these unassigned pages likely wait for a domain like this - see
+                          &quot;Candidates for new domains&quot; in the Domains card.
+                        </>
+                      ) : (
+                        <>
+                          Adds nothing beyond the page&apos;s domain field - nearly every use sits inside{' '}
+                          <span className="dom">{e.domain}</span>.
+                        </>
+                      )}
+                    </span>
                   </label>
                 )
               })}
@@ -413,25 +442,57 @@ function TagHygieneCard({
               )}
             </section>
           )}
-          {report.singletons.length > 0 && (
-            <section>
-              <h4>
-                Single-use tags <span className="cnt">{report.singletons.length}</span>
-                <button className="linklike" onClick={() => setShowSingletons((v) => !v)}>
-                  {showSingletons ? 'hide' : 'show'}
-                </button>
-              </h4>
-              {showSingletons && (
-                <div className="filters">
-                  {report.singletons.slice(0, 60).map((t) => (
-                    <span key={t} className="chip">
-                      #{t}
-                    </span>
+          {(report.implications.length > 0 || report.singletons.length > 0) && (
+            <details className="tag-obs">
+              <summary>
+                Observations - nothing to fix{' '}
+                <span className="cnt">
+                  {report.implications.length} implied · {report.singletons.length} single-use
+                </span>
+              </summary>
+              <p className="tab-hint">
+                Implied tags show how your tags nest (pages with the first almost always carry the second) -
+                useful context, not a defect. Single-use tags usually resolve themselves as the vault grows.
+              </p>
+              {report.implications.length > 0 && (
+                <section>
+                  <h4>
+                    Implied tags <span className="cnt">{report.implications.length}</span>
+                  </h4>
+                  {report.implications.slice(0, CAP).map((v) => (
+                    <div key={`${v.a}|${v.b}`} className="trow">
+                      <span className="pair">
+                        <code>#{v.a}</code> <span className="sep">{v.mutual === true ? '↔' : '→'}</span>{' '}
+                        <code>#{v.b}</code>
+                      </span>
+                      <span className="meta">
+                        together on {v.both} of {v.aCount} pages
+                      </span>
+                    </div>
                   ))}
-                  {report.singletons.length > 60 && <span className="more">+{report.singletons.length - 60} more</span>}
-                </div>
+                  {report.implications.length > CAP && (
+                    <div className="more">+{report.implications.length - CAP} more</div>
+                  )}
+                </section>
               )}
-            </section>
+              {report.singletons.length > 0 && (
+                <section>
+                  <h4>
+                    Single-use tags <span className="cnt">{report.singletons.length}</span>
+                  </h4>
+                  <div className="filters">
+                    {report.singletons.slice(0, 60).map((t) => (
+                      <span key={t} className="chip">
+                        #{t}
+                      </span>
+                    ))}
+                    {report.singletons.length > 60 && (
+                      <span className="more">+{report.singletons.length - 60} more</span>
+                    )}
+                  </div>
+                </section>
+              )}
+            </details>
           )}
         </div>
       )}
@@ -514,16 +575,30 @@ function RetrievalIndexCard(): React.ReactElement {
 
 /**
  * The governance loop's UI (SPEC §12.4 Stufe 3). The candidate list itself is deterministic and
- * free, so it simply renders — no "start analysis" needed. The agent pass is opt-in via the
- * toggle: it only JUDGES what the finder already surfaced, and costs a real agent run.
+ * free, so it simply renders — no "start analysis" needed. The agent pass only JUDGES what the
+ * finder already surfaced, and costs a real agent run; it is ON by default (SPEC §12.7 Stufe a)
+ * because its verdicts are what turn a bare key into a complete proposal (key + description +
+ * tags) — the toggle remains as the opt-out for cost-conscious refreshes.
  *
- * Creating a domain is deliberately a user action here; agents may never coin a key.
+ * Creating a domain is deliberately a user action here; agents may never coin a key. A created
+ * domain gets its pages only through a backfill — the explicit prompt after each create closes
+ * what used to be a silent gap.
  */
-function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElement | null {
+function DomainCandidates({
+  vaultName,
+  onStartBackfill,
+  backfillRunning,
+}: {
+  vaultName: string
+  onStartBackfill: () => void
+  backfillRunning: boolean
+}): React.ReactElement | null {
   const qc = useQueryClient()
   const candidates = useQuery({ queryKey: ['domain-candidates'], queryFn: api.domainCandidates })
-  const [withAgent, setWithAgent] = useState(false)
+  const [withAgent, setWithAgent] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)
+  /** Key of the most recently created domain — drives the "run the backfill now" prompt. */
+  const [created, setCreated] = useState<string | null>(null)
   const review = useMaintenanceRun(() => api.domainReview())
 
   const refresh = (): void => {
@@ -550,7 +625,10 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
       <div className="section-head">
         <h4 className="section-title">Candidates for new domains</h4>
         <div className="candidate-actions">
-          <label className="toggle" title="Additionally have an agent judge the candidates (costs one run)">
+          <label
+            className="toggle"
+            title="An agent judges each candidate and drafts key, description and tags (costs one run). Uncheck for a free refresh of the deterministic list only."
+          >
             <input type="checkbox" checked={withAgent} onChange={(e) => setWithAgent(e.target.checked)} />
             With agent review
           </label>
@@ -580,6 +658,27 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
         </div>
       )}
 
+      {/* A created domain owns no pages until a backfill re-files its `unassigned` backlog
+          (SPEC §12.4 Stufe 3 "Selbstheilung") — prompt for it instead of leaving the gap silent. */}
+      {created !== null && (
+        <div className="toast ok toast-action">
+          <span>
+            Domain <code>{created}</code> created. Its pages still say <code>unassigned</code> until a
+            backfill files them.
+          </span>
+          <button
+            className="btn"
+            disabled={backfillRunning}
+            onClick={() => {
+              setCreated(null)
+              onStartBackfill()
+            }}
+          >
+            {backfillRunning ? 'Backfill running…' : 'Start backfill now'}
+          </button>
+        </div>
+      )}
+
       {data.candidates.length === 0 ? (
         <p className="empty-inline">
           No candidates. New domains emerge once enough thematically related pages accumulate that no existing
@@ -595,6 +694,7 @@ function DomainCandidates({ vaultName }: { vaultName: string }): React.ReactElem
               vaultName={vaultName}
               editing={editing === c.key}
               onEdit={() => setEditing(editing === c.key ? null : c.key)}
+              onCreated={setCreated}
               onDone={() => {
                 setEditing(null)
                 refresh()
@@ -637,6 +737,7 @@ function CandidateCard({
   vaultName,
   editing,
   onEdit,
+  onCreated,
   onDone,
 }: {
   candidate: DomainCandidate
@@ -644,21 +745,36 @@ function CandidateCard({
   vaultName: string
   editing: boolean
   onEdit: () => void
+  onCreated: (key: string) => void
   onDone: () => void
 }): React.ReactElement {
-  // The agent's proposal pre-fills the form when it has one; otherwise the candidate tag does.
+  // The proposal is always complete (SPEC §12.7 Stufe a): the agent's verdict pre-fills key,
+  // description and tags when it exists; the deterministic draft is the floor so the
+  // description never starts empty.
+  const fallbackDescription = useMemo(() => draftDomainDescription(candidate), [candidate])
   const [key, setKey] = useState(verdict?.key ?? candidate.key)
-  const [description, setDescription] = useState(verdict?.description ?? '')
+  const [description, setDescription] = useState(verdict?.description ?? fallbackDescription)
   const [tags, setTags] = useState((verdict?.tags ?? candidate.tags).join(', '))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The review lands AFTER this card mounted (it is a run, the list is not) — without this
+  // sync the verdict's proposal would never reach the already-initialized fields. Only while
+  // the form is closed: an open form is the user's text, never to be clobbered.
+  useEffect(() => {
+    if (editing) return
+    setKey(verdict?.key ?? candidate.key)
+    setDescription(verdict?.description ?? fallbackDescription)
+    setTags((verdict?.tags ?? candidate.tags).join(', '))
+  }, [verdict, candidate, fallbackDescription, editing])
+
   const create = (): void => {
+    const finalKey = key.trim().toLowerCase()
     setBusy(true)
     setError(null)
     void api
       .createDomain({
-        key: key.trim().toLowerCase(),
+        key: finalKey,
         description: description.trim(),
         tags: tags
           .split(',')
@@ -666,7 +782,10 @@ function CandidateCard({
           .filter(Boolean),
         dismissCandidate: candidate.key,
       })
-      .then(onDone)
+      .then(() => {
+        onCreated(finalKey)
+        onDone()
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setBusy(false))
   }
@@ -700,11 +819,16 @@ function CandidateCard({
           </label>
           <label>
             Description
-            <input
+            <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              rows={2}
               placeholder="What does this domain cover?"
             />
+            <span className="field-hint">
+              Prefilled draft{verdict?.description ? ' (agent proposal)' : ''} - edit freely; broad wording
+              keeps the domain extensible.
+            </span>
           </label>
           <label>
             Tags (comma-separated)
