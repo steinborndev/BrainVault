@@ -70,6 +70,35 @@ describe('detectClusters', () => {
     expect(clusterLabels.get(cid)).toBe('#alpha') // pure -> tag label
   })
 
+  it('labels sub-clusters by their distinctive tags, not the ubiquitous one', () => {
+    // Two cliques, ALL pages tagged #broad (the redundant domain-synonym case from the
+    // vault: #biomedical/#biomedicine on every page); each clique adds one tag of its own.
+    // Frequency-based labeling named both clusters after #broad — distinctiveness must
+    // drop it (it discriminates nothing) and label each clique by its own tag.
+    const nodes = [
+      ...Array.from({ length: 5 }, () => node('alpha', ['broad', 'hplc'])),
+      ...Array.from({ length: 5 }, () => node('alpha', ['broad', 'stability'])),
+    ]
+    const edges: Array<[number, number]> = [...clique(0, 5), ...clique(5, 5), [0, 5]]
+    const { clusterIds, clusterLabels } = detectClusters(nodes, edges, nodes.length)
+    const cidA = clusterIds[0]!
+    const cidB = clusterIds[5]!
+    expect(cidA).toBeGreaterThanOrEqual(0)
+    expect(cidA).not.toBe(cidB)
+    expect(clusterLabels.get(cidA)).toBe('#hplc')
+    expect(clusterLabels.get(cidB)).toBe('#stability')
+  })
+
+  it('falls back to the best available tag when nothing is distinctive', () => {
+    // Both cliques carry ONLY the ubiquitous tag: no tag discriminates, but an empty label
+    // would be worse — the frequency fallback still names them.
+    const nodes = Array.from({ length: 10 }, () => node('alpha', ['broad']))
+    const edges: Array<[number, number]> = [...clique(0, 5), ...clique(5, 5), [0, 5]]
+    const { clusterIds, clusterLabels } = detectClusters(nodes, edges, nodes.length)
+    expect(clusterLabels.get(clusterIds[0]!)).toBe('#broad')
+    expect(clusterLabels.get(clusterIds[5]!)).toBe('#broad')
+  })
+
   it('labels a domain-mixed cluster by its dominant domain, not its tags', () => {
     // K7: 4 "beta" pages + 3 uncategorized pages, all one thematic tag. Edges touching an
     // uncategorized page keep full weight, so the whole K7 is one community. Its dominant

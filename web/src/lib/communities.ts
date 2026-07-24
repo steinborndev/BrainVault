@@ -143,7 +143,8 @@ export function louvainCommunities(
  * the tail, are excluded and get id -1). Uses multi-level Louvain (see louvainCommunities)
  * so a dense vault yields coherent, domain-respecting communities instead of one giant blob.
  * Returns a per-node id array (compacted, clusters < MIN_CLUSTER folded to -1) and each
- * cluster's label from its dominant shared tags.
+ * cluster's label from its most DISTINCTIVE shared tags (see topDistinct — plain frequency
+ * let one ubiquitous tag label every sub-community of a domain identically).
  */
 export function detectClusters(
   nodes: GraphNode[],
@@ -184,8 +185,36 @@ export function detectClusters(
   }
   const topEntry = (m: Map<string, number> | undefined): [string, number] | undefined =>
     m ? [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] : undefined
-  const topN = (m: Map<string, number> | undefined, n: number): string[] =>
-    m ? [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([k]) => k) : []
+
+  // Global tag frequency over the visible subgraph, for the distinctiveness scoring below.
+  const totalTagCounts = new Map<string, number>()
+  for (let i = 0; i < realCount; i++)
+    for (const t of nodes[i]!.tags) totalTagCounts.set(t, (totalTagCounts.get(t) ?? 0) + 1)
+
+  /**
+   * The n most DISTINCTIVE tags of a cluster, not its most frequent ones: score = share of
+   * members carrying the tag minus its share outside the cluster. A ubiquitous tag scores
+   * ~0 — #biomedical inside a drilled-into biomedical cluster is on every page in AND
+   * outside each sub-community, so it can no longer label every sub-cluster identically;
+   * the tags that actually tell the clusters apart win. Structural tags (#source, #concept)
+   * die the same death without needing a list — they are everywhere. Falls back to raw
+   * order when nothing scores clearly positive: a cluster whose members share only
+   * ubiquitous tags still deserves its best label. Deterministic: score, count, then name.
+   */
+  const topDistinct = (cid: number, n: number): string[] => {
+    const tc = tagCounts.get(cid)
+    if (tc === undefined) return []
+    const size = clusterSize.get(cid) ?? 1
+    const outN = Math.max(1, realCount - size)
+    const scored = [...tc.entries()].map(([t, c]) => ({
+      t,
+      c,
+      score: c / size - ((totalTagCounts.get(t) ?? c) - c) / outN,
+    }))
+    scored.sort((a, b) => b.score - a.score || b.c - a.c || a.t.localeCompare(b.t))
+    const distinct = scored.filter((s) => s.score > 0.05).slice(0, n).map((s) => s.t)
+    return distinct.length > 0 ? distinct : scored.slice(0, n).map((s) => s.t)
+  }
 
   // Each cluster's dominant domain (for the hull tint) and its label. A domain-pure cluster
   // keeps the tag label; a domain-MIXED one is labelled by its dominant domain instead — the
@@ -197,7 +226,7 @@ export function detectClusters(
     if (dom !== undefined) clusterDomains.set(cid, dom[0])
     const share = dom !== undefined ? dom[1] / (clusterSize.get(cid) ?? 1) : 0
     const mixed = dom !== undefined && share < DOMAIN_PURITY
-    const tags = topN(tagCounts.get(cid), 2)
+    const tags = topDistinct(cid, 2)
     clusterLabels.set(
       cid,
       mixed ? dom![0] : tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : dom?.[0] ?? '',
