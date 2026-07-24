@@ -2516,6 +2516,20 @@ details.hot-cache[open] .hc-summary::before {
   text-transform: uppercase;
   flex-shrink: 0;
 }
+/* Domain hits sit above the page hits; a color dot ties them to their filter chip. */
+.graph-search-results .dom-hit .dom-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  align-self: center;
+}
+.graph-search-results .dom-hit .dom-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  flex-shrink: 0;
+}
 .graph-search input {
   border: none;
   background: transparent;

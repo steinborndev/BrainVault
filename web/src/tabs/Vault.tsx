@@ -366,6 +366,7 @@ const viewMemory = {
   showClusters: false,
   showGaps: false,
   showNetwork: false,
+  spotlight: false,
   showSystem: ((): boolean => {
     try {
       return localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
@@ -459,6 +460,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // brighten, cross-cluster bridges get a directional gradient). Off by default. Reuses the
   // community detection, so turning it on computes clusters even when the hull tint is off.
   const [showNetwork, setShowNetwork] = useState(viewMemory.showNetwork)
+  // Spotlight: hovering a node highlights its neighbors and dims the rest. Off by default
+  // (easier to click). Lives in the viewbar overlays; passed down to the canvas.
+  const [spotlight, setSpotlight] = useState(viewMemory.spotlight)
   /**
    * System pages (structural hubs + maintenance artifacts, node `kind` ≠ knowledge) are
    * hidden by default: the heavily-linked index/hot/log hubs are cross-domain bridges that
@@ -487,6 +491,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       showClusters,
       showGaps,
       showNetwork,
+      spotlight,
       showSystem,
       selection,
       trail,
@@ -696,6 +701,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return list
   }, [matches, nodes, query])
 
+  // Known domains matching the query — surfaced ABOVE the page hits so "carbon" offers the
+  // carbon-fiber domain as its first result; picking one solo-selects that domain filter.
+  const domainResults = useMemo(() => {
+    const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+    if (terms.length === 0) return [] as Array<[string, number]>
+    return domains.filter(([d]) => d !== NO_DOMAIN && terms.every((t) => d.toLowerCase().includes(t)))
+  }, [domains, query])
+
   const toggleType = (t: string): void => {
     const next = new Set(hiddenTypes)
     if (next.has(t)) next.delete(t)
@@ -792,8 +805,25 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         aria-label="Search the graph for a page or tag"
       />
       {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
-      {query.trim() !== '' && results.length > 0 && (
+      {query.trim() !== '' && (results.length > 0 || domainResults.length > 0) && (
         <ul className="graph-search-results">
+          {domainResults.map(([d, count]) => (
+            <li key={`dom-${d}`}>
+              <button
+                className="dom-hit"
+                onClick={() => {
+                  setSelectedDomains(new Set([d]))
+                  setQuery('')
+                }}
+                title={`Filter the graph to the ${d} domain`}
+              >
+                <span className="bucket">Domain</span>
+                <span className="dom-dot" style={{ background: domainColor(d) }} aria-hidden />
+                {d}
+                <span className="dom-count">{count}</span>
+              </button>
+            </li>
+          ))}
           {results.map((n) => (
             <li key={n.path}>
               <button
@@ -858,6 +888,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             title="Network lens: brighten the connections. Intra-cluster links lift into view; cross-cluster bridges show link direction as a colour gradient with an arrowhead."
           >
             <Icon name="graph" /> Network
+          </button>
+          <button
+            className={`ctl${spotlight ? ' on' : ''}`}
+            onClick={() => setSpotlight((v) => !v)}
+            title="Spotlight: hovering a node highlights its neighbors and dims the rest. Off by default — easier to click a node when off."
+          >
+            <Icon name="search" /> Spotlight
           </button>
         </span>
         <span className="vb-spacer" />
@@ -944,6 +981,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           clusterDomains={clusterDomains}
           showHulls={showClusters}
           network={showNetwork}
+          spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
           fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}`}
           onSelect={(n) =>

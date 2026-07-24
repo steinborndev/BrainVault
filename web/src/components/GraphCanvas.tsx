@@ -80,6 +80,11 @@ export interface GraphCanvasProps {
    */
   network?: boolean
   /**
+   * When on, hovering a node spotlights its neighbors and dims the rest. Controlled from the
+   * viewbar (the toggle used to live inside the canvas); off by default — easier to click.
+   */
+  spotlight?: boolean
+  /**
    * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
    * depth) — each change re-fits the view so the filtered graph fills the canvas again.
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
@@ -213,7 +218,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -227,9 +232,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // Hover-driven neighborhood spotlight, OFF by default: it dims the rest of the graph and
   // drops their labels, which makes precise clicking hard as it flickers under the pointer.
   // A click selection (selectedIndex) still spotlights; this toggle only gates the HOVER one.
-  const [hoverSpotlight, setHoverSpotlight] = useState(false)
-  const hoverSpotlightRef = useRef(hoverSpotlight)
-  hoverSpotlightRef.current = hoverSpotlight
+  // Controlled by the viewbar toggle; a ref so the draw closure reads the latest without redeps.
+  const hoverSpotlightRef = useRef(spotlight)
+  hoverSpotlightRef.current = spotlight
 
   // Neighbor sets for hover highlighting (undirected view of the directed edges).
   const neighbors = useMemo(() => {
@@ -895,7 +900,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // — these must not depend on a pointer move or a layout tick happening to come along.
   useEffect(() => {
     scheduleDraw()
-  }, [matches, focusIndex, selectedIndex, ghostIndices, lens, clusters, clusterLabels, scheduleDraw])
+  }, [matches, focusIndex, selectedIndex, ghostIndices, lens, clusters, clusterLabels, spotlight, scheduleDraw])
 
   /** Screen → world coordinates under the current transform. */
   const toWorld = useCallback((sx: number, sy: number): { x: number; y: number } => {
@@ -1171,17 +1176,6 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         </button>
         <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
           +
-        </button>
-        <button
-          className={`btn ghost${hoverSpotlight ? ' active' : ''}`}
-          aria-pressed={hoverSpotlight}
-          onClick={() => {
-            setHoverSpotlight((v) => !v)
-            scheduleDraw()
-          }}
-          title="Highlight a node's neighbors on hover (off by default — easier to click when off)"
-        >
-          Hover-Highlight {hoverSpotlight ? 'on' : 'off'}
         </button>
       </div>
       {overlay}
