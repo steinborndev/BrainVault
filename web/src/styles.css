@@ -1712,10 +1712,23 @@ details.hot-cache[open] .hc-summary::before {
   gap: 16px;
   align-items: start;
 }
+/* Focused mode: one status item was clicked — exactly one tool, full width. */
+.maint.single {
+  grid-template-columns: 1fr;
+}
 @media (max-width: 900px) {
   .maint {
     grid-template-columns: 1fr;
   }
+}
+/* Breadcrumb-ish bar above a focused tool: back to the overview, or open everything. */
+.focus-bar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 0 4px;
+  font-size: 12.5px;
 }
 .mcol {
   display: flex;

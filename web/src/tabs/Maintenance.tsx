@@ -69,37 +69,40 @@ export function Maintenance(): React.ReactElement {
   const totalPages = stats.data?.pages.total ?? 0
   const lastReport = stats.data?.lintReport ?? null
 
-  // The status head is the tab's primary surface (SPEC §12.7); the expert cards are the
-  // second view behind a toggle — visible on demand, or when a status item jumps into them.
-  // Setup mode force-opens them: the credential entry lives in Settings.
-  const [showTools, setShowTools] = useState(false)
-  const [pendingJump, setPendingJump] = useState<string | null>(null)
+  // The status head is the tab's primary surface (SPEC §12.7). Below it there are three
+  // views: 'overview' (head only), one focused card (a status item was clicked — show
+  // exactly the tool that item is about), or 'all' (the Expert-tools toggle / setup mode,
+  // which force-opens everything because the credential entry lives in Settings).
+  const [view, setView] = useState<'overview' | 'all' | string>('overview')
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   const setupMode = health.data !== undefined && !health.data.credentialConfigured
   useEffect(() => {
-    if (setupMode) setShowTools(true)
+    if (setupMode) setView('all')
   }, [setupMode])
-  // The jump target renders only after the tools section mounts — scroll on the next pass.
-  useEffect(() => {
-    if (pendingJump === null || !showTools) return
-    document.getElementById(pendingJump)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    setPendingJump(null)
-  }, [pendingJump, showTools])
+  const showCard = (anchor: string): boolean => view === 'all' || view === anchor
 
   return (
     <>
       <StatusHead
-        toolsShown={showTools}
-        onToggleTools={() => setShowTools((v) => !v)}
-        onJump={(anchor) => {
-          setShowTools(true)
-          setPendingJump(anchor)
-        }}
+        allShown={view === 'all'}
+        onToggleTools={() => setView(view === 'all' ? 'overview' : 'all')}
+        onJump={(anchor) => setView(anchor)}
       />
-      {showTools && (
-      <div className="maint">
+      {view !== 'overview' && view !== 'all' && (
+        <div className="focus-bar">
+          <button className="linklike" onClick={() => setView('overview')}>
+            ← Back to what&apos;s due
+          </button>
+          <button className="linklike" onClick={() => setView('all')}>
+            Show all tools
+          </button>
+        </div>
+      )}
+      {view !== 'overview' && (
+      <div className={view === 'all' ? 'maint' : 'maint single'}>
       <div className="mcol">
         {/* Lint */}
+        {showCard('card-lint') && (
         <div className="card card-pad" id="card-lint">
           <div className="section-head">
             <h3 className="section-title">
@@ -156,8 +159,10 @@ export function Maintenance(): React.ReactElement {
             </div>
           )}
         </div>
+        )}
 
         {/* Hot cache */}
+        {showCard('card-hot-cache') && (
         <div className="card card-pad" id="card-hot-cache">
           <div className="section-head">
             <h3 className="section-title">
@@ -189,11 +194,13 @@ export function Maintenance(): React.ReactElement {
           {hot.error && <div className="toast err">{hot.error}</div>}
           {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
         </div>
+        )}
 
         {/* Retrieval index (SPEC §12.6 stage 1) */}
-        <RetrievalIndexCard />
+        {showCard('card-index') && <RetrievalIndexCard />}
 
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
+        {showCard('card-domains') && (
         <div className="card card-pad" id="card-domains">
           <div className="section-head">
             <h3 className="section-title">
@@ -257,11 +264,13 @@ export function Maintenance(): React.ReactElement {
             />
           )}
         </div>
+        )}
 
         {/* Tag hygiene (lint equivalent for tags + the bounded repair run) */}
-        <TagHygieneCard nodes={graph.data?.nodes} vaultName={vaultName} />
+        {showCard('card-tags') && <TagHygieneCard nodes={graph.data?.nodes} vaultName={vaultName} />}
       </div>
 
+      {view === 'all' && (
       <div className="mcol">
         <div className="card card-pad">
           <div className="section-head">
@@ -273,6 +282,7 @@ export function Maintenance(): React.ReactElement {
           <SettingsEditor />
         </div>
       </div>
+      )}
       </div>
       )}
     </>
@@ -282,15 +292,16 @@ export function Maintenance(): React.ReactElement {
 /**
  * The "what's due" head (SPEC §12.7 Stufe b): the deterministic status model rendered as a
  * prioritized list — severity chip, WHAT, WHY NOW, COST — as the tab's PRIMARY surface.
- * Clicking an item opens the expert tools and jumps to the matching card; healthy areas
- * collapse into one line so an all-green tab reads as exactly that.
+ * Clicking an item focuses exactly the tool it is about (one concern per screen); the
+ * Expert-tools toggle shows every card. Healthy areas collapse into one line so an
+ * all-green tab reads as exactly that.
  */
 function StatusHead({
-  toolsShown,
+  allShown,
   onToggleTools,
   onJump,
 }: {
-  toolsShown: boolean
+  allShown: boolean
   onToggleTools: () => void
   onJump: (anchor: string) => void
 }): React.ReactElement {
@@ -318,7 +329,7 @@ function StatusHead({
       <div className="section-head">
         <h3 className="section-title">
           What&apos;s due
-          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to open its tool; 'Expert tools' shows every card regardless." />
+          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'Expert tools' shows every card." />
         </h3>
         <span className="right ms-actions">
           <span className="ms-counts">
@@ -327,7 +338,7 @@ function StatusHead({
             <span className="sev ok">{status.healthy} healthy</span>
           </span>
           <button className="btn" onClick={onToggleTools}>
-            {toolsShown ? 'Hide expert tools' : 'Expert tools'}
+            {allShown ? 'Hide expert tools' : 'Expert tools'}
           </button>
         </span>
       </div>
