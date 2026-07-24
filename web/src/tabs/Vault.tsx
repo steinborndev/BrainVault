@@ -15,7 +15,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { staleLinks, useStaleLinks } from '../lib/staleLinks.ts'
 import type { GraphNode, VaultGraph, ValidationFinding, RepairTask } from '../api/types.ts'
-import { GraphCanvas, domainColor, type Lens } from '../components/GraphCanvas.tsx'
+import { GraphCanvas, domainColor, TYPE_VARS, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { Tip } from '../components/Tip.tsx'
@@ -537,6 +537,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return [...counts.entries()].sort((a, b) => (a[0] === NO_DOMAIN ? 1 : b[0] === NO_DOMAIN ? -1 : b[1] - a[1]))
   }, [graph, showSystem])
   const hasDomains = domains.some(([d]) => d !== NO_DOMAIN)
+  // With no domains assigned, the domain lens falls back to type-coloring; the legend must
+  // follow the SAME resolution so it explains what's actually drawn.
+  const effectiveLens: Lens = hasDomains ? lens : lens === 'domain' ? 'type' : lens
 
   // Displayed subgraph: type + domain filters first, then (optionally) the BFS neighborhood
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
@@ -935,7 +938,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           selectedIndex={selectedIndex}
           ghostIndices={ghostIndices}
           matches={matches}
-          lens={hasDomains ? lens : lens === 'domain' ? 'type' : lens}
+          lens={effectiveLens}
           clusters={clusterIds}
           clusterLabels={clusterLabels}
           clusterDomains={clusterDomains}
@@ -965,7 +968,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                   </button>
                 </div>
               )}
-              {hasDomains && <LensLegend lens={lens} />}
+              <LensLegend lens={effectiveLens} types={types} />
               {trail.length > 1 && (
                 <div className="graph-trail" role="navigation" aria-label="Exploration trail">
                   {trail.map((p, i) => {
@@ -1617,10 +1620,43 @@ function LensDropdown({
   )
 }
 
-/** A small canvas-corner legend for the metric lenses (categorical lenses use the chips). */
-function LensLegend({ lens }: { lens: Lens }): React.ReactElement | null {
+/**
+ * A small canvas-corner legend (bottom-right). The metric lenses each get a one-line key; the
+ * `type` lens gets a swatch per page-type color present. The `domain` lens has no legend here —
+ * the domain filter chips at the top ARE its legend. `types` is the [type, count] list of what
+ * is currently visible, so the legend lists only colors actually on screen.
+ */
+function LensLegend({
+  lens,
+  types,
+}: {
+  lens: Lens
+  types: Array<[string, number]>
+}): React.ReactElement | null {
   let body: React.ReactNode = null
-  if (lens === 'authority')
+  if (lens === 'type') {
+    // Distinct color buckets present, in a stable order; everything without its own color
+    // (meta, references, comparisons, folds, …) collapses to one muted "Meta / other" row —
+    // mirroring colorFor(), which paints exactly those buckets muted.
+    const present = new Set(types.map(([t]) => t))
+    const colored = Object.entries(TYPE_VARS).filter(([, v]) => v !== '--muted')
+    const rows = colored
+      .filter(([t]) => present.has(t))
+      .map(([t, cssVar]) => ({ label: TYPE_LABELS[t] ?? t, cssVar }))
+    const coloredKeys = new Set(colored.map(([t]) => t))
+    if (types.some(([t]) => !coloredKeys.has(t))) rows.push({ label: 'Meta / other', cssVar: '--muted' })
+    body =
+      rows.length > 0 ? (
+        <>
+          <span className="ll-title">Page type</span>
+          {rows.map((r) => (
+            <span className="ll-row" key={r.label}>
+              <i className="ll-sw" style={{ background: `var(${r.cssVar})` }} /> {r.label}
+            </span>
+          ))}
+        </>
+      ) : null
+  } else if (lens === 'authority')
     body = (
       <>
         <span className="ll-title">Authority</span>

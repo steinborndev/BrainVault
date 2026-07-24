@@ -101,8 +101,9 @@ export interface GraphCanvasProps {
   overlay?: React.ReactNode
 }
 
-/** Bucket → CSS variable. Falls back to --muted for unknown buckets. */
-const TYPE_VARS: Record<string, string> = {
+/** Bucket → CSS variable. Falls back to --muted for unknown buckets. Exported so the type
+ *  legend renders swatches from the same mapping the canvas colors nodes with. */
+export const TYPE_VARS: Record<string, string> = {
   concepts: '--accent',
   entities: '--ok',
   sources: '--warn',
