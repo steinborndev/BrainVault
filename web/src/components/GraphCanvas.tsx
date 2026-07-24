@@ -80,8 +80,10 @@ export interface GraphCanvasProps {
    */
   network?: boolean
   /**
-   * When on, hovering a node spotlights its neighbors and dims the rest. Controlled from the
-   * viewbar (the toggle used to live inside the canvas); off by default — easier to click.
+   * When on, hovering a node spotlights its whole community (from `clusters`, falling back
+   * to its direct neighbors when it has none) and dims the rest — previewing exactly the set
+   * a click would isolate (the caller handles that via onSelect). Controlled from the viewbar
+   * (the toggle used to live inside the canvas); off by default — easier to click.
    */
   spotlight?: boolean
   /**
@@ -90,7 +92,11 @@ export interface GraphCanvasProps {
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
    */
   fitKey?: string
-  onSelect: (node: GraphNode) => void
+  /**
+   * Single click/tap on a node. `index` is the node's position in `nodes` — the caller needs
+   * it to look up cluster membership (the spotlight-click isolation) without a path scan.
+   */
+  onSelect: (node: GraphNode, index: number) => void
   /**
    * Double-click / double-tap on a node. The click-vs-open split mirrors every file
    * manager: single opens the explorer panel, double navigates to the page itself.
@@ -248,6 +254,19 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return map
   }, [edges])
 
+  // Community membership sets, cluster id → member indices, for the cluster-wide spotlight:
+  // hovering previews the exact set a click would isolate. Rebuilt only when the ids change,
+  // never per frame.
+  const clusterSets = useMemo(() => {
+    if (clusters === null) return null
+    const map = new Map<number, Set<number>>()
+    clusters.forEach((cid, i) => {
+      if (cid < 0) return
+      ;(map.get(cid) ?? map.set(cid, new Set<number>()).get(cid)!).add(i)
+    })
+    return map
+  }, [clusters])
+
   // One guaranteed label per domain-region of every connected component big enough to read as
   // a cluster. Without this, the label loop's global degree sort + fixed budget fill every slot
   // from the densest regions, leaving small detached clusters (materials-science, unassigned)
@@ -281,7 +300,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     for (let i = 0; i < nodes.length; i++) {
       const r = find(i)
       if ((compSize.get(r) ?? 0) < MIN_LABELED_CLUSTER) continue
-      const key = `${r} ${nodes[i]!.domain ?? ''}`
+      const key = `${r}\u0000${nodes[i]!.domain ?? ''}`
       const cur = best.get(key)
       if (cur === undefined || nodes[i]!.in + nodes[i]!.out > nodes[cur]!.in + nodes[cur]!.out) best.set(key, i)
     }
@@ -358,8 +377,18 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // node still keeps its own label + tooltip (via `interactive` below) so pointing still
     // tells you what a node is — only the neighborhood dimming is gated.
     const spotHover = hoverSpotlightRef.current ? hovered : null
+    // The hovered node's community, when it has one: the hover spotlight previews the exact
+    // set a click would isolate (Vault.tsx handles the click). Community-less nodes (id -1)
+    // fall back to the 1-hop neighborhood, and so do the persistent selection/focus
+    // spotlights — those answer "what does THIS page link to", not "what belongs together".
+    const spotCid = spotHover !== null && clusters !== null ? clusters[spotHover] ?? -1 : -1
     const active = spotHover ?? selectedIndex ?? focusIndex
-    const highlight = active !== null ? new Set([active, ...(neighbors.get(active) ?? [])]) : null
+    const highlight =
+      active !== null
+        ? spotCid >= 0
+          ? clusterSets!.get(spotCid)!
+          : new Set([active, ...(neighbors.get(active) ?? [])])
+        : null
     // The transient hover may dim hard; a selection/focus spotlight is long-lived, so it
     // dims gently enough that the rest of the graph stays readable underneath it.
     const dimNode = spotHover !== null ? 0.18 : 0.45
@@ -383,11 +412,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // tinted blob and cleared against one another; their boxes then seed the node-label
     // collision list below so a page title can't overwrite a group label either.
     const regionLabelBoxes: Array<[number, number, number, number]> = []
-    if (clusters !== null && showHulls) {
+    // With hulls off, the spotlight still traces the HOVERED community's hull (and its label,
+    // via the shared `members` map below) — the preview of what a click would isolate.
+    if (clusters !== null && (showHulls || spotCid >= 0)) {
       const members = new Map<number, Array<[number, number]>>()
       for (let i = 0; i < nodes.length; i++) {
         const cid = clusters[i]
         if (cid === undefined || cid < 0) continue
+        if (!showHulls && cid !== spotCid) continue
         const x = pos[i * 2]!
         const y = pos[i * 2 + 1]!
         if (Number.isNaN(x)) continue
@@ -635,7 +667,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
@@ -1072,7 +1104,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
             onOpen(node)
           } else {
             lastTapRef.current = { time: now, path: node.path }
-            onSelect(node)
+            onSelect(node, hit)
           }
         } else {
           lastTapRef.current = null
@@ -1158,7 +1190,19 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         }}
         role="img"
         aria-label={`Wikilink graph with ${nodes.length} pages`}
-        style={{ cursor: hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab', touchAction: 'none' }}
+        style={{
+          // zoom-in signals that a click will isolate the hovered node's community rather
+          // than open the explorer panel (spotlight on + the node belongs to one).
+          cursor:
+            hover !== null
+              ? spotlight && clusters !== null && (clusters[hover] ?? -1) >= 0
+                ? 'zoom-in'
+                : 'pointer'
+              : drag.current
+                ? 'grabbing'
+                : 'grab',
+          touchAction: 'none',
+        }}
       />
       <div className="graph-controls">
         <button
@@ -1194,7 +1238,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
                 {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
                 {nodes[hover]!.out} out
               </span>
-              {onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>}
+              {spotlight && clusters !== null && (clusters[hover] ?? -1) >= 0 ? (
+                <span className="tt-hint">click to isolate this community · double-click to open</span>
+              ) : (
+                onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>
+              )}
             </>
           )}
         </div>

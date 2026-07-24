@@ -14,6 +14,10 @@ export type IconName =
   | 'check'
   | 'search'
   | 'graph'
+  | 'gap'
+  | 'cluster'
+  | 'network'
+  | 'spotlight'
   | 'back'
   | 'upload'
   | 'edit'
@@ -76,6 +80,38 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="18" cy="8" r="2.5" />
       <circle cx="9" cy="18" r="2.5" />
       <path d="M8.2 7l7.4 0.7M7 8.2l1.4 7.4M16.4 10l-5.8 6.3" />
+    </>
+  ),
+  // A real page linking into a dashed, not-yet-written one — the ghost-node treatment itself.
+  gap: (
+    <>
+      <circle cx="6.5" cy="6.5" r="2.5" />
+      <path d="M8.5 8.5l3.2 3.2" />
+      <circle cx="15" cy="15" r="5" strokeDasharray="2.6 2.6" />
+    </>
+  ),
+  // Member dots inside a tinted hull outline — the cluster overlay in miniature.
+  cluster: (
+    <>
+      <ellipse cx="12" cy="12" rx="8.5" ry="6" />
+      <circle cx="8.5" cy="11" r="1.4" />
+      <circle cx="13.5" cy="14.2" r="1.4" />
+      <circle cx="15" cy="9.5" r="1.4" />
+    </>
+  ),
+  // Two nodes with the directed bridge between them — the network lens's arrowed edge.
+  network: (
+    <>
+      <circle cx="5.5" cy="18.5" r="2.5" />
+      <circle cx="18.5" cy="5.5" r="2.5" />
+      <path d="M7.4 16.6L15 9M15 9h-3.4M15 9v3.4" />
+    </>
+  ),
+  // A radiating node: the hover glow that lights a community up.
+  spotlight: (
+    <>
+      <circle cx="12" cy="12" r="3.6" />
+      <path d="M12 3.5v2.3M12 18.2v2.3M3.5 12h2.3M18.2 12h2.3M6 6l1.7 1.7M16.3 16.3L18 18M18 6l-1.7 1.7M7.7 16.3L6 18" />
     </>
   ),
   back: <path d="M15 4l-8 8 8 8" />,

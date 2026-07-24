@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectClusters, louvainCommunities } from '../src/tabs/Vault.tsx'
+import { detectClusters, louvainCommunities } from '../src/lib/communities.ts'
 import type { GraphNode } from '../src/api/types.ts'
 
 /** Minimal node fixture — only the fields detectClusters reads (domain, tags). */

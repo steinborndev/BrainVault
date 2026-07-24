@@ -2585,6 +2585,43 @@ details.hot-cache[open] .hc-summary::before {
 .focusbar strong {
   color: var(--text);
 }
+
+/* ── The isolated-community bar (spotlight click) ── Accent-tinted, unlike the neutral
+   focusbar: cluster focus is a temporary zoom-in the user should notice they are inside of. */
+.clusterbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 7px 11px;
+}
+.clusterbar strong {
+  color: var(--text);
+}
+.clusterbar .cb-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.clusterbar .cb-meta {
+  font-variant-numeric: tabular-nums;
+}
+.clusterbar .cb-exit {
+  margin-left: auto;
+}
+
+/* Spotlight while a cluster is isolated: present but paused — there is nothing left to
+   isolate until Esc brings the full graph back. */
+.ctl.suspended {
+  border-style: dashed;
+  color: var(--text-faint);
+}
 .seg {
   display: inline-flex;
   border: 1px solid var(--border-strong);
