@@ -11,16 +11,18 @@
  * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type {
+  GraphNode,
   LintReport,
   MaintenanceResult,
   DomainCandidate,
   DomainReviewEntry,
   CandidatesResponse,
 } from '../api/types.ts'
+import { computeTagReport } from '../lib/tagReport.ts'
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
@@ -201,6 +203,9 @@ export function Maintenance(): React.ReactElement {
           {backfill.result && <RunResult result={backfill.result} vaultName={vaultName} label="Filed" />}
           {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
         </div>
+
+        {/* Tag hygiene (read-only lint equivalent for tags) */}
+        <TagHygieneCard nodes={graph.data?.nodes} />
       </div>
 
       <div className="mcol">
@@ -214,6 +219,119 @@ export function Maintenance(): React.ReactElement {
           <SettingsEditor />
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Tag hygiene (level 2 of the tag plan): the deterministic, read-only lint equivalent for
+ * tags — likely spelling variants, tags implied by another tag, tags that just echo a
+ * domain, and single-use tags. Computed client-side from the graph the tab already loads;
+ * nothing is written. The repair itself stays a (future) sanctioned agent run per hard
+ * rule 1 — this card is the evidence such a run would act on.
+ */
+function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }): React.ReactElement | null {
+  const report = useMemo(() => (nodes !== undefined ? computeTagReport(nodes) : null), [nodes])
+  const [showSingletons, setShowSingletons] = useState(false)
+  if (report === null) return null
+  const findingCount = report.variants.length + report.implications.length + report.domainEchoes.length
+  const CAP = 8 // evidence, not an endless list — the counts carry the "how bad is it"
+  return (
+    <div className="card card-pad">
+      <div className="section-head">
+        <h3 className="section-title">
+          Tags — hygiene
+          <Tip text="Deterministic tag lint, computed from the live graph — nothing is written. Variants: two tags that look like spellings of the same thing. Implied: a tag whose pages (almost) always carry another tag too. Domain echoes: a tag that just repeats the page's domain. Single-use: tags with exactly one page. Repairing (merging/dropping tags) will be an agent run using this report as its plan." />
+        </h3>
+      </div>
+      <div className="tool-meta">
+        {report.distinctTags} distinct tags on {report.taggedPages} of {report.knowledgePages} knowledge pages
+      </div>
+      {findingCount === 0 && report.singletons.length === 0 ? (
+        <p className="tab-hint">No findings — the tag set looks healthy.</p>
+      ) : (
+        <div className="tagrep">
+          {report.variants.length > 0 && (
+            <section>
+              <h4>
+                Likely variants <span className="cnt">{report.variants.length}</span>
+              </h4>
+              {report.variants.slice(0, CAP).map((v) => (
+                <div key={`${v.a}|${v.b}`} className="trow">
+                  <span className="pair">
+                    <code>#{v.a}</code> <span className="sep">≈</span> <code>#{v.b}</code>
+                  </span>
+                  <span className="meta">
+                    {v.aCount} + {v.bCount} pages
+                    {v.both > 0 ? ` · ${v.both} carry both` : ''}
+                  </span>
+                </div>
+              ))}
+              {report.variants.length > CAP && <div className="more">+{report.variants.length - CAP} more</div>}
+            </section>
+          )}
+          {report.implications.length > 0 && (
+            <section>
+              <h4>
+                Implied tags <span className="cnt">{report.implications.length}</span>
+              </h4>
+              {report.implications.slice(0, CAP).map((v) => (
+                <div key={`${v.a}|${v.b}`} className="trow">
+                  <span className="pair">
+                    <code>#{v.a}</code> <span className="sep">{v.mutual === true ? '↔' : '→'}</span> <code>#{v.b}</code>
+                  </span>
+                  <span className="meta">
+                    together on {v.both} of {v.aCount} pages
+                  </span>
+                </div>
+              ))}
+              {report.implications.length > CAP && (
+                <div className="more">+{report.implications.length - CAP} more</div>
+              )}
+            </section>
+          )}
+          {report.domainEchoes.length > 0 && (
+            <section>
+              <h4>
+                Domain echoes <span className="cnt">{report.domainEchoes.length}</span>
+              </h4>
+              {report.domainEchoes.slice(0, CAP).map((e) => (
+                <div key={`${e.tag}|${e.domain}`} className="trow">
+                  <span className="pair">
+                    <code>#{e.tag}</code> <span className="sep">≙</span> <span className="dom">{e.domain}</span>
+                  </span>
+                  <span className="meta">
+                    {e.inDomain} of {e.domainSize} pages in the domain · {e.tagCount} uses overall
+                  </span>
+                </div>
+              ))}
+              {report.domainEchoes.length > CAP && (
+                <div className="more">+{report.domainEchoes.length - CAP} more</div>
+              )}
+            </section>
+          )}
+          {report.singletons.length > 0 && (
+            <section>
+              <h4>
+                Single-use tags <span className="cnt">{report.singletons.length}</span>
+                <button className="linklike" onClick={() => setShowSingletons((v) => !v)}>
+                  {showSingletons ? 'hide' : 'show'}
+                </button>
+              </h4>
+              {showSingletons && (
+                <div className="filters">
+                  {report.singletons.slice(0, 60).map((t) => (
+                    <span key={t} className="chip">
+                      #{t}
+                    </span>
+                  ))}
+                  {report.singletons.length > 60 && <span className="more">+{report.singletons.length - 60} more</span>}
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      )}
     </div>
   )
 }

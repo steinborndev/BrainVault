@@ -1727,6 +1727,60 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 12px;
   color: var(--text-faint);
 }
+
+/* ── Tag-hygiene report (Maintenance) ── */
+.tagrep {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+}
+.tagrep h4 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.tagrep h4 .cnt {
+  font-weight: 500;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.tagrep .trow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+.tagrep .trow .pair {
+  min-width: 0;
+}
+.tagrep .trow .sep {
+  color: var(--text-faint);
+  padding: 0 2px;
+}
+.tagrep .trow .dom {
+  color: var(--text);
+  font-weight: 500;
+}
+.tagrep .trow .meta {
+  color: var(--text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tagrep .more {
+  font-size: 12px;
+  color: var(--text-faint);
+  padding-top: 2px;
+}
 .tool-meta a {
   font-size: 12px;
 }
