@@ -2268,10 +2268,11 @@ details.hot-cache[open] .hc-summary::before {
   gap: 7px;
   padding: 6px 11px;
   font-size: 12.5px;
-  /* Match .ctl's line box exactly (it inherits the body 1.5). A <button> otherwise falls back
-     to the UA `line-height: normal`, which makes the segments — and so the whole box — a hair
-     taller than the neighbouring .ctl buttons. */
-  line-height: 1.5;
+  /* Match the .ctl buttons' line box. .ctl is a <button>, and form controls do NOT inherit
+     the body line-height — they render at the UA `line-height: normal` (~15px box at 12.5px).
+     The label is a <span>, so it must state `normal` explicitly or it would inherit the body
+     1.5 and stand ~4px taller than the neighbouring .ctl buttons (measured). */
+  line-height: normal;
   font-weight: 500;
   color: var(--text-dim);
   background: var(--bg-elev-2);
@@ -2291,7 +2292,7 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-dim);
   padding: 6px 12px;
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: normal;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
