@@ -762,11 +762,15 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             <li key={`dom-${d}`}>
               <button
                 className="dom-hit"
+                // REPLACES the domain selection, deliberately diverging from the accumulating
+                // chips/panel: search is a refocus — whoever had cooking soloed and then
+                // searches carbon fiber has moved on; the old selection lost its relevance
+                // the moment they typed. The tooltip says so.
                 onClick={() => {
                   setSelectedDomains(new Set([d]))
                   setQuery('')
                 }}
-                title={`Filter the graph to the ${d} domain`}
+                title={`Show only the ${d} domain (replaces the current domain filter)`}
               >
                 <span className="bucket">Domain</span>
                 <span className="dom-dot" style={{ background: domainColor(d) }} aria-hidden />
@@ -1480,6 +1484,20 @@ function DomainBand({
 
   const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
   const dot = (d: string): string => (d === NO_DOMAIN ? 'var(--muted)' : domainColor(d))
+  /**
+   * Honest, state-aware tooltip for a toggle target (chip or panel row). The old static
+   * "Show only this domain" was only true for the FIRST click; every further click adds to
+   * the selection, and claiming "only" there mislabeled the accumulate semantics. (The graph
+   * search's domain hit is the one place that genuinely replaces — its own tooltip says so.)
+   */
+  const toggleTitle = (d: string, active: boolean): string =>
+    active
+      ? selected.size === 1
+        ? 'Deselect — back to all domains'
+        : `Remove ${label(d)} from the filter`
+      : selected.size === 0
+        ? 'Show only this domain'
+        : `Add ${label(d)} to the current selection`
   const q = filter.trim().toLowerCase()
   // The band orders by size (biggest domains first); the panel is for FINDING a domain,
   // so it orders alphabetically — the no-domain pseudo-bucket stays last either way.
@@ -1503,7 +1521,7 @@ function DomainBand({
               key={d || '∅'}
               className={`chip${active ? ' active' : ''}${selected.size > 0 && !active ? ' dimmed' : ''}`}
               onClick={() => onToggle(d)}
-              title={active ? 'Deselect (back to all)' : 'Show only this domain'}
+              title={toggleTitle(d, active)}
             >
               <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
               {label(d)} <span className="chip-n">{count}</span>
@@ -1542,7 +1560,12 @@ function DomainBand({
                 {panelRows.map(([d, count]) => {
                   const active = selected.has(d)
                   return (
-                    <button key={d || '∅'} className={`p-row${active ? ' active' : ''}`} onClick={() => onToggle(d)}>
+                    <button
+                      key={d || '∅'}
+                      className={`p-row${active ? ' active' : ''}`}
+                      onClick={() => onToggle(d)}
+                      title={toggleTitle(d, active)}
+                    >
                       <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
                       <span className="nm">{label(d)}</span>
                       <span className="n">{count}</span>
