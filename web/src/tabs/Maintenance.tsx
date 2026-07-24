@@ -69,9 +69,34 @@ export function Maintenance(): React.ReactElement {
   const totalPages = stats.data?.pages.total ?? 0
   const lastReport = stats.data?.lintReport ?? null
 
+  // The status head is the tab's primary surface (SPEC §12.7); the expert cards are the
+  // second view behind a toggle — visible on demand, or when a status item jumps into them.
+  // Setup mode force-opens them: the credential entry lives in Settings.
+  const [showTools, setShowTools] = useState(false)
+  const [pendingJump, setPendingJump] = useState<string | null>(null)
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  const setupMode = health.data !== undefined && !health.data.credentialConfigured
+  useEffect(() => {
+    if (setupMode) setShowTools(true)
+  }, [setupMode])
+  // The jump target renders only after the tools section mounts — scroll on the next pass.
+  useEffect(() => {
+    if (pendingJump === null || !showTools) return
+    document.getElementById(pendingJump)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setPendingJump(null)
+  }, [pendingJump, showTools])
+
   return (
     <>
-      <StatusHead />
+      <StatusHead
+        toolsShown={showTools}
+        onToggleTools={() => setShowTools((v) => !v)}
+        onJump={(anchor) => {
+          setShowTools(true)
+          setPendingJump(anchor)
+        }}
+      />
+      {showTools && (
       <div className="maint">
       <div className="mcol">
         {/* Lint */}
@@ -249,20 +274,40 @@ export function Maintenance(): React.ReactElement {
         </div>
       </div>
       </div>
+      )}
     </>
   )
 }
 
 /**
  * The "what's due" head (SPEC §12.7 Stufe b): the deterministic status model rendered as a
- * prioritized list — severity chip, WHAT, WHY NOW, COST — above the expert cards. Items jump
- * to their card; healthy areas collapse into one line so an all-green tab reads as exactly
- * that. Renders nothing while the inputs still load (no flickering severities).
+ * prioritized list — severity chip, WHAT, WHY NOW, COST — as the tab's PRIMARY surface.
+ * Clicking an item opens the expert tools and jumps to the matching card; healthy areas
+ * collapse into one line so an all-green tab reads as exactly that.
  */
-function StatusHead(): React.ReactElement | null {
+function StatusHead({
+  toolsShown,
+  onToggleTools,
+  onJump,
+}: {
+  toolsShown: boolean
+  onToggleTools: () => void
+  onJump: (anchor: string) => void
+}): React.ReactElement {
   const data = useMaintenanceStatus()
   const [showHealthy, setShowHealthy] = useState(false)
-  if (data === null) return null
+
+  if (data === null) {
+    return (
+      <div className="card card-pad maint-status">
+        <div className="section-head">
+          <h3 className="section-title">What&apos;s due</h3>
+        </div>
+        <div className="tool-meta">Checking vault status…</div>
+      </div>
+    )
+  }
+
   const { status, lastRuns } = data
   const open = status.items.filter((i) => i.severity !== 'healthy')
   const healthy = status.items.filter((i) => i.severity === 'healthy')
@@ -273,12 +318,17 @@ function StatusHead(): React.ReactElement | null {
       <div className="section-head">
         <h3 className="section-title">
           What&apos;s due
-          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'recommended' is worth doing soon; everything else is explicitly healthy." />
+          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to open its tool; 'Expert tools' shows every card regardless." />
         </h3>
-        <span className="ms-counts">
-          {status.due > 0 && <span className="sev due">{status.due} due</span>}
-          {status.recommended > 0 && <span className="sev rec">{status.recommended} recommended</span>}
-          <span className="sev ok">{status.healthy} healthy</span>
+        <span className="right ms-actions">
+          <span className="ms-counts">
+            {status.due > 0 && <span className="sev due">{status.due} due</span>}
+            {status.recommended > 0 && <span className="sev rec">{status.recommended} soon</span>}
+            <span className="sev ok">{status.healthy} healthy</span>
+          </span>
+          <button className="btn" onClick={onToggleTools}>
+            {toolsShown ? 'Hide expert tools' : 'Expert tools'}
+          </button>
         </span>
       </div>
 
@@ -289,7 +339,7 @@ function StatusHead(): React.ReactElement | null {
       ) : (
         <div className="ms-items">
           {open.map((item) => (
-            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} />
+            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} onJump={onJump} />
           ))}
         </div>
       )}
@@ -302,7 +352,7 @@ function StatusHead(): React.ReactElement | null {
       {showHealthy && !allHealthy && (
         <div className="ms-items ms-items-healthy">
           {healthy.map((item) => (
-            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} />
+            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} onJump={onJump} />
           ))}
         </div>
       )}
@@ -322,12 +372,17 @@ function lastRunLabel(
   return `last run ${timeAgo(last.finishedAt)}${last.ok ? '' : ' (failed)'}`
 }
 
-function StatusItem({ item, lastRun }: { item: MaintStatusItem; lastRun: string | null }): React.ReactElement {
-  const jump = (): void => {
-    document.getElementById(item.anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+function StatusItem({
+  item,
+  lastRun,
+  onJump,
+}: {
+  item: MaintStatusItem
+  lastRun: string | null
+  onJump: (anchor: string) => void
+}): React.ReactElement {
   return (
-    <button className="ms-item" onClick={jump} title="Jump to the card">
+    <button className="ms-item" onClick={() => onJump(item.anchor)} title="Open the tool for this">
       <span className={`sev ${item.severity === 'due' ? 'due' : item.severity === 'recommended' ? 'rec' : 'ok'}`}>
         {item.severity === 'recommended' ? 'soon' : item.severity}
       </span>
@@ -901,7 +956,12 @@ function CandidateCard({
         </p>
       )}
 
-      <PageLinks paths={candidate.pages.map((p) => p.path)} vaultName={vaultName} />
+      {/* The member pages, collapsed: a 30-page candidate must not cost 30 chip rows of
+          screen before the user even decides — the count in the head already says the size. */}
+      <details className="cand-pages">
+        <summary>Show {candidate.pageCount} page{candidate.pageCount === 1 ? '' : 's'}</summary>
+        <PageLinks paths={candidate.pages.map((p) => p.path)} vaultName={vaultName} />
+      </details>
 
       {editing ? (
         <div className="candidate-form">

@@ -1760,6 +1760,11 @@ details.hot-cache[open] .hc-summary::before {
   gap: 8px;
   align-items: center;
 }
+.ms-actions {
+  display: inline-flex;
+  gap: 12px;
+  align-items: center;
+}
 .ms-items {
   display: flex;
   flex-direction: column;
@@ -3772,6 +3777,28 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-dim);
   font-size: 13px;
   margin: 10px 0 0;
+}
+/* Candidate member pages, collapsed by default — the count is in the card head already. */
+.cand-pages {
+  margin-top: 8px;
+}
+.cand-pages > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-faint);
+  list-style: none;
+}
+.cand-pages > summary::-webkit-details-marker {
+  display: none;
+}
+.cand-pages > summary::before {
+  content: '▸ ';
+}
+.cand-pages[open] > summary::before {
+  content: '▾ ';
+}
+.cand-pages[open] > summary {
+  margin-bottom: 6px;
 }
 .linkish {
   background: none;
