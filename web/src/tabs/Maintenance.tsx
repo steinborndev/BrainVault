@@ -302,6 +302,9 @@ function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }):
                   </span>
                   <span className="meta">
                     {e.inDomain} of {e.domainSize} pages in the domain · {e.tagCount} uses overall
+                    {/* A tag blanketing the unassigned bucket isn't redundancy — it's the
+                        domain those pages are waiting for. */}
+                    {e.domain === 'unassigned' ? ' · likely a missing domain' : ''}
                   </span>
                 </div>
               ))}

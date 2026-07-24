@@ -31,6 +31,29 @@ describe('computeTagReport', () => {
     expect(computeTagReport(nodes).variants).toEqual([])
   })
 
+  it('matches spelling twins with equal word counts ("fibre"/"fiber")', () => {
+    const nodes = [page(['carbon-fiber']), page(['carbon-fibre'])]
+    const r = computeTagReport(nodes)
+    expect(r.variants).toHaveLength(1)
+  })
+
+  it('never pairs a base tag with a compound or hierarchical tag (real false positives)', () => {
+    // The three false-positive families the whole-string stem rule produced on the live
+    // vault: base vs compound, adjective compound, and tag hierarchies.
+    const nodes = [
+      page(['person']),
+      page(['personal-finance']),
+      page(['organization']),
+      page(['organizational-structure']),
+      page(['regulator']),
+      page(['regulatory-affairs']),
+      page(['claude']),
+      page(['claude-ecosystem']),
+      page(['claude-code']),
+    ]
+    expect(computeTagReport(nodes).variants).toEqual([])
+  })
+
   it('finds implications and collapses mutual ones', () => {
     // #gmp appears on 5 pages, always alongside #quality (which has 3 more of its own):
     // gmp → quality, one-directional. #alpha/#beta always together: mutual.

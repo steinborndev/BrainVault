@@ -64,21 +64,55 @@ const ECHO_TAG_CONCENTRATION = 0.9
 /** Domains smaller than this can't meaningfully be "echoed". */
 const MIN_ECHO_DOMAIN_SIZE = 5
 
-/** Comparison form: case- and separator-insensitive ("carbon-fiber" ≡ "carbon_fiber"). */
-const norm = (t: string): string => t.toLowerCase().replace(/[-_\s]/g, '')
+/** Word split for the variant comparison: separators and case are never meaningful. */
+const words = (t: string): string[] => t.toLowerCase().split(/[-_\s]+/).filter(Boolean)
 
-/** True for pairs shaped like spelling variants or near-synonyms of one another. */
-function isVariantPair(a: string, b: string): boolean {
-  const na = norm(a)
-  const nb = norm(b)
-  if (na === nb) return true // pure separator/case variants
-  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na]
+/** Levenshtein distance, for short single words only (variant spellings like fiber/fibre). */
+function editDistance(a: string, b: string): number {
+  const dp = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0]!
+    dp[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const cur = dp[j]!
+      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
+      prev = cur
+    }
+  }
+  return dp[b.length]!
+}
+
+/** True when two single WORDS look like spellings of the same word. */
+function isWordVariant(x: string, y: string): boolean {
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x]
   if (`${short}s` === long || `${short}es` === long) return true // singular/plural
   let p = 0
   while (p < short.length && short[p] === long[p]) p++
   // Long shared stem: "biomedic(al|ine)", "chromatograph(y|ic)". The share bound keeps
   // short accidental prefixes ("sta-bility"/"sta-tistics") out.
-  return p >= Math.max(MIN_STEM, Math.ceil(STEM_SHARE * short.length))
+  if (p >= Math.max(MIN_STEM, Math.ceil(STEM_SHARE * short.length))) return true
+  // Spelling twins ("fiber"/"fibre"): tiny edit distance on a shared opening — too short
+  // for the stem rule but clearly the same word.
+  return short.length >= 5 && p >= 3 && editDistance(short, long) <= 2
+}
+
+/**
+ * True for tag pairs shaped like spellings of the SAME concept. Compared word by word with
+ * equal word counts required — that one rule kills three false-positive families the
+ * whole-string stem match produced on real data: base-vs-compound ("person" /
+ * "personal-finance", "organization" / "organizational-structure"), and tag hierarchies
+ * ("claude" / "claude-ecosystem") — those are different concepts or intentional structure,
+ * not spelling drift. Word-count-preserving pairs still match: "carbon-fiber" ≡
+ * "carbon_fibre", "method" / "methods", "biomedical" / "biomedicine".
+ */
+function isVariantPair(a: string, b: string): boolean {
+  const wa = words(a)
+  const wb = words(b)
+  if (wa.length !== wb.length) return false
+  for (let i = 0; i < wa.length; i++) {
+    if (wa[i] !== wb[i] && !isWordVariant(wa[i]!, wb[i]!)) return false
+  }
+  return true // every word equal or a variant (all-equal = pure separator/case variant)
 }
 
 export function computeTagReport(nodes: readonly TagNode[]): TagReport {
