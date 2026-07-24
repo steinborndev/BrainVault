@@ -2615,11 +2615,13 @@ details.hot-cache[open] .hc-summary::before {
 .clusterbar .cb-exit {
   margin-left: auto;
 }
-
-/* Spotlight while a cluster is isolated: present but paused — there is nothing left to
-   isolate until Esc brings the full graph back. */
-.ctl.suspended {
-  border-style: dashed;
+/* Drill-down breadcrumb: one crumb per isolated level, earlier levels clickable. */
+.clusterbar .cb-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.clusterbar .cb-arrow {
   color: var(--text-faint);
 }
 .seg {

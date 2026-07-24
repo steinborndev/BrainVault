@@ -381,7 +381,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // set a click would isolate (Vault.tsx handles the click). Community-less nodes (id -1)
     // fall back to the 1-hop neighborhood, and so do the persistent selection/focus
     // spotlights — those answer "what does THIS page link to", not "what belongs together".
-    const spotCid = spotHover !== null && clusters !== null ? clusters[spotHover] ?? -1 : -1
+    // A community spanning every visible real node subdivides nothing (an isolated cluster
+    // that Louvain can't split further) — treated as absent, mirroring the caller's
+    // proper-subset click guard, so the spotlight degrades to 1-hop instead of lighting
+    // everything up.
+    const rawSpotCid = spotHover !== null && clusters !== null ? clusters[spotHover] ?? -1 : -1
+    const realNodeCount = nodes.length - (ghostIndices?.size ?? 0)
+    const spotCid =
+      rawSpotCid >= 0 && (clusterSets?.get(rawSpotCid)?.size ?? 0) < realNodeCount ? rawSpotCid : -1
     const active = spotHover ?? selectedIndex ?? focusIndex
     const highlight =
       active !== null
@@ -1171,6 +1178,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  // Whether a click on the hovered node would isolate its community (instead of selecting) —
+  // drives the zoom-in cursor and the tooltip hint. Mirrors draw()'s spanning guard: a
+  // community covering every visible real node has nothing left to subdivide.
+  const hoverIsolatable =
+    hover !== null &&
+    spotlight &&
+    clusters !== null &&
+    (() => {
+      const cid = clusters[hover] ?? -1
+      if (cid < 0) return false
+      const set = clusterSets?.get(cid)
+      return set !== undefined && set.size < nodes.length - (ghostIndices?.size ?? 0)
+    })()
+
   return (
     <div className="graph-canvas-wrap">
       <canvas
@@ -1193,14 +1214,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         style={{
           // zoom-in signals that a click will isolate the hovered node's community rather
           // than open the explorer panel (spotlight on + the node belongs to one).
-          cursor:
-            hover !== null
-              ? spotlight && clusters !== null && (clusters[hover] ?? -1) >= 0
-                ? 'zoom-in'
-                : 'pointer'
-              : drag.current
-                ? 'grabbing'
-                : 'grab',
+          cursor: hover !== null ? (hoverIsolatable ? 'zoom-in' : 'pointer') : drag.current ? 'grabbing' : 'grab',
           touchAction: 'none',
         }}
       />
@@ -1238,7 +1252,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
                 {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
                 {nodes[hover]!.out} out
               </span>
-              {spotlight && clusters !== null && (clusters[hover] ?? -1) >= 0 ? (
+              {hoverIsolatable ? (
                 <span className="tt-hint">click to isolate this community · double-click to open</span>
               ) : (
                 onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>

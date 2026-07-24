@@ -136,11 +136,15 @@ const GAP_PATH_PREFIX = '#gap:'
 type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string } | null
 
 /**
- * An isolated community (spotlight click, SPEC §12.4): the graph shows only these pages until
- * Esc. Snapshot by PATH, not by subgraph index — indices churn on every filter change and SSE
- * live update (same reasoning as `Selection`). `anchor` is the clicked page, used to key the
- * camera re-fit; label/domain feed the clusterbar. A cluster is NOT a domain: one domain
- * typically splits into several Louvain communities, and this isolates exactly one of them.
+ * One level of isolated community (spotlight click, SPEC §12.4): the graph shows only these
+ * pages until Esc. Levels stack — Louvain re-runs on the isolated subgraph and usually finds
+ * sub-communities, so a spotlight click inside a focused cluster drills one level deeper;
+ * Esc pops one level. Each level is a snapshot by PATH, not by subgraph index — indices churn
+ * on every filter change and SSE live update (same reasoning as `Selection`) — and a proper
+ * SUBSET of the level above, so the keep-filter only ever needs the top of the stack.
+ * `anchor` is the clicked page, keying the camera re-fit; label/domain feed the clusterbar.
+ * A cluster is NOT a domain: one domain typically splits into several Louvain communities,
+ * and this isolates exactly one of them.
  */
 interface ClusterFocus {
   paths: ReadonlySet<string>
@@ -184,7 +188,7 @@ const viewMemory = {
   showGaps: false,
   showNetwork: false,
   spotlight: false,
-  clusterFocus: null as ClusterFocus | null,
+  clusterStack: [] as readonly ClusterFocus[],
   showSystem: ((): boolean => {
     try {
       return localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
@@ -282,9 +286,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // neighbors when it has none) and dims the rest; clicking isolates the community. Off by
   // default (easier to click). Lives in the viewbar overlays; passed down to the canvas.
   const [spotlight, setSpotlight] = useState(viewMemory.spotlight)
-  // The isolated community, entered by a spotlight click, left via Esc/the clusterbar.
-  // While set, the hover spotlight is suspended (there is nothing left to isolate).
-  const [clusterFocus, setClusterFocus] = useState<ClusterFocus | null>(viewMemory.clusterFocus)
+  // The stack of isolated communities: each spotlight click pushes one level (the clicked
+  // node's community, re-detected on the isolated subgraph), Esc pops one, the clusterbar
+  // jumps to any level. Empty = the full graph. The spotlight stays live inside a focus —
+  // it highlights the SUB-communities of the current level; when a level doesn't subdivide
+  // any further, the canvas falls back to the 1-hop neighborhood and clicks select normally
+  // (the drill-down ends exactly where there is nothing left to subdivide).
+  const [clusterStack, setClusterStack] = useState<readonly ClusterFocus[]>(viewMemory.clusterStack)
+  const clusterFocus = clusterStack.length > 0 ? clusterStack[clusterStack.length - 1]! : null
   /**
    * System pages (structural hubs + maintenance artifacts, node `kind` ≠ knowledge) are
    * hidden by default: the heavily-linked index/hot/log hubs are cross-domain bridges that
@@ -314,7 +323,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       showGaps,
       showNetwork,
       spotlight,
-      clusterFocus,
+      clusterStack,
       showSystem,
       selection,
       trail,
@@ -585,7 +594,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       e.preventDefault()
       if (query !== '') setQuery('')
       else if (selection !== null) closeExplorer()
-      else if (clusterFocus !== null) setClusterFocus(null) // spotlight resumes by itself
+      else if (clusterStack.length > 0) setClusterStack((prev) => prev.slice(0, -1)) // pop one level
       else if (showGaps) setShowGaps(false)
       else if (focusPath !== null) navigate('/vault')
       return
@@ -717,13 +726,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             <Icon name="network" /> Network
           </button>
           <button
-            className={`ctl${clusterFocus !== null ? ' suspended' : spotlight ? ' on' : ''}`}
+            className={`ctl${spotlight ? ' on' : ''}`}
             onClick={() => setSpotlight((v) => !v)}
-            title={
-              clusterFocus !== null
-                ? 'Spotlight is paused while a cluster is isolated — Esc returns to the full graph and resumes it.'
-                : 'Spotlight: hovering a node highlights its whole community and dims the rest; clicking isolates that community as its own view (Esc returns). Off by default.'
-            }
+            title="Spotlight: hovering a node highlights its whole community and dims the rest; clicking isolates that community as its own view — and keeps drilling into sub-communities as long as the isolated cluster subdivides further. Esc backs out one level. Off by default."
           >
             <Icon name="spotlight" /> Spotlight
           </button>
@@ -784,14 +789,37 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           {clusterFocus.domain !== null && (
             <span className="cb-dot" style={{ background: domainColor(clusterFocus.domain) }} aria-hidden />
           )}
-          <span>
-            Cluster: <strong>{clusterFocus.label !== '' ? clusterFocus.label : 'unlabeled community'}</strong>
-          </span>
+          <span>Cluster:</span>
+          {/* One crumb per drill-down level; clicking an earlier level pops back to it. */}
+          {clusterStack.map((cf, i) => {
+            const label = cf.label !== '' ? cf.label : 'unlabeled community'
+            const isTop = i === clusterStack.length - 1
+            return (
+              <span key={`${i}-${cf.anchor}`} className="cb-level">
+                {i > 0 && <span className="cb-arrow" aria-hidden>→</span>}
+                {isTop ? (
+                  <strong>{label}</strong>
+                ) : (
+                  <button
+                    className="linklike"
+                    onClick={() => setClusterStack((prev) => prev.slice(0, i + 1))}
+                    title={`Back to this level (${cf.paths.size} pages)`}
+                  >
+                    {label}
+                  </button>
+                )}
+              </span>
+            )
+          })}
           <span className="cb-meta">
             {clusterFocus.paths.size} pages
             {clusterFocus.domain !== null ? ` · ${clusterFocus.domain}` : ''}
           </span>
-          <button className="btn ghost cb-exit" onClick={() => setClusterFocus(null)} title="Back to the full graph (Esc)">
+          <button
+            className="btn ghost cb-exit"
+            onClick={() => setClusterStack([])}
+            title="Back to the full graph (Esc backs out one level at a time)"
+          >
             <Icon name="x" /> Full graph
           </button>
         </div>
@@ -834,34 +862,39 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           clusterDomains={clusterDomains}
           showHulls={showClusters}
           network={showNetwork}
-          // Derived, not toggled: inside a cluster focus the hover spotlight is suspended
-          // (nothing left to isolate) and resumes by itself when the focus is left.
-          spotlight={spotlight && clusterFocus === null}
+          spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
-          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterFocus?.anchor ?? ''}`}
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
           // With the spotlight on, a click on a clustered node isolates its whole community
-          // (the hover already previews exactly this set); it deliberately does NOT open the
-          // explorer panel — the click means "zoom in", not "inspect". Unclustered nodes and
-          // every click inside an existing focus keep today's select behavior.
+          // (the hover already previews exactly this set) — recursively: inside a focus the
+          // ids come from re-detection on the isolated subgraph, so the click drills into a
+          // sub-community. It deliberately does NOT open the explorer panel — the click means
+          // "zoom in", not "inspect". The proper-subset guard is where the recursion ends: a
+          // level that doesn't subdivide yields one community spanning everything visible,
+          // and isolating that would push a no-op level — such clicks select normally, as do
+          // unclustered nodes (the canvas's hover fallback mirrors both cases).
           onSelect={(n, i) => {
             if (n.path.startsWith(GAP_PATH_PREFIX)) {
               selectGap(n.title)
               return
             }
-            if (spotlight && clusterFocus === null && clusterIds !== null) {
+            if (spotlight && clusterIds !== null) {
               const cid = clusterIds[i] ?? -1
               if (cid >= 0) {
                 const paths = new Set<string>()
                 nodes.forEach((m, j) => {
                   if (clusterIds[j] === cid) paths.add(m.path)
                 })
-                setClusterFocus({
-                  paths,
-                  label: clusterLabels.get(cid) ?? '',
-                  domain: clusterDomains.get(cid) ?? null,
-                  anchor: n.path,
-                })
-                return
+                if (paths.size < realCount) {
+                  const level: ClusterFocus = {
+                    paths,
+                    label: clusterLabels.get(cid) ?? '',
+                    domain: clusterDomains.get(cid) ?? null,
+                    anchor: n.path,
+                  }
+                  setClusterStack((prev) => [...prev, level])
+                  return
+                }
               }
             }
             selectPage(n.path)
