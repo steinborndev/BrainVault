@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   deriveMaintenanceStatus,
+  buildRunPlan,
   LINT_STALE_DAYS,
   HOT_CACHE_STALE_DAYS,
   type MaintStatusInput,
@@ -112,5 +113,34 @@ describe('deriveMaintenanceStatus', () => {
     // Within "due", backfill (the chain's head) comes before the domain decisions.
     const dueIds = s.items.filter((i) => i.severity === 'due').map((i) => i.id)
     expect(dueIds).toEqual(['backfill', 'domains'])
+  })
+})
+
+describe('buildRunPlan', () => {
+  it('plans only what is due/recommended, in dependency order', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({ undomained: 5, candidateCount: 2, tagRepairCount: 3, lintReport: null, hotCacheUpdatedAt: null }),
+    )
+    const plan = buildRunPlan(s)
+    expect(plan.map((p) => p.id)).toEqual(['backfill', 'domains', 'backfill2', 'tags', 'lint', 'hot-cache'])
+    expect(plan.map((p) => p.kind)).toEqual(['auto', 'decision', 'auto', 'decision', 'auto', 'auto'])
+  })
+
+  it('a healthy vault yields an empty plan', () => {
+    expect(buildRunPlan(deriveMaintenanceStatus(healthy()))).toEqual([])
+  })
+
+  it('the follow-up backfill is planned exactly when domain decisions are', () => {
+    const withDomains = buildRunPlan(deriveMaintenanceStatus(healthy({ candidateCount: 1 })))
+    expect(withDomains.map((p) => p.id)).toEqual(['domains', 'backfill2'])
+    const withoutDomains = buildRunPlan(deriveMaintenanceStatus(healthy({ tagRepairCount: 1 })))
+    expect(withoutDomains.map((p) => p.id)).toEqual(['tags'])
+  })
+
+  it('never plans the index (self-refreshing) or a registry install (not runnable)', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({ registryInstalled: false, index: { scriptsPresent: true, provisioned: false } }),
+    )
+    expect(buildRunPlan(s)).toEqual([])
   })
 })

@@ -239,3 +239,73 @@ export function deriveMaintenanceStatus(input: MaintStatusInput): MaintStatus {
     healthy: items.filter((i) => i.severity === 'healthy').length,
   }
 }
+
+/* ── Guided run (SPEC §12.7 Stufe c) ─────────────────────────────────────────────────── */
+
+export type RunStepId = 'backfill' | 'domains' | 'backfill2' | 'tags' | 'lint' | 'hot-cache'
+
+export interface RunPlanStep {
+  readonly id: RunStepId
+  /** `auto` runs unattended and advances by itself; `decision` stops for the user. */
+  readonly kind: 'auto' | 'decision'
+  readonly title: string
+  readonly why: string
+}
+
+/**
+ * The guided run's plan: only what the status model says is actually due or worth doing,
+ * in dependency order (SPEC §12.7). `backfill2` is planned whenever domain decisions are —
+ * whether it RUNS depends on what the user decides (skipped when nothing was created).
+ * The retrieval index never appears: it refreshes itself after ingests.
+ */
+export function buildRunPlan(status: MaintStatus): RunPlanStep[] {
+  const sev = (id: MaintAreaId): MaintSeverity | undefined => status.items.find((i) => i.id === id)?.severity
+  const steps: RunPlanStep[] = []
+  if (sev('backfill') === 'due') {
+    steps.push({
+      id: 'backfill',
+      kind: 'auto',
+      title: 'Domain backfill',
+      why: 'Files every page without a domain field - the steps after this read the result.',
+    })
+  }
+  if (sev('domains') === 'due') {
+    steps.push({
+      id: 'domains',
+      kind: 'decision',
+      title: 'Domain decisions',
+      why: 'A read-only review prepares key, description and tags per candidate - accept, edit or skip each.',
+    })
+    steps.push({
+      id: 'backfill2',
+      kind: 'auto',
+      title: 'Backfill new domains',
+      why: 'A created domain owns no pages until its unassigned backlog is re-filed - queued automatically.',
+    })
+  }
+  if (sev('tags') === 'due') {
+    steps.push({
+      id: 'tags',
+      kind: 'decision',
+      title: 'Tag repairs',
+      why: 'Preselected repairs with a clear direction - uncheck what you disagree with, then apply.',
+    })
+  }
+  if (sev('lint') === 'recommended') {
+    steps.push({
+      id: 'lint',
+      kind: 'auto',
+      title: 'Lint + safe fixes',
+      why: 'Writes a fresh report, then fixes only the mechanical findings - judgement calls stay in the report.',
+    })
+  }
+  if (sev('hot-cache') === 'recommended') {
+    steps.push({
+      id: 'hot-cache',
+      kind: 'auto',
+      title: 'Hot cache',
+      why: 'Refreshes the compact context every agent run reads first.',
+    })
+  }
+  return steps
+}

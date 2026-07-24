@@ -47,9 +47,9 @@ import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { Tip } from '../components/Tip.tsx'
-import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
-import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
-import type { MaintStatusItem } from '../lib/maintenanceStatus.ts'
+import { useMaintenanceRun, type MaintenanceRunState } from '../hooks/useMaintenanceRun.ts'
+import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
+import { buildRunPlan, type MaintStatusItem, type RunPlanStep, type RunStepId } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
 import { pageRoute, navigate } from '../lib/router.ts'
@@ -69,11 +69,14 @@ export function Maintenance(): React.ReactElement {
   const totalPages = stats.data?.pages.total ?? 0
   const lastReport = stats.data?.lintReport ?? null
 
-  // The status head is the tab's primary surface (SPEC §12.7). Below it there are three
+  // The status head is the tab's primary surface (SPEC §12.7). Below it there are four
   // views: 'overview' (head only), one focused card (a status item was clicked — show
-  // exactly the tool that item is about), or 'all' (the Expert-tools toggle / setup mode,
-  // which force-opens everything because the credential entry lives in Settings).
+  // exactly the tool that item is about), 'all' (the Expert-tools toggle / setup mode,
+  // which force-opens everything because the credential entry lives in Settings), or the
+  // guided run (Stufe c) replacing everything while it walks the plan.
   const [view, setView] = useState<'overview' | 'all' | string>('overview')
+  const [runPlan, setRunPlan] = useState<RunPlanStep[] | null>(null)
+  const statusData = useMaintenanceStatus()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   const setupMode = health.data !== undefined && !health.data.credentialConfigured
   useEffect(() => {
@@ -81,12 +84,34 @@ export function Maintenance(): React.ReactElement {
   }, [setupMode])
   const showCard = (anchor: string): boolean => view === 'all' || view === anchor
 
+  if (view === 'run' && runPlan !== null) {
+    return (
+      <GuidedRun
+        plan={runPlan}
+        vaultName={vaultName}
+        onExit={() => {
+          setRunPlan(null)
+          setView('overview')
+        }}
+      />
+    )
+  }
+
   return (
     <>
       <StatusHead
+        data={statusData}
         allShown={view === 'all'}
+        setupMode={setupMode}
         onToggleTools={() => setView(view === 'all' ? 'overview' : 'all')}
         onJump={(anchor) => setView(anchor)}
+        onStartRun={() => {
+          const plan = statusData !== null ? buildRunPlan(statusData.status) : []
+          if (plan.length > 0) {
+            setRunPlan(plan)
+            setView('run')
+          }
+        }}
       />
       {view !== 'overview' && view !== 'all' && (
         <div className="focus-bar">
@@ -297,15 +322,20 @@ export function Maintenance(): React.ReactElement {
  * all-green tab reads as exactly that.
  */
 function StatusHead({
+  data,
   allShown,
+  setupMode,
   onToggleTools,
   onJump,
+  onStartRun,
 }: {
+  data: MaintenanceStatusData | null
   allShown: boolean
+  setupMode: boolean
   onToggleTools: () => void
   onJump: (anchor: string) => void
+  onStartRun: () => void
 }): React.ReactElement {
-  const data = useMaintenanceStatus()
   const [showHealthy, setShowHealthy] = useState(false)
 
   if (data === null) {
@@ -340,6 +370,20 @@ function StatusHead({
           <button className="btn" onClick={onToggleTools}>
             {allShown ? 'Hide expert tools' : 'Expert tools'}
           </button>
+          {!allHealthy && (
+            <button
+              className="btn primary"
+              disabled={setupMode}
+              onClick={onStartRun}
+              title={
+                setupMode
+                  ? 'Configure a credential first (Settings)'
+                  : 'Work through the open items in order - automatic steps run on their own, the run stops only where your judgement is needed'
+              }
+            >
+              Start maintenance run
+            </button>
+          )}
         </span>
       </div>
 
@@ -426,9 +470,12 @@ function StatusItem({
 function TagHygieneCard({
   nodes,
   vaultName,
+  onFixed,
 }: {
   nodes: readonly GraphNode[] | undefined
   vaultName: string
+  /** Guided run (SPEC §12.7 Stufe c): reports an applied fix (committed pages) to the wizard. */
+  onFixed?: (pages: readonly string[]) => void
 }): React.ReactElement | null {
   const qc = useQueryClient()
   const report = useMemo(() => (nodes !== undefined ? computeTagReport(nodes) : null), [nodes])
@@ -454,11 +501,18 @@ function TagHygieneCard({
   )
   // A finished fix changed frontmatter → the graph (and with it this report) is stale.
   const fixedOk = fix.result?.ok === true
+  const notifiedRef = useRef(false)
   useEffect(() => {
     if (fixedOk) {
       setSelected(new Set())
       void qc.invalidateQueries({ queryKey: ['graph'] })
+      if (!notifiedRef.current) {
+        notifiedRef.current = true
+        onFixed?.(fix.result?.pages ?? [])
+      }
     }
+    // fix.result is settled once per run; onFixed identity changes must not re-fire this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixedOk, qc])
   if (report === null) return null
   const actions = selectedActions(report, selected)
@@ -746,10 +800,19 @@ function DomainCandidates({
   vaultName,
   onStartBackfill,
   backfillRunning,
+  autoReview = false,
+  suppressBackfillPrompt = false,
+  onDomainCreated,
 }: {
   vaultName: string
   onStartBackfill: () => void
   backfillRunning: boolean
+  /** Guided run (SPEC §12.7 Stufe c): start the read-only review by itself when candidates exist. */
+  autoReview?: boolean
+  /** Guided run: the follow-up backfill is queued as a step — no inline prompt needed. */
+  suppressBackfillPrompt?: boolean
+  /** Guided run: lets the wizard track what was created (drives the follow-up backfill). */
+  onDomainCreated?: (key: string) => void
 }): React.ReactElement | null {
   const qc = useQueryClient()
   const candidates = useQuery({ queryKey: ['domain-candidates'], queryFn: api.domainCandidates })
@@ -758,6 +821,20 @@ function DomainCandidates({
   /** Key of the most recently created domain — drives the "run the backfill now" prompt. */
   const [created, setCreated] = useState<string | null>(null)
   const review = useMaintenanceRun(() => api.domainReview())
+
+  // The wizard's domain step runs the review as a fixed part of the flow (one run, all
+  // candidates) — its verdicts are what make every proposal complete. Once per mount.
+  const autoStarted = useRef(false)
+  const candidateCount = candidates.data?.candidates.length ?? 0
+  useEffect(() => {
+    if (!autoReview || autoStarted.current) return
+    if (candidateCount === 0) return
+    autoStarted.current = true
+    review.start()
+    // review is stable per mount (useMaintenanceRun returns fresh closures, but start is safe
+    // to call once); candidateCount gates until the list is loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReview, candidateCount])
 
   const refresh = (): void => {
     void qc.invalidateQueries({ queryKey: ['domain-candidates'] })
@@ -817,8 +894,9 @@ function DomainCandidates({
       )}
 
       {/* A created domain owns no pages until a backfill re-files its `unassigned` backlog
-          (SPEC §12.4 Stufe 3 "Selbstheilung") — prompt for it instead of leaving the gap silent. */}
-      {created !== null && (
+          (SPEC §12.4 Stufe 3 "Selbstheilung") — prompt for it instead of leaving the gap silent.
+          The guided run queues the backfill as its own step, so it suppresses this. */}
+      {created !== null && !suppressBackfillPrompt && (
         <div className="toast ok toast-action">
           <span>
             Domain <code>{created}</code> created. Its pages still say <code>unassigned</code> until a
@@ -852,7 +930,10 @@ function DomainCandidates({
               vaultName={vaultName}
               editing={editing === c.key}
               onEdit={() => setEditing(editing === c.key ? null : c.key)}
-              onCreated={setCreated}
+              onCreated={(key) => {
+                setCreated(key)
+                onDomainCreated?.(key)
+              }}
               onDone={() => {
                 setEditing(null)
                 refresh()
@@ -1072,6 +1153,267 @@ function RunResult({ result, vaultName, label }: { result: MaintenanceResult; va
     <div className="toast ok">
       {label}
       {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> — no changes.</>}
+    </div>
+  )
+}
+
+/* ── Guided run (SPEC §12.7 Stufe c) ─────────────────────────────────────────────────── */
+
+type StepOutcome = { state: 'done' | 'skipped' | 'failed'; note: string }
+
+/**
+ * The guided maintenance run: walks the plan `buildRunPlan` derived from the status model.
+ * Automatic steps start themselves, stream their live log and advance on settle; decision
+ * steps embed the SAME components the expert cards use (one implementation per decision
+ * surface) and wait for the user. Sequencing is client-driven over the existing endpoints —
+ * the server's run mutex serializes the actual vault writes, and every step stays its own
+ * revertable commit, so closing the tab mid-run loses only the wizard position, never work.
+ */
+function GuidedRun({
+  plan,
+  vaultName,
+  onExit,
+}: {
+  plan: RunPlanStep[]
+  vaultName: string
+  onExit: () => void
+}): React.ReactElement {
+  const qc = useQueryClient()
+  const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  const [idx, setIdx] = useState(0)
+  const [outcomes, setOutcomes] = useState<Record<string, StepOutcome>>({})
+  /** Domains created in the decision step — what makes the follow-up backfill run vs. skip. */
+  const [created, setCreated] = useState<string[]>([])
+
+  const backfill1 = useMaintenanceRun(() => api.domainBackfill())
+  const backfill2 = useMaintenanceRun(() => api.domainBackfill())
+  const lint = useMaintenanceRun(() => api.lint())
+  const lintFix = useMaintenanceRun(() => api.lintFix())
+  const hot = useMaintenanceRun(() => api.hotCache())
+  const autoRuns: Partial<Record<RunStepId, MaintenanceRunState>> = {
+    backfill: backfill1,
+    backfill2,
+    'hot-cache': hot,
+  }
+
+  const step: RunPlanStep | undefined = plan[idx]
+  const finished = idx >= plan.length
+
+  const finish = (id: RunStepId, state: StepOutcome['state'], note: string): void => {
+    setOutcomes((prev) => ({ ...prev, [id]: { state, note } }))
+    setIdx((i) => i + 1)
+  }
+
+  // Automatic steps start themselves on entry, exactly once. The follow-up backfill skips
+  // itself when the domain step created nothing — there is nothing to re-file then.
+  const startedRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (step === undefined || step.kind !== 'auto') return
+    if (startedRef.current.has(step.id)) return
+    startedRef.current.add(step.id)
+    if (step.id === 'backfill2' && created.length === 0) {
+      finish('backfill2', 'skipped', 'No domain created - nothing to re-file.')
+      return
+    }
+    if (step.id === 'lint') lint.start()
+    else autoRuns[step.id]?.start()
+    // start() closures are stable enough for a once-per-step fire; the ref is the guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, created])
+
+  // Plain automatic steps advance when their run settles ok (errors render Retry/Skip below).
+  useEffect(() => {
+    if (step === undefined || step.kind !== 'auto' || step.id === 'lint') return
+    const r = autoRuns[step.id]
+    if (r?.result?.ok === true) {
+      finish(step.id, 'done', r.result.pages.length > 0 ? `${r.result.pages.length} page(s) committed` : 'No changes needed.')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backfill1.result, backfill2.result, hot.result])
+
+  // The lint step chains its safe-fix run: report first (it BOUNDS the fix), then the fix.
+  const lintFixStarted = useRef(false)
+  useEffect(() => {
+    if (step?.id !== 'lint') return
+    if (lint.result?.ok === true && !lintFixStarted.current) {
+      lintFixStarted.current = true
+      lintFix.start()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lint.result, step])
+  useEffect(() => {
+    if (step?.id !== 'lint') return
+    if (lintFix.result?.ok === true) {
+      finish('lint', 'done', `Report written · ${lintFix.result.pages.length} page(s) auto-fixed.`)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lintFix.result, step])
+
+  const exit = (): void => {
+    void qc.invalidateQueries({ queryKey: ['graph'] })
+    void qc.invalidateQueries({ queryKey: ['domain-candidates'] })
+    void qc.invalidateQueries({ queryKey: ['stats'] })
+    onExit()
+  }
+
+  const stepError =
+    step?.kind === 'auto'
+      ? step.id === 'lint'
+        ? lint.error ?? lintFix.error
+        : autoRuns[step.id]?.error ?? null
+      : null
+  const retry = (): void => {
+    if (step === undefined) return
+    if (step.id === 'lint') {
+      if (lint.error !== null) lint.start()
+      else lintFix.start()
+    } else {
+      autoRuns[step.id]?.start()
+    }
+  }
+
+  return (
+    <div className="guided-run">
+      <div className="card card-pad maint-status">
+        <div className="section-head">
+          <h3 className="section-title">
+            Maintenance run
+            <Tip text="Works through the open items in dependency order. Automatic steps run on their own - the run stops only where your judgement is needed. Every step is one revertable git commit." />
+          </h3>
+          {!finished && (
+            <button className="btn ghost" onClick={exit} title="A step that is already running finishes on the server">
+              Cancel run
+            </button>
+          )}
+        </div>
+        <div className="wiz-steps">
+          {plan.map((s, i) => {
+            const o = outcomes[s.id]
+            const cls = o !== undefined ? o.state : i === idx ? 'active' : 'pending'
+            return (
+              <span key={s.id} className={`wiz-step ${cls}`}>
+                <span className="dot">{o === undefined ? i + 1 : o.state === 'done' ? '✓' : o.state === 'skipped' ? '–' : '!'}</span>
+                {s.title}
+                <span className={`sev ${s.kind === 'auto' ? 'mut' : 'rec'}`}>{s.kind === 'auto' ? 'auto' : 'you decide'}</span>
+              </span>
+            )
+          })}
+        </div>
+      </div>
+
+      {finished || step === undefined ? (
+        <div className="card card-pad">
+          <div className="toast ok">Maintenance run finished.</div>
+          <h3 className="section-title" style={{ marginBottom: 4 }}>
+            What happened
+          </h3>
+          <p className="tab-hint">Every step was its own git commit - revertable independently.</p>
+          <div className="wiz-summary">
+            {plan.map((s) => {
+              const o = outcomes[s.id]
+              return (
+                <div key={s.id} className="wiz-summary-row">
+                  <span className={`sev ${o?.state === 'done' ? 'ok' : o?.state === 'failed' ? 'due' : 'mut'}`}>
+                    {o?.state ?? 'skipped'}
+                  </span>
+                  <span className="ms-title">{s.title}</span>
+                  <span className="ms-why">{o?.note ?? ''}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="wiz-foot">
+            <span className="spacer" />
+            <button className="btn primary" onClick={exit}>
+              Back to overview
+            </button>
+          </div>
+        </div>
+      ) : step.kind === 'decision' ? (
+        <div className="card card-pad wiz-panel">
+          <div className="section-head">
+            <h3 className="section-title">{step.title}</h3>
+            <span className="sev rec">you decide</span>
+          </div>
+          <p className="tab-hint">{step.why}</p>
+          {step.id === 'domains' ? (
+            <DomainCandidates
+              vaultName={vaultName}
+              onStartBackfill={() => {}}
+              backfillRunning={false}
+              autoReview
+              suppressBackfillPrompt
+              onDomainCreated={(key) => setCreated((prev) => [...prev, key])}
+            />
+          ) : (
+            <TagHygieneCard
+              nodes={graph.data?.nodes}
+              vaultName={vaultName}
+              onFixed={(pages) => finish('tags', 'done', `${pages.length} page(s) committed.`)}
+            />
+          )}
+          <div className="wiz-foot">
+            <button
+              className="btn ghost"
+              onClick={() => finish(step.id, 'skipped', 'Skipped - comes back with the next check.')}
+            >
+              Skip step
+            </button>
+            <span className="spacer" />
+            {step.id === 'domains' && (
+              <button
+                className="btn primary"
+                onClick={() =>
+                  finish(
+                    'domains',
+                    'done',
+                    created.length > 0
+                      ? `${created.length} domain(s) created - backfill queued.`
+                      : 'Nothing created.',
+                  )
+                }
+              >
+                Continue
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="card card-pad wiz-panel">
+          <div className="section-head">
+            <h3 className="section-title">{step.title}</h3>
+            <span className="sev mut">automatic</span>
+          </div>
+          <p className="tab-hint">{step.why}</p>
+          {step.id === 'lint' ? (
+            <>
+              <JobLog jobId="maintenance:lint" seed={false} />
+              {lintFixStarted.current && <JobLog jobId="maintenance:lint-fix" seed={false} />}
+            </>
+          ) : (
+            <JobLog
+              jobId={`maintenance:${step.id === 'backfill' || step.id === 'backfill2' ? 'domain-backfill' : step.id}`}
+              seed={false}
+            />
+          )}
+          {stepError !== null ? (
+            <div className="wiz-foot">
+              <span className="toast err">{stepError}</span>
+              <span className="spacer" />
+              <button className="btn" onClick={retry}>
+                Retry
+              </button>
+              <button className="btn ghost" onClick={() => finish(step.id, 'failed', stepError)}>
+                Skip step
+              </button>
+            </div>
+          ) : (
+            <div className="wiz-foot">
+              <span className="autonote">Running - continues automatically…</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
