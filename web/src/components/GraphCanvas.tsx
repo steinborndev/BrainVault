@@ -61,6 +61,13 @@ export interface GraphCanvasProps {
   /** Cluster id → short label (its dominant shared tags), drawn at the hull centroid. */
   clusterLabels?: ReadonlyMap<number, string>
   /**
+   * Cluster id → its dominant `domain:` (the domain most of its pages carry), when the
+   * cluster has one. The hull is tinted in that domain's color instead of an arbitrary
+   * per-id hue, so a hull's color carries real meaning — and a domain-mixed community (a
+   * bridge node gluing two domains) no longer hides behind a neutral tint.
+   */
+  clusterDomains?: ReadonlyMap<number, string>
+  /**
    * Draw the tinted cluster hulls + region labels. Split from `clusters` because the network
    * lens needs the cluster ids to classify edges (intra vs bridge) WITHOUT drawing hulls — so
    * `clusters` may be present while hulls stay off.
@@ -110,10 +117,14 @@ const TYPE_VARS: Record<string, string> = {
  * work — and hashing keeps a domain's color stable across sessions with zero bookkeeping.
  * Exported so the filter chips can wear the same color as their nodes (the legend).
  */
-export function domainColor(domain: string): string {
+export function domainHue(domain: string): number {
   let h = 0
   for (let i = 0; i < domain.length; i++) h = (h * 31 + domain.charCodeAt(i)) >>> 0
-  return `hsl(${h % 360} 62% 52%)`
+  return h % 360
+}
+
+export function domainColor(domain: string): string {
+  return `hsl(${domainHue(domain)} 62% 52%)`
 }
 
 /** The available color lenses. `domain`/`type` are categorical; the rest re-encode a metric. */
@@ -201,7 +212,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, showHulls = false, network = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -387,7 +398,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         paddedHulls.set(cid, padded)
         ctx.beginPath()
         traceSmooth(ctx, padded)
-        const hue = clusterHue(cid)
+        // Tint by the cluster's dominant domain so the color means something; fall back to a
+        // per-id hue only for a community with no domain at all.
+        const dom = clusterDomains?.get(cid)
+        const hue = dom !== undefined ? domainHue(dom) : clusterHue(cid)
         ctx.fillStyle = `hsl(${hue} 60% 55% / 0.09)`
         ctx.strokeStyle = `hsl(${hue} 60% 60% / 0.4)`
         ctx.fill()
@@ -404,7 +418,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         labelInputs.push({ key: cid, width: ctx.measureText(label).width, weight: pts.length })
       }
       for (const p of placeRegionLabels(labelInputs, paddedHulls, 14 / t.k, 6 / t.k)) {
-        ctx.fillStyle = `hsl(${clusterHue(p.key)} 55% 62%)`
+        const dom = clusterDomains?.get(p.key)
+        const hue = dom !== undefined ? domainHue(dom) : clusterHue(p.key)
+        ctx.fillStyle = `hsl(${hue} 55% 62%)`
         ctx.fillText(clusterLabels!.get(p.key)!, p.x, p.y)
         regionLabelBoxes.push(p.box)
       }
@@ -613,7 +629,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, showHulls, network, neighbors, labelReps, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)

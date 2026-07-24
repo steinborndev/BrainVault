@@ -135,6 +135,20 @@ type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string }
 const MIN_CLUSTER = 4
 
 /**
+ * Weight of an edge whose two endpoints carry different `domain:` values, relative to a
+ * same-domain edge (1). Below 1 so a cross-domain link (typically a shared person/org entity
+ * bridging two fields) is a weak tie the modularity gain rarely rewards merging across — a
+ * lone bridge no longer drags a whole foreign domain into a community. Not 0: a genuinely
+ * dense cross-domain seam (two topics that really do interleave) can still merge if the links
+ * are many. Edges touching an uncategorized page (no `domain:`) keep full weight — we don't
+ * penalize what we can't classify.
+ */
+const CROSS_DOMAIN_WEIGHT = 0.25
+
+/** A cluster is "domain-mixed" when its dominant domain holds less than this share of members. */
+const DOMAIN_PURITY = 0.7
+
+/**
  * One Louvain level: greedily move each node into the neighbouring community that most
  * raises modularity, until no move helps. Deterministic — nodes are visited in index order
  * and equal gains break toward the lowest community id, so there is no run-to-run jitter.
@@ -189,21 +203,32 @@ function louvainLevel(
  * domain, and LP floods one label across those bridges — the biomedical hull swallowed
  * cooking, finance, … Modularity resists it: merging weakly-linked domains lowers the score,
  * so Louvain keeps them apart while still finding real sub-communities inside a domain.
+ *
+ * `weightOf(a, b)` is the weight of the edge; the topology is otherwise link-only. It lets the
+ * caller down-weight cross-`domain:` edges so a single bridge node (e.g. a person who authored
+ * papers in two unrelated fields) can no longer glue two domains into one community — the
+ * authoritative `domain:` metadata nudges the purely link-based detection without overriding it.
  */
-function louvainCommunities(n: number, edges: Array<[number, number]>): number[] {
+export function louvainCommunities(
+  n: number,
+  edges: Array<[number, number]>,
+  weightOf: (a: number, b: number) => number = () => 1,
+): number[] {
   let size = n
   let adj: Array<Map<number, number>> = Array.from({ length: n }, () => new Map())
   let self = new Array<number>(n).fill(0)
   let twoM = 0
   for (const [a, b] of edges) {
     if (a >= n || b >= n) continue
-    twoM += 2
+    const w = weightOf(a, b)
+    if (w <= 0) continue
+    twoM += 2 * w
     if (a === b) {
-      self[a]!++
+      self[a]! += w
       continue
     }
-    adj[a]!.set(b, (adj[a]!.get(b) ?? 0) + 1)
-    adj[b]!.set(a, (adj[b]!.get(a) ?? 0) + 1)
+    adj[a]!.set(b, (adj[a]!.get(b) ?? 0) + w)
+    adj[b]!.set(a, (adj[b]!.get(a) ?? 0) + w)
   }
   const mapping = Array.from({ length: n }, (_, i) => i)
   if (twoM === 0) return mapping
@@ -244,12 +269,19 @@ function louvainCommunities(n: number, edges: Array<[number, number]>): number[]
  * Returns a per-node id array (compacted, clusters < MIN_CLUSTER folded to -1) and each
  * cluster's label from its dominant shared tags.
  */
-function detectClusters(
+export function detectClusters(
   nodes: GraphNode[],
   edges: Array<[number, number]>,
   realCount: number,
-): { clusterIds: number[]; clusterLabels: Map<number, string> } {
-  const label = louvainCommunities(realCount, edges)
+): { clusterIds: number[]; clusterLabels: Map<number, string>; clusterDomains: Map<number, string> } {
+  // Down-weight edges that cross a domain boundary (both endpoints categorized, differently).
+  const domOf = (i: number): string | null => nodes[i]?.domain ?? null
+  const weightOf = (a: number, b: number): number => {
+    const da = domOf(a)
+    const db = domOf(b)
+    return da !== null && db !== null && da !== db ? CROSS_DOMAIN_WEIGHT : 1
+  }
+  const label = louvainCommunities(realCount, edges, weightOf)
 
   // Count members, keep only clusters ≥ MIN_CLUSTER, and compact the surviving ids to 0..k.
   const size = new Map<number, number>()
@@ -259,12 +291,14 @@ function detectClusters(
 
   const clusterIds = nodes.map((_, i) => (i < realCount ? remap.get(label[i]!) ?? -1 : -1))
 
-  // Label each cluster by its top shared tags (up to 2), falling back to the dominant domain.
+  // Tally shared tags and domains per surviving cluster.
   const tagCounts = new Map<number, Map<string, number>>()
   const domCounts = new Map<number, Map<string, number>>()
+  const clusterSize = new Map<number, number>()
   for (let i = 0; i < realCount; i++) {
     const cid = clusterIds[i]!
     if (cid < 0) continue
+    clusterSize.set(cid, (clusterSize.get(cid) ?? 0) + 1)
     const tc = tagCounts.get(cid) ?? tagCounts.set(cid, new Map()).get(cid)!
     for (const t of nodes[i]!.tags) tc.set(t, (tc.get(t) ?? 0) + 1)
     if (nodes[i]!.domain) {
@@ -272,14 +306,28 @@ function detectClusters(
       dc.set(nodes[i]!.domain!, (dc.get(nodes[i]!.domain!) ?? 0) + 1)
     }
   }
+  const topEntry = (m: Map<string, number> | undefined): [string, number] | undefined =>
+    m ? [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] : undefined
   const topN = (m: Map<string, number> | undefined, n: number): string[] =>
     m ? [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([k]) => k) : []
+
+  // Each cluster's dominant domain (for the hull tint) and its label. A domain-pure cluster
+  // keeps the tag label; a domain-MIXED one is labelled by its dominant domain instead — the
+  // honest name for a community a bridge node stitched across two domains.
+  const clusterDomains = new Map<number, string>()
   const clusterLabels = new Map<number, string>()
   for (const cid of remap.values()) {
+    const dom = topEntry(domCounts.get(cid))
+    if (dom !== undefined) clusterDomains.set(cid, dom[0])
+    const share = dom !== undefined ? dom[1] / (clusterSize.get(cid) ?? 1) : 0
+    const mixed = dom !== undefined && share < DOMAIN_PURITY
     const tags = topN(tagCounts.get(cid), 2)
-    clusterLabels.set(cid, tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : topN(domCounts.get(cid), 1)[0] ?? '')
+    clusterLabels.set(
+      cid,
+      mixed ? dom![0] : tags.length > 0 ? tags.map((t) => `#${t}`).join(' ') : dom?.[0] ?? '',
+    )
   }
-  return { clusterIds, clusterLabels }
+  return { clusterIds, clusterLabels, clusterDomains }
 }
 
 /** Missing `kind` (ghost nodes, old cached responses) counts as knowledge — never hide it. */
@@ -617,8 +665,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // cluster vs bridge and so needs the ids even when no hull is drawn. Ghost nodes are excluded
   // (id -1) — a missing page has no community. Small clusters (< MIN_CLUSTER) are dropped so the
   // canvas isn't peppered with singleton blobs. Each surviving cluster is labelled by its tags.
-  const { clusterIds, clusterLabels } = useMemo(() => {
-    if (!showClusters && !showNetwork) return { clusterIds: null as number[] | null, clusterLabels: new Map<number, string>() }
+  const { clusterIds, clusterLabels, clusterDomains } = useMemo(() => {
+    if (!showClusters && !showNetwork)
+      return { clusterIds: null as number[] | null, clusterLabels: new Map<number, string>(), clusterDomains: new Map<number, string>() }
     return detectClusters(nodes, edges, realCount)
   }, [showClusters, showNetwork, nodes, edges, realCount])
 
@@ -886,6 +935,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           lens={hasDomains ? lens : lens === 'domain' ? 'type' : lens}
           clusters={clusterIds}
           clusterLabels={clusterLabels}
+          clusterDomains={clusterDomains}
           showHulls={showClusters}
           network={showNetwork}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
