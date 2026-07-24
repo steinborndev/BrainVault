@@ -190,9 +190,12 @@ const VIEW_PREFS_KEY = 'vault.graphPrefs'
 const LENS_VALUES: ReadonlySet<string> = new Set(['domain', 'type', 'authority', 'orphans', 'stubs', 'recency'])
 
 interface ViewPrefs {
-  v: 1
+  // v2: the type filter flipped from hide-set (`hiddenTypes`) to solo-select (`selectedTypes`),
+  // mirroring the domain filter. The two carry OPPOSITE meaning, so a v1 payload must be
+  // discarded, not read as the new field — the version bump is what makes the loader do that.
+  v: 2
   lens: Lens
-  hiddenTypes: string[]
+  selectedTypes: string[]
   selectedDomains: string[]
   showClusters: boolean
   showGaps: boolean
@@ -212,14 +215,14 @@ export function loadViewPrefs(): LoadedPrefs {
     const raw = localStorage.getItem(VIEW_PREFS_KEY)
     if (raw === null) return { showSystem: localStorage.getItem(SHOW_SYSTEM_KEY) === '1' }
     const p: unknown = JSON.parse(raw)
-    if (p === null || typeof p !== 'object' || (p as { v?: unknown }).v !== 1) return {}
+    if (p === null || typeof p !== 'object' || (p as { v?: unknown }).v !== 2) return {}
     const o = p as Record<string, unknown>
     const strings = (x: unknown): string[] | undefined =>
       Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : undefined
     const bool = (x: unknown): boolean | undefined => (typeof x === 'boolean' ? x : undefined)
     return {
       lens: typeof o.lens === 'string' && LENS_VALUES.has(o.lens) ? (o.lens as Lens) : undefined,
-      hiddenTypes: strings(o.hiddenTypes),
+      selectedTypes: strings(o.selectedTypes),
       selectedDomains: strings(o.selectedDomains),
       showClusters: bool(o.showClusters),
       showGaps: bool(o.showGaps),
@@ -244,7 +247,7 @@ const savedPrefs = loadViewPrefs()
  */
 const viewMemory = {
   query: '',
-  hiddenTypes: new Set(savedPrefs.hiddenTypes ?? []) as ReadonlySet<string>,
+  selectedTypes: new Set(savedPrefs.selectedTypes ?? []) as ReadonlySet<string>,
   selectedDomains: new Set(savedPrefs.selectedDomains ?? []) as ReadonlySet<string>,
   lens: savedPrefs.lens ?? ('domain' as Lens),
   showClusters: savedPrefs.showClusters ?? false,
@@ -262,9 +265,9 @@ let lastSavedPrefs: string | null = null
 
 function saveViewPrefs(): void {
   const prefs: ViewPrefs = {
-    v: 1,
+    v: 2,
     lens: viewMemory.lens,
-    hiddenTypes: [...viewMemory.hiddenTypes].sort(),
+    selectedTypes: [...viewMemory.selectedTypes].sort(),
     selectedDomains: [...viewMemory.selectedDomains].sort(),
     showClusters: viewMemory.showClusters,
     showGaps: viewMemory.showGaps,
@@ -343,7 +346,13 @@ function computeGraphHealth(graph: VaultGraph): GraphHealth {
 
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   const [query, setQuery] = useState(viewMemory.query)
-  const [hiddenTypes, setHiddenTypes] = useState<ReadonlySet<string>>(viewMemory.hiddenTypes)
+  /**
+   * Type filter, SOLO-select like the domains (was a hide-set): clicking "concepts" means
+   * "show me concepts", so an empty set = every type visible and a non-empty set = only those
+   * types. Same inclusion semantics on both axes — a checked box now means "shown", not "not
+   * hidden" (the old double negative).
+   */
+  const [selectedTypes, setSelectedTypes] = useState<ReadonlySet<string>>(viewMemory.selectedTypes)
   /**
    * Domain chips are SOLO-selects, not hide-toggles: clicking "finance" means "show me
    * finance", so an empty set = everything visible and a non-empty set = only those
@@ -398,7 +407,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   useEffect(() => {
     Object.assign(viewMemory, {
       query,
-      hiddenTypes,
+      selectedTypes,
       selectedDomains,
       lens,
       showClusters,
@@ -469,7 +478,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     let keep: boolean[] = graph.nodes.map(
       (n) =>
         (showSystem || isKnowledge(n)) &&
-        !hiddenTypes.has(n.type) &&
+        (selectedTypes.size === 0 || selectedTypes.has(n.type)) &&
         (selectedDomains.size === 0 || selectedDomains.has(n.domain ?? NO_DOMAIN)) &&
         (clusterFocus === null || clusterFocus.paths.has(n.path)),
     )
@@ -576,7 +585,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     }
 
     return { nodes, edges, focusIndex: remap.get(focusIndexFull) ?? null, ghostIndices, realCount, realEdgeCount, matches }
-  }, [graph, hiddenTypes, selectedDomains, clusterFocus, showSystem, localDepth, focusIndexFull, showGaps, query])
+  }, [graph, selectedTypes, selectedDomains, clusterFocus, showSystem, localDepth, focusIndexFull, showGaps, query])
 
   // Subgraph index of the explorer selection, for the canvas ring + spotlight. Null when the
   // selected page/gap is currently filtered out of view (the panel still shows regardless).
@@ -626,11 +635,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return domains.filter(([d]) => d !== NO_DOMAIN && terms.every((t) => d.toLowerCase().includes(t)))
   }, [domains, query])
 
+  // Solo-select, mirroring toggleDomain: empty = all types; a click adds/removes a type, and
+  // deselecting the last one falls back to "all".
   const toggleType = (t: string): void => {
-    const next = new Set(hiddenTypes)
+    const next = new Set(selectedTypes)
     if (next.has(t)) next.delete(t)
     else next.add(t)
-    setHiddenTypes(next)
+    setSelectedTypes(next)
   }
 
   // Persisted with the rest of the view prefs by the snapshot effect — no standalone key.
@@ -657,7 +668,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    */
   const resetView = (): void => {
     setQuery('')
-    setHiddenTypes(new Set())
+    setSelectedTypes(new Set())
     setSelectedDomains(new Set())
     setLens('domain')
     setShowClusters(false)
@@ -791,7 +802,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       <div className="viewbar">
         <span className="vb-eyebrow">View</span>
         <LensDropdown lens={lens} onSelect={setLens} hasDomains={hasDomains} />
-        <TypesDropdown types={types} hidden={hiddenTypes} onToggle={toggleType} />
+        <TypesDropdown types={types} selected={selectedTypes} onToggle={toggleType} onClear={() => setSelectedTypes(new Set())} />
         <button
           className={`ctl${showSystem ? ' on' : ''}`}
           onClick={toggleSystem}
@@ -971,7 +982,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           network={showNetwork}
           spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
-          fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...selectedTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
           onSelect={(n) =>
             n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
           }
@@ -1555,12 +1566,15 @@ function DomainBand({
 
 function TypesDropdown({
   types,
-  hidden,
+  selected,
   onToggle,
+  onClear,
 }: {
   types: Array<[string, number]>
-  hidden: ReadonlySet<string>
+  /** Solo-select set (same semantics as the domain filter): empty = every type shown. */
+  selected: ReadonlySet<string>
   onToggle: (t: string) => void
+  onClear: () => void
 }): React.ReactElement {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -1574,22 +1588,32 @@ function TypesDropdown({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
+  const all = selected.size === 0
   return (
     <div className="dropdown" ref={ref}>
       <button
-        className={`ctl${hidden.size > 0 ? ' on' : ''}`}
+        className={`ctl${all ? '' : ' on'}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="true"
       >
-        Types:{' '}
-        <span className="ctl-val">{hidden.size === 0 ? 'all' : `${types.length - hidden.size} of ${types.length}`}</span> ▾
+        Types: <span className="ctl-val">{all ? 'all' : `${selected.size} of ${types.length}`}</span> ▾
       </button>
       {open && (
         <div className="dropdown-menu" role="menu">
+          {/* "All types" is the empty selection — the reset, mirroring the domain band's Clear.
+              Checked when nothing is soloed, so the menu always shows one active state. */}
+          <label className="dropdown-item">
+            <input type="checkbox" checked={all} onChange={onClear} />
+            <em>All types</em>
+          </label>
+          <div className="dropdown-sep" role="separator" />
           {types.map(([t, count]) => (
+            // Checked = this type is soloed (in the active filter), like a highlighted domain
+            // chip. With nothing soloed no box is checked and "All types" carries the state —
+            // a click then means "show me only this type", not "uncheck one of all".
             <label key={t} className="dropdown-item">
-              <input type="checkbox" checked={!hidden.has(t)} onChange={() => onToggle(t)} />
+              <input type="checkbox" checked={selected.has(t)} onChange={() => onToggle(t)} />
               {TYPE_LABELS[t] ?? t}
               <span className="count">{count}</span>
             </label>

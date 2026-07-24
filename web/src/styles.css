@@ -2514,6 +2514,15 @@ details.hot-cache[open] .hc-summary::before {
 .dropdown-item input {
   accent-color: var(--accent);
 }
+.dropdown-item em {
+  font-style: normal;
+  color: var(--text-dim);
+}
+.dropdown-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
 .graph-search {
   position: relative;
   display: flex;

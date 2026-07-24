@@ -30,9 +30,9 @@ describe('loadViewPrefs', () => {
     store.set(
       'vault.graphPrefs',
       JSON.stringify({
-        v: 1,
+        v: 2,
         lens: 'authority',
-        hiddenTypes: ['sources'],
+        selectedTypes: ['concepts'],
         selectedDomains: ['alpha', 'beta'],
         showClusters: true,
         showGaps: false,
@@ -43,7 +43,7 @@ describe('loadViewPrefs', () => {
     )
     expect(loadViewPrefs()).toEqual({
       lens: 'authority',
-      hiddenTypes: ['sources'],
+      selectedTypes: ['concepts'],
       selectedDomains: ['alpha', 'beta'],
       showClusters: true,
       showGaps: false,
@@ -54,7 +54,11 @@ describe('loadViewPrefs', () => {
   })
 
   it('rejects a payload with the wrong version wholesale', () => {
-    store.set('vault.graphPrefs', JSON.stringify({ v: 2, lens: 'type' }))
+    // A v1 payload's `hiddenTypes` carries the OPPOSITE meaning of v2's `selectedTypes`, so
+    // it must be discarded outright rather than half-read.
+    store.set('vault.graphPrefs', JSON.stringify({ v: 1, lens: 'type', hiddenTypes: ['sources'] }))
+    expect(loadViewPrefs()).toEqual({})
+    store.set('vault.graphPrefs', JSON.stringify({ v: 3, lens: 'type' }))
     expect(loadViewPrefs()).toEqual({})
   })
 
@@ -69,9 +73,9 @@ describe('loadViewPrefs', () => {
     store.set(
       'vault.graphPrefs',
       JSON.stringify({
-        v: 1,
+        v: 2,
         lens: 'bogus',
-        hiddenTypes: [1, 'sources', null],
+        selectedTypes: [1, 'concepts', null],
         selectedDomains: 'not-an-array',
         showClusters: 'yes',
         spotlight: true,
@@ -79,7 +83,7 @@ describe('loadViewPrefs', () => {
     )
     const p = loadViewPrefs()
     expect(p.lens).toBeUndefined()
-    expect(p.hiddenTypes).toEqual(['sources'])
+    expect(p.selectedTypes).toEqual(['concepts'])
     expect(p.selectedDomains).toBeUndefined()
     expect(p.showClusters).toBeUndefined()
     expect(p.spotlight).toBe(true)
