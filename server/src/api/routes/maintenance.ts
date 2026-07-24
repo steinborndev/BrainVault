@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
+import type { MaintenanceStateStore } from '../../db/maintenance-state.js'
 import {
   DomainRegistryMissingError,
   LintReportMissingError,
@@ -32,6 +33,7 @@ export function registerMaintenanceRoute(
   ctx: AppContext,
   graph?: GraphBuilder,
   dismissals?: DismissalStore,
+  state?: MaintenanceStateStore,
 ): void {
   const { maintenance } = ctx
 
@@ -268,5 +270,12 @@ export function registerMaintenanceRoute(
   // Recent runs, newest first — lets the UI restore state after a reload.
   app.get('/api/v1/maintenance/runs', async (_req, reply) => {
     return reply.send({ runs: maintenance.listRuns() })
+  })
+
+  // Per-kind last-settle state (SPEC.md §12.7 Stufe b) — restart-proof "zuletzt erledigt"
+  // for the status head. Areas whose outcome lives in the vault (lint report, hot.md mtime,
+  // index artifacts) additionally keep their vault facts; this fills the gaps and failures.
+  app.get('/api/v1/maintenance/state', async (_req, reply) => {
+    return reply.send({ areas: state?.list() ?? [] })
   })
 }

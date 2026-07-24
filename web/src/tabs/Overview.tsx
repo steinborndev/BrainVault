@@ -17,6 +17,8 @@ import { Tip } from '../components/Tip.tsx'
 import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
+import { navigate } from '../lib/router.ts'
 
 const DIR_LABELS: Record<string, string> = {
   concepts: 'Concepts',
@@ -112,6 +114,32 @@ export function Overview({ onGoto }: { onGoto: () => void }): React.ReactElement
 
       {data.hotCache && <HotCache stats={data} />}
     </div>
+  )
+}
+
+/**
+ * The maintenance badge (SPEC §12.7 Stufe b): "N due" in the status strip, linking into the
+ * tab. Shares every query with the Maintenance tab (TanStack dedup), so it costs no extra
+ * fetches. Quiet by design — it renders nothing while loading and nothing when all areas
+ * are healthy; the strip is for states that want attention.
+ */
+function MaintenanceSpill(): React.ReactElement | null {
+  const data = useMaintenanceStatus()
+  if (data === null) return null
+  const { due, recommended } = data.status
+  if (due === 0 && recommended === 0) return null
+  return (
+    <button
+      className={`spill spill-link${due > 0 ? ' warn' : ''}`}
+      onClick={() => navigate('/maintenance')}
+      title="Open the Maintenance tab"
+    >
+      <span className={`d ${due > 0 ? 'warn' : 'dim'}`} />
+      Maintenance{' '}
+      <strong>
+        {due > 0 ? `${due} due` : `${recommended} recommended`}
+      </strong>
+    </button>
   )
 }
 
@@ -235,6 +263,7 @@ function StatusStrip({ stats }: { stats: Stats }): React.ReactElement {
           Last commit <strong>{timeAgo(last.date)}</strong>
         </span>
       )}
+      <MaintenanceSpill />
       <span className="spill">
         <span className="d dim" />
         Vault <strong>{stats.vaultName}</strong>

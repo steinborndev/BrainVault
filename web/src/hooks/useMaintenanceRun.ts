@@ -47,8 +47,12 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
 
   const settled = poll.data !== undefined && poll.data.status !== 'running'
   useEffect(() => {
-    // A settled run may have committed pages / refreshed the hot cache — refresh stats.
-    if (settled) qc.invalidateQueries({ queryKey: ['stats'] })
+    // A settled run may have committed pages / refreshed the hot cache — refresh stats, and
+    // the per-kind settle state that feeds the status head (SPEC §12.7 Stufe b).
+    if (settled) {
+      qc.invalidateQueries({ queryKey: ['stats'] })
+      qc.invalidateQueries({ queryKey: ['maintenance-state'] })
+    }
   }, [settled, qc])
 
   const running =

@@ -259,6 +259,29 @@ ALTER TABLE jobs ADD COLUMN commit_hash TEXT;
 ALTER TABLE jobs ADD COLUMN reverted_at TEXT;
 `
 
+/**
+ * v10 — per-area maintenance state (SPEC.md §12.7 Stufe b). The runner's run history is a
+ * bounded in-memory map that dies with the process, so "when did the last backfill/tag-fix
+ * run, and did it work" was gone after every restart — exactly the facts the "what's due"
+ * status layer needs. One row per (user, kind), upserted when a run settles.
+ *
+ * Operational state only (hard rule 1): losing it costs nothing but a "never ran" display
+ * until the next run; runs whose outcome lives in the vault (lint report file, hot.md
+ * mtime, index artifacts) keep those vault facts as the primary source.
+ */
+const V10 = `
+CREATE TABLE maintenance_state (
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  kind        TEXT NOT NULL,
+  run_id      TEXT NOT NULL,
+  ok          INTEGER NOT NULL,
+  pages       INTEGER NOT NULL DEFAULT 0,
+  error       TEXT,
+  finished_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, kind)
+);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -269,4 +292,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, up: V7 },
   { version: 8, up: V8 },
   { version: 9, up: V9 },
+  { version: 10, up: V10 },
 ]

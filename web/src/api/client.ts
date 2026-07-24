@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  MaintenanceStateResponse,
   RevertResponse,
   RetrieveIndexStatus,
   RepairTask,
@@ -225,6 +226,10 @@ export const api = {
 
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  /** Per-kind last-settle state (SPEC §12.7 Stufe b) — feeds the status head's "last run" facts. */
+  maintenanceState: (): Promise<MaintenanceStateResponse> =>
+    fetch(`${BASE}/maintenance/state`).then(json<MaintenanceStateResponse>),
 
   /** Hybrid-retrieval index status (SPEC §12.6): provisioned?, chunk count, index age. */
   retrieveIndexStatus: (): Promise<RetrieveIndexStatus> =>

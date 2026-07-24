@@ -510,6 +510,14 @@ button {
 .spill .d.ok { background: var(--ok); }
 .spill .d.warn { background: var(--warn); }
 .spill .d.dim { background: var(--muted); }
+/* A spill that navigates (the maintenance badge) — same look, button semantics. */
+button.spill-link {
+  font-family: inherit;
+  cursor: pointer;
+}
+button.spill-link:hover {
+  border-color: var(--accent);
+}
 
 /* ---- Pages-by-type bars ---- */
 .tbars {
@@ -1726,6 +1734,94 @@ details.hot-cache[open] .hc-summary::before {
   flex-wrap: wrap;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+/* ── "What's due" status head (Maintenance, SPEC §12.7 Stufe b) ── */
+.maint-status {
+  margin-bottom: 16px;
+}
+/* Tab-wide severity chips: due (amber) / soon (accent) / healthy (green). */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.sev.due { color: var(--warn); background: var(--warn-bg); }
+.sev.rec { color: var(--accent); background: var(--accent-soft); }
+.sev.ok { color: var(--ok); background: var(--ok-bg); }
+.ms-counts {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.ms-items {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+}
+.ms-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.ms-item:last-child {
+  border-bottom: none;
+}
+.ms-item:hover .ms-title {
+  color: var(--accent);
+}
+.ms-item .sev {
+  margin-top: 1px;
+}
+.ms-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ms-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.ms-why {
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.ms-last {
+  color: var(--text-faint);
+}
+.ms-cost {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  padding-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.ms-healthy-toggle {
+  margin-top: 10px;
+  font-size: 12px;
+}
+.ms-items-healthy .ms-item {
+  opacity: 0.75;
+}
+@media (max-width: 640px) {
+  .ms-cost { display: none; }
 }
 
 /* ── Tag-hygiene report (Maintenance) ── */

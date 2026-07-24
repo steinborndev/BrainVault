@@ -22,12 +22,9 @@ import type {
   DomainReviewEntry,
   CandidatesResponse,
 } from '../api/types.ts'
-import { computeTagReport, conflictingTag, recommendedKeys, type TagReport } from '../lib/tagReport.ts'
+import { computeTagReport, conflictingTag, recommendedKeys, MAX_TAG_ACTIONS, type TagReport } from '../lib/tagReport.ts'
 import { draftDomainDescription } from '../lib/domainDraft.ts'
 import type { TagFixAction } from '../api/types.ts'
-
-/** The tag-fix route's hard cap on actions per run — mirrored so the button says what runs. */
-const MAX_TAG_ACTIONS = 20
 
 /** Merge direction for a variant pair: fold the less common spelling into the more common one. */
 const mergeDir = (v: { a: string; b: string; aCount: number; bCount: number }): [string, string] =>
@@ -51,6 +48,8 @@ import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
+import type { MaintStatusItem } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
 import { pageRoute, navigate } from '../lib/router.ts'
@@ -71,10 +70,12 @@ export function Maintenance(): React.ReactElement {
   const lastReport = stats.data?.lintReport ?? null
 
   return (
-    <div className="maint">
+    <>
+      <StatusHead />
+      <div className="maint">
       <div className="mcol">
         {/* Lint */}
-        <div className="card card-pad">
+        <div className="card card-pad" id="card-lint">
           <div className="section-head">
             <h3 className="section-title">
               Lint — wiki health
@@ -132,7 +133,7 @@ export function Maintenance(): React.ReactElement {
         </div>
 
         {/* Hot cache */}
-        <div className="card card-pad">
+        <div className="card card-pad" id="card-hot-cache">
           <div className="section-head">
             <h3 className="section-title">
               Hot cache
@@ -168,7 +169,7 @@ export function Maintenance(): React.ReactElement {
         <RetrievalIndexCard />
 
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
-        <div className="card card-pad">
+        <div className="card card-pad" id="card-domains">
           <div className="section-head">
             <h3 className="section-title">
               Domains
@@ -247,7 +248,98 @@ export function Maintenance(): React.ReactElement {
           <SettingsEditor />
         </div>
       </div>
+      </div>
+    </>
+  )
+}
+
+/**
+ * The "what's due" head (SPEC §12.7 Stufe b): the deterministic status model rendered as a
+ * prioritized list — severity chip, WHAT, WHY NOW, COST — above the expert cards. Items jump
+ * to their card; healthy areas collapse into one line so an all-green tab reads as exactly
+ * that. Renders nothing while the inputs still load (no flickering severities).
+ */
+function StatusHead(): React.ReactElement | null {
+  const data = useMaintenanceStatus()
+  const [showHealthy, setShowHealthy] = useState(false)
+  if (data === null) return null
+  const { status, lastRuns } = data
+  const open = status.items.filter((i) => i.severity !== 'healthy')
+  const healthy = status.items.filter((i) => i.severity === 'healthy')
+  const allHealthy = open.length === 0
+
+  return (
+    <div className="card card-pad maint-status">
+      <div className="section-head">
+        <h3 className="section-title">
+          What&apos;s due
+          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'recommended' is worth doing soon; everything else is explicitly healthy." />
+        </h3>
+        <span className="ms-counts">
+          {status.due > 0 && <span className="sev due">{status.due} due</span>}
+          {status.recommended > 0 && <span className="sev rec">{status.recommended} recommended</span>}
+          <span className="sev ok">{status.healthy} healthy</span>
+        </span>
+      </div>
+
+      {allHealthy ? (
+        <div className="empty">
+          <Icon name="check" /> Everything healthy - nothing is due right now.
+        </div>
+      ) : (
+        <div className="ms-items">
+          {open.map((item) => (
+            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} />
+          ))}
+        </div>
+      )}
+
+      {!allHealthy && healthy.length > 0 && (
+        <button className="linklike ms-healthy-toggle" onClick={() => setShowHealthy((v) => !v)}>
+          {showHealthy ? 'hide' : 'show'} {healthy.length} healthy area{healthy.length === 1 ? '' : 's'}
+        </button>
+      )}
+      {showHealthy && !allHealthy && (
+        <div className="ms-items ms-items-healthy">
+          {healthy.map((item) => (
+            <StatusItem key={item.id} item={item} lastRun={lastRunLabel(item, lastRuns)} />
+          ))}
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Restart-proof "last run" line for areas whose outcome no vault file captures. */
+function lastRunLabel(
+  item: MaintStatusItem,
+  lastRuns: ReadonlyMap<string, { ok: boolean; finishedAt: string }>,
+): string | null {
+  const kind = item.id === 'backfill' ? 'domain-backfill' : item.id === 'tags' ? 'tag-fix' : null
+  if (kind === null) return null
+  const last = lastRuns.get(kind)
+  if (last === undefined) return null
+  return `last run ${timeAgo(last.finishedAt)}${last.ok ? '' : ' (failed)'}`
+}
+
+function StatusItem({ item, lastRun }: { item: MaintStatusItem; lastRun: string | null }): React.ReactElement {
+  const jump = (): void => {
+    document.getElementById(item.anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  return (
+    <button className="ms-item" onClick={jump} title="Jump to the card">
+      <span className={`sev ${item.severity === 'due' ? 'due' : item.severity === 'recommended' ? 'rec' : 'ok'}`}>
+        {item.severity === 'recommended' ? 'soon' : item.severity}
+      </span>
+      <span className="ms-main">
+        <span className="ms-title">{item.title}</span>
+        <span className="ms-why">
+          {item.why}
+          {lastRun !== null && <span className="ms-last"> · {lastRun}</span>}
+        </span>
+      </span>
+      <span className="ms-cost">{item.cost}</span>
+    </button>
   )
 }
 
@@ -318,7 +410,7 @@ function TagHygieneCard({
   const findingCount = report.variants.length + report.implications.length + report.domainEchoes.length
   const CAP = 8 // evidence, not an endless list — the counts carry the "how bad is it"
   return (
-    <div className="card card-pad">
+    <div className="card card-pad" id="card-tags">
       <div className="section-head">
         <h3 className="section-title">
           Tags — hygiene
@@ -524,7 +616,7 @@ function RetrievalIndexCard(): React.ReactElement {
   const missing = s !== undefined && !s.scriptsPresent
 
   return (
-    <div className="card card-pad">
+    <div className="card card-pad" id="card-index">
       <div className="section-head">
         <h3 className="section-title">
           Retrieval index

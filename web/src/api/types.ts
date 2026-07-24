@@ -337,6 +337,23 @@ export type TagFixAction =
   | { kind: 'merge'; from: string; to: string }
 
 /** Retrieval-index status (GET /maintenance/retrieve-index, SPEC §12.6). */
+/**
+ * Per-kind last-settle record (GET /maintenance/state, SPEC §12.7 Stufe b) — restart-proof
+ * "last run" facts for areas whose outcome no vault file captures (tag-fix, backfill, …).
+ */
+export interface MaintenanceAreaState {
+  kind: string
+  runId: string
+  ok: boolean
+  pages: number
+  error: string | null
+  finishedAt: string
+}
+
+export interface MaintenanceStateResponse {
+  areas: MaintenanceAreaState[]
+}
+
 export interface RetrieveIndexStatus {
   /** The vault ships the wiki-retrieve scripts at all (a v1.7+ claude-obsidian clone). */
   scriptsPresent: boolean

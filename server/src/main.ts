@@ -11,6 +11,7 @@ import { JobStore } from './db/jobs.js'
 import { ChatStore } from './db/chat.js'
 import { SettingsStore } from './db/settings.js'
 import { DomainDismissalStore } from './db/domain-dismissals.js'
+import { SqliteMaintenanceStateStore } from './db/maintenance-state.js'
 import { TelegramDropStore } from './db/telegram-drops.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
@@ -94,6 +95,10 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Dropped-sender counters (SPEC.md §9): written by the bot, read by the settings route.
   const telegramDrops = new TelegramDropStore(db)
 
+  // Restart-proof per-kind settle state (SPEC.md §12.7 Stufe b): written by the runner,
+  // read by the status endpoint the dashboard's "what's due" head polls.
+  const maintenanceState = new SqliteMaintenanceStateStore(db)
+
   const maintenance = new MaintenanceRunner({
     vaultRoot: config.vaultRoot,
     auth: config.auth,
@@ -101,6 +106,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     commitMutex,
     runRegistry,
     validate,
+    stateStore: maintenanceState,
   })
 
   // The start-time-bound settings folded into the config the watcher and HTTP server see. The
@@ -149,6 +155,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     autoCommit: () => settings.effective(config).gitAutoCommit,
     // Persistent, so a rejected domain candidate stays rejected across restarts.
     domainDismissals: new DomainDismissalStore(db),
+    maintenanceState,
     telegramDrops,
     graph,
   })

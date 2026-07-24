@@ -11,6 +11,9 @@
 
 import type { GraphNode, TagFixAction } from '../api/types.ts'
 
+/** The tag-fix route's hard cap on actions per run — mirrored so UI and status agree. */
+export const MAX_TAG_ACTIONS = 20
+
 /** The slice of a graph node the analysis reads (kind gates system pages out). */
 export type TagNode = Pick<GraphNode, 'tags' | 'domain' | 'kind'>
 

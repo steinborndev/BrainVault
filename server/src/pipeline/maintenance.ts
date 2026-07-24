@@ -35,6 +35,7 @@ import { getResearchProfile, renderProfileBlock } from './research-profiles.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
+import type { MaintenanceStateStore } from '../db/maintenance-state.js'
 import { Mutex } from '../util/mutex.js'
 
 /**
@@ -114,6 +115,12 @@ export interface MaintenanceRunnerOptions {
   readonly validate?: Validator
   /** Injectable retrieval-index builder (tests supply a fake — no real python). */
   readonly buildIndex?: RetrieveIndexBuilder
+  /**
+   * Persistent per-kind settle record (SPEC.md §12.7 Stufe b) — what makes "when did the
+   * last backfill run, and did it work" survive a restart. Optional: without it the runner
+   * behaves exactly as before (in-memory run history only).
+   */
+  readonly stateStore?: MaintenanceStateStore
 }
 
 export interface MaintenanceResult {
@@ -176,6 +183,7 @@ export class MaintenanceRunner {
   private readonly runRegistry: RunRegistry
   private readonly validate: Validator | undefined
   private readonly buildIndex: RetrieveIndexBuilder
+  private readonly stateStore: MaintenanceStateStore | undefined
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
   /**
@@ -204,6 +212,7 @@ export class MaintenanceRunner {
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
     this.validate = opts.validate
     this.buildIndex = opts.buildIndex ?? buildRetrieveIndex
+    this.stateStore = opts.stateStore
   }
 
   /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
@@ -677,6 +686,22 @@ export class MaintenanceRunner {
     if (!prev) return
     const settled: MaintenanceRun = { ...prev, status, finishedAt: new Date().toISOString(), ...patch }
     this.runs.set(id, settled)
+    // Persist the per-kind outcome (SPEC.md §12.7 Stufe b). A store failure must never
+    // corrupt the settle itself — the in-memory record above stays the runtime truth.
+    if (this.stateStore !== undefined) {
+      try {
+        this.stateStore.record({
+          kind: prev.kind,
+          runId: id,
+          ok: status === 'done',
+          pages: patch.result?.pages.length ?? 0,
+          error: patch.error ?? null,
+          finishedAt: settled.finishedAt ?? new Date().toISOString(),
+        })
+      } catch {
+        /* swallowed — operational bookkeeping only */
+      }
+    }
     const cb = this.settledCallbacks.get(id)
     if (cb !== undefined) {
       this.settledCallbacks.delete(id)
