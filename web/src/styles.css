@@ -2268,6 +2268,10 @@ details.hot-cache[open] .hc-summary::before {
   gap: 7px;
   padding: 6px 11px;
   font-size: 12.5px;
+  /* Match .ctl's line box exactly (it inherits the body 1.5). A <button> otherwise falls back
+     to the UA `line-height: normal`, which makes the segments — and so the whole box — a hair
+     taller than the neighbouring .ctl buttons. */
+  line-height: 1.5;
   font-weight: 500;
   color: var(--text-dim);
   background: var(--bg-elev-2);
@@ -2279,12 +2283,15 @@ details.hot-cache[open] .hc-summary::before {
   flex-shrink: 0;
 }
 .communities .cm-seg {
+  display: inline-flex;
+  align-items: center;
   border: none;
   border-right: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
   padding: 6px 12px;
   font-size: 12.5px;
+  line-height: 1.5;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
