@@ -18,7 +18,7 @@
  * update — auto-fit happens only on the very first layout.
  */
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { GraphNode } from '../api/types.ts'
 
 /**
@@ -1010,6 +1010,33 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return () => window.removeEventListener('blur', onBlur)
   }, [scheduleDraw])
 
+  /**
+   * The tooltip follows the pointer, clamped inside the wrap — its old fixed bottom-left
+   * slot is the trail's, and the two overlapped on every hover once a trail existed (the
+   * trail's CSS even claimed otherwise). Positioned by direct style writes, not state: a
+   * React re-render per pointermove would be pure waste when only the transform changes.
+   * Near the right/bottom edges it flips to the other side of the pointer.
+   */
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const positionTooltip = useCallback((clientX: number, clientY: number): void => {
+    const tip = tooltipRef.current
+    const wrap = canvasRef.current?.parentElement
+    if (tip === null || !wrap) return
+    const rect = wrap.getBoundingClientRect()
+    const pad = 8
+    let x = clientX - rect.left + 14
+    let y = clientY - rect.top + 18
+    if (x + tip.offsetWidth + pad > rect.width) x = clientX - rect.left - tip.offsetWidth - 12
+    if (y + tip.offsetHeight + pad > rect.height) y = clientY - rect.top - tip.offsetHeight - 14
+    tip.style.transform = `translate(${Math.max(pad, x)}px, ${Math.max(pad, y)}px)`
+  }, [])
+  // The div mounts one commit AFTER the hover begins — place it before that first paint,
+  // or it would flash at the wrap's origin.
+  useLayoutEffect(() => {
+    const at = lastPointerRef.current
+    if (hover !== null && at !== null) positionTooltip(at.x, at.y)
+  }, [hover, positionTooltip])
+
   /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
   const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
     const canvas = canvasRef.current
@@ -1091,6 +1118,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       setHover(hit)
       scheduleDraw()
     }
+    positionTooltip(e.clientX, e.clientY)
   }
   const onPointerUp = (e: React.PointerEvent): void => {
     pointers.current.delete(e.pointerId)
@@ -1239,7 +1267,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       {overlay}
       {layouting && <div className="graph-status">Laying out…</div>}
       {hover !== null && nodes[hover] && (
-        <div className="graph-tooltip">
+        <div className="graph-tooltip" ref={tooltipRef}>
           <strong>{nodes[hover]!.title}</strong>
           {ghostIndices?.has(hover) ? (
             <span>

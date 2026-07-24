@@ -169,35 +169,114 @@ const STRUCTURAL_TAGS: ReadonlySet<string> = new Set([
 ])
 const isThematicTag = (t: string): boolean => !STRUCTURAL_TAGS.has(t.toLowerCase())
 
-/** localStorage key for the System toggle — a lasting preference, not a session whim. */
+/** localStorage key of the RETIRED standalone System toggle — read once as a migration
+ *  fallback when the combined prefs key below doesn't exist yet. */
 const SHOW_SYSTEM_KEY = 'vault.showSystem'
+
+/**
+ * localStorage key for the graph view preferences — the how-it's-drawn choices (lens, type
+ * visibility, domain filter, overlay toggles, System). Persisted so an F5 keeps the graph
+ * the user set up; System used to be the only survivor, which read as random amnesia.
+ * Exploration state (search, selection, trail, cluster drill-down) stays session-only on
+ * purpose — it describes where the user currently IS, not how they like the graph shown.
+ * The payload carries a `v` field: bump it on shape changes and stale prefs fall back to
+ * defaults instead of half-applying.
+ */
+const VIEW_PREFS_KEY = 'vault.graphPrefs'
+
+const LENS_VALUES: ReadonlySet<string> = new Set(['domain', 'type', 'authority', 'orphans', 'stubs', 'recency'])
+
+interface ViewPrefs {
+  v: 1
+  lens: Lens
+  hiddenTypes: string[]
+  selectedDomains: string[]
+  showClusters: boolean
+  showGaps: boolean
+  showNetwork: boolean
+  spotlight: boolean
+  showSystem: boolean
+}
+
+/** loadViewPrefs result: every field optional AND possibly explicitly undefined (validation
+ *  emits undefined for unusable fields; exactOptionalPropertyTypes makes that distinction). */
+type LoadedPrefs = { [K in keyof Omit<ViewPrefs, 'v'>]?: ViewPrefs[K] | undefined }
+
+/** Field-by-field validated load: a foreign or stale payload degrades to defaults, never
+ *  throws. Exported for its unit tests only. */
+export function loadViewPrefs(): LoadedPrefs {
+  try {
+    const raw = localStorage.getItem(VIEW_PREFS_KEY)
+    if (raw === null) return { showSystem: localStorage.getItem(SHOW_SYSTEM_KEY) === '1' }
+    const p: unknown = JSON.parse(raw)
+    if (p === null || typeof p !== 'object' || (p as { v?: unknown }).v !== 1) return {}
+    const o = p as Record<string, unknown>
+    const strings = (x: unknown): string[] | undefined =>
+      Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string') : undefined
+    const bool = (x: unknown): boolean | undefined => (typeof x === 'boolean' ? x : undefined)
+    return {
+      lens: typeof o.lens === 'string' && LENS_VALUES.has(o.lens) ? (o.lens as Lens) : undefined,
+      hiddenTypes: strings(o.hiddenTypes),
+      selectedDomains: strings(o.selectedDomains),
+      showClusters: bool(o.showClusters),
+      showGaps: bool(o.showGaps),
+      showNetwork: bool(o.showNetwork),
+      spotlight: bool(o.spotlight),
+      showSystem: bool(o.showSystem),
+    }
+  } catch {
+    return {} // storage unavailable (private mode) or corrupt JSON — defaults win
+  }
+}
+
+const savedPrefs = loadViewPrefs()
 
 /**
  * GraphView state that OUTLIVES the component: graph and page view are mutually exclusive
  * routes, so opening an article unmounts the graph — without this, a double-click →
  * article → Escape round trip would come back to reset filters, lens, search, selection
  * and trail. Same module-scope pattern (and rationale) as the canvas's camera memory in
- * GraphCanvas.tsx; safe because the app has exactly one graph view.
+ * GraphCanvas.tsx; safe because the app has exactly one graph view. The ViewPrefs subset
+ * additionally survives reloads via localStorage (seeded here, written by saveViewPrefs).
  */
 const viewMemory = {
   query: '',
-  hiddenTypes: new Set<string>() as ReadonlySet<string>,
-  selectedDomains: new Set<string>() as ReadonlySet<string>,
-  lens: 'domain' as Lens,
-  showClusters: false,
-  showGaps: false,
-  showNetwork: false,
-  spotlight: false,
+  hiddenTypes: new Set(savedPrefs.hiddenTypes ?? []) as ReadonlySet<string>,
+  selectedDomains: new Set(savedPrefs.selectedDomains ?? []) as ReadonlySet<string>,
+  lens: savedPrefs.lens ?? ('domain' as Lens),
+  showClusters: savedPrefs.showClusters ?? false,
+  showGaps: savedPrefs.showGaps ?? false,
+  showNetwork: savedPrefs.showNetwork ?? false,
+  spotlight: savedPrefs.spotlight ?? false,
   clusterStack: [] as readonly ClusterFocus[],
-  showSystem: ((): boolean => {
-    try {
-      return localStorage.getItem(SHOW_SYSTEM_KEY) === '1'
-    } catch {
-      return false
-    }
-  })(),
+  showSystem: savedPrefs.showSystem ?? false,
   selection: null as Selection,
   trail: [] as string[],
+}
+
+/** Last-written prefs JSON — the snapshot effect runs on every commit, writes only on change. */
+let lastSavedPrefs: string | null = null
+
+function saveViewPrefs(): void {
+  const prefs: ViewPrefs = {
+    v: 1,
+    lens: viewMemory.lens,
+    hiddenTypes: [...viewMemory.hiddenTypes].sort(),
+    selectedDomains: [...viewMemory.selectedDomains].sort(),
+    showClusters: viewMemory.showClusters,
+    showGaps: viewMemory.showGaps,
+    showNetwork: viewMemory.showNetwork,
+    spotlight: viewMemory.spotlight,
+    showSystem: viewMemory.showSystem,
+  }
+  const json = JSON.stringify(prefs)
+  if (json === lastSavedPrefs) return
+  lastSavedPrefs = json
+  try {
+    localStorage.setItem(VIEW_PREFS_KEY, json)
+  } catch {
+    // Storage unavailable (private mode) — the prefs still hold for this session.
+  }
 }
 
 /** An existing wikilink flagged as possibly incidental (see the graph-health memo). */
@@ -328,6 +407,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       selection,
       trail,
     })
+    saveViewPrefs()
   })
 
   const selectPage = (path: string): void => {
@@ -550,17 +630,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setHiddenTypes(next)
   }
 
-  const toggleSystem = (): void => {
-    setShowSystem((v) => {
-      const next = !v
-      try {
-        localStorage.setItem(SHOW_SYSTEM_KEY, next ? '1' : '0')
-      } catch {
-        // Storage unavailable (private mode) — the toggle still works for this session.
-      }
-      return next
-    })
-  }
+  // Persisted with the rest of the view prefs by the snapshot effect — no standalone key.
+  const toggleSystem = (): void => setShowSystem((v) => !v)
 
   // Solo-select semantics: empty = all; a click adds/removes a domain from the selection,
   // and deselecting the last one falls back to "all".
@@ -741,10 +812,11 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               {' · '}
               <button
                 className="linklike"
-                onClick={() => {
-                  setShowGaps(true)
-                  if (graph.gaps[0]) selectGap(graph.gaps[0].title)
-                }}
+                // Same landing as the Gaps overlay toggle: the gaps view with the explorer's
+                // ranked list (it shows whenever gaps are on and nothing is selected) — the
+                // two entry points used to diverge, this one additionally auto-selecting the
+                // first gap, which surprise-opened a specific page's panel.
+                onClick={() => setShowGaps(true)}
                 title="Explore the unresolved links as knowledge gaps"
               >
                 {graph.unresolved} gaps

@@ -2729,10 +2729,14 @@ details.hot-cache[open] .hc-summary::before {
   border-radius: 6px;
   padding: 2px 8px;
 }
+/* Pointer-following (GraphCanvas positions it via transform, clamped to the wrap): the
+   fixed bottom-left slot belongs to the trail, and the two used to overlap on every hover. */
 .graph-tooltip {
   position: absolute;
-  left: 12px;
-  bottom: 10px;
+  left: 0;
+  top: 0;
+  will-change: transform;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   font-size: 12px;
@@ -2772,8 +2776,8 @@ details.hot-cache[open] .hc-summary::before {
   color: color-mix(in srgb, var(--accent) 80%, var(--text));
 }
 
-/* Breadcrumb trail of visited pages, bottom-left of the canvas (clear of the tooltip, which
-   only shows on hover, and the zoom controls up top). */
+/* Breadcrumb trail of visited pages, bottom-left of the canvas — its slot alone now that
+   the tooltip follows the pointer; the zoom controls live up top. */
 .graph-trail {
   position: absolute;
   left: 12px;
