@@ -22,7 +22,7 @@ import type {
   DomainReviewEntry,
   CandidatesResponse,
 } from '../api/types.ts'
-import { computeTagReport, type TagReport } from '../lib/tagReport.ts'
+import { computeTagReport, conflictingTag, type TagReport } from '../lib/tagReport.ts'
 import type { TagFixAction } from '../api/types.ts'
 
 /** The tag-fix route's hard cap on actions per run — mirrored so the button says what runs. */
@@ -280,6 +280,9 @@ function TagHygieneCard({
   }, [fixedOk, qc])
   if (report === null) return null
   const actions = selectedActions(report, selected)
+  // Two selected repairs fighting over one tag (e.g. two merges consuming the same tag)
+  // would force the agent to guess an order — block the run until one is unchecked.
+  const conflict = conflictingTag(actions)
   const toggle = (key: string): void => {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -299,17 +302,24 @@ function TagHygieneCard({
         </h3>
         <button
           className="btn primary"
-          disabled={actions.length === 0 || fix.running}
+          disabled={actions.length === 0 || conflict !== null || fix.running}
           onClick={fix.start}
           title={
             actions.length === 0
               ? 'Check findings below to build the repair plan'
-              : `Apply ${Math.min(actions.length, MAX_TAG_ACTIONS)} tag repair${actions.length === 1 ? '' : 's'} (one git commit — revertable)`
+              : conflict !== null
+                ? `Conflicting selections: #${conflict} appears in more than one repair — uncheck one`
+                : `Apply ${Math.min(actions.length, MAX_TAG_ACTIONS)} tag repair${actions.length === 1 ? '' : 's'} (one git commit — revertable)`
           }
         >
           {fix.running ? 'Fixing…' : `Fix selected${actions.length > 0 ? ` (${Math.min(actions.length, MAX_TAG_ACTIONS)})` : ''}`}
         </button>
       </div>
+      {conflict !== null && (
+        <div className="toast err">
+          Conflicting selections: <code>#{conflict}</code> appears in more than one checked repair. Uncheck one of them.
+        </div>
+      )}
       <div className="tool-meta">
         {report.distinctTags} distinct tags on {report.taggedPages} of {report.knowledgePages} knowledge pages
       </div>

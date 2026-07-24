@@ -9,7 +9,7 @@
  * graph data the dashboard already has — no endpoint, no vault access.
  */
 
-import type { GraphNode } from '../api/types.ts'
+import type { GraphNode, TagFixAction } from '../api/types.ts'
 
 /** The slice of a graph node the analysis reads (kind gates system pages out). */
 export type TagNode = Pick<GraphNode, 'tags' | 'domain' | 'kind'>
@@ -67,19 +67,37 @@ const MIN_ECHO_DOMAIN_SIZE = 5
 /** Word split for the variant comparison: separators and case are never meaningful. */
 const words = (t: string): string[] => t.toLowerCase().split(/[-_\s]+/).filter(Boolean)
 
-/** Levenshtein distance, for short single words only (variant spellings like fiber/fibre). */
-function editDistance(a: string, b: string): number {
-  const dp = Array.from({ length: b.length + 1 }, (_, j) => j)
+/**
+ * After the shared stem, a suffix longer than this makes a DIFFERENT word, not a spelling:
+ * "product"+"ivity" changes the concept, "biomedic"+"al|ine" does not. Derivational pairs
+ * with short suffixes on both sides (research/researcher, regulation/regulator) stay
+ * flagged — they are genuinely ambiguous and exactly what the human checkbox is for.
+ */
+const MAX_VARIANT_SUFFIX = 4
+
+/**
+ * Optimal-string-alignment distance (Levenshtein + adjacent transposition), for short
+ * single words. Transpositions count 1 so "fiber"/"fibre" lands at distance 1 — while
+ * two independent substitutions ("concept"/"context", "product"/"project") stay at 2.
+ */
+function osaDistance(a: string, b: string): number {
+  const rows = Array.from({ length: a.length + 1 }, (_, i) => {
+    const row = new Array<number>(b.length + 1)
+    row[0] = i
+    return row
+  })
+  for (let j = 0; j <= b.length; j++) rows[0]![j] = j
   for (let i = 1; i <= a.length; i++) {
-    let prev = dp[0]!
-    dp[0] = i
     for (let j = 1; j <= b.length; j++) {
-      const cur = dp[j]!
-      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
-      prev = cur
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      let d = Math.min(rows[i - 1]![j]! + 1, rows[i]![j - 1]! + 1, rows[i - 1]![j - 1]! + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d = Math.min(d, rows[i - 2]![j - 2]! + 1)
+      }
+      rows[i]![j] = d
     }
   }
-  return dp[b.length]!
+  return rows[a.length]![b.length]!
 }
 
 /** True when two single WORDS look like spellings of the same word. */
@@ -88,12 +106,21 @@ function isWordVariant(x: string, y: string): boolean {
   if (`${short}s` === long || `${short}es` === long) return true // singular/plural
   let p = 0
   while (p < short.length && short[p] === long[p]) p++
-  // Long shared stem: "biomedic(al|ine)", "chromatograph(y|ic)". The share bound keeps
-  // short accidental prefixes ("sta-bility"/"sta-tistics") out.
-  if (p >= Math.max(MIN_STEM, Math.ceil(STEM_SHARE * short.length))) return true
-  // Spelling twins ("fiber"/"fibre"): tiny edit distance on a shared opening — too short
-  // for the stem rule but clearly the same word.
-  return short.length >= 5 && p >= 3 && editDistance(short, long) <= 2
+  // Long shared stem with SHORT residues on both sides: "biomedic(al|ine)",
+  // "chromatograph(y|ic)". The share bound keeps short accidental prefixes
+  // ("sta-bility"/"sta-tistics") out; the suffix cap keeps derivations that change the
+  // concept ("product-ivity") out.
+  if (
+    p >= Math.max(MIN_STEM, Math.ceil(STEM_SHARE * short.length)) &&
+    short.length - p <= MAX_VARIANT_SUFFIX &&
+    long.length - p <= MAX_VARIANT_SUFFIX
+  ) {
+    return true
+  }
+  // Spelling twins ("fiber"/"fibre"): one edit or transposition on a shared opening. A
+  // plain distance-2 bound flagged "concept"/"context" and "product"/"project" on real
+  // data — two substitutions make a different word, one transposition does not.
+  return short.length >= 5 && p >= 3 && osaDistance(short, long) <= 1
 }
 
 /**
@@ -210,4 +237,33 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
     domainEchoes,
     singletons,
   }
+}
+
+/**
+ * A tag referenced by two selected repairs where at least one CONSUMES it (drop, or the
+ * from-side of a merge), or null when the plan is consistent. Two merges may share a
+ * TARGET ("#fibre → #fiber" and "#fibres → #fiber" is fine) — but a tag that is dropped
+ * or merged away must appear nowhere else: "merge #project into #product" plus "merge
+ * #project into #projects" is two repairs fighting over one tag, and the agent would have
+ * to guess an order. Selection-time guard for the tag-fix run.
+ */
+export function conflictingTag(actions: readonly TagFixAction[]): string | null {
+  const refs = new Map<string, { consuming: number; total: number }>()
+  const add = (tag: string, consuming: boolean): void => {
+    const r = refs.get(tag) ?? { consuming: 0, total: 0 }
+    r.total++
+    if (consuming) r.consuming++
+    refs.set(tag, r)
+  }
+  for (const a of actions) {
+    if (a.kind === 'drop') add(a.tag, true)
+    else {
+      add(a.from, true)
+      add(a.to, false)
+    }
+  }
+  for (const [tag, r] of refs) {
+    if (r.total > 1 && r.consuming > 0) return tag
+  }
+  return null
 }
