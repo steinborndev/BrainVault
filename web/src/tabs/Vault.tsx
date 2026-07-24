@@ -132,6 +132,9 @@ const NO_DOMAIN = ''
 /** Synthetic path prefix marking a ghost (gap) node in the canvas node list. */
 const GAP_PATH_PREFIX = '#gap:'
 
+/** Two Escape presses within this window are a "double Esc" — reset the whole graph view. */
+const DOUBLE_ESC_MS = 400
+
 /** The explorer selection: a real page (by path) or a knowledge gap (by title). */
 type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string } | null
 
@@ -646,13 +649,36 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   const health = useMemo(() => computeGraphHealth(graph), [graph])
 
+  /**
+   * Reset every VIEW control to its default so the whole vault is shown again (the double-Esc
+   * escape hatch out of a deep filter/drill state). Clears filters, lens, overlays, cluster
+   * drill-down, focus depth, search and selection. `showSystem` is deliberately kept — it is a
+   * persistent preference (localStorage), not a filter the user is trying to escape.
+   */
+  const resetView = (): void => {
+    setQuery('')
+    setHiddenTypes(new Set())
+    setSelectedDomains(new Set())
+    setLens('domain')
+    setShowClusters(false)
+    setShowGaps(false)
+    setShowNetwork(false)
+    setSpotlight(false)
+    setClusterStack([])
+    setLocalDepth(0)
+    closeExplorer() // selection + trail
+    if (focusPath !== null) navigate('/vault')
+  }
+
   // ---- keyboard layer. Window-level (the canvas isn't focusable), via the same stable-
   // listener ref pattern the canvas uses for wheel/zoom keys; gated on this view being the
   // VISIBLE tab — tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
   // Escape peels back one UI layer per press: search → explorer panel → cluster focus →
-  // gaps list → focus.
+  // gaps list → focus; a DOUBLE Escape (two presses within DOUBLE_ESC_MS) resets the whole
+  // view at once.
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const lastEscRef = useRef(0)
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   keyRef.current = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -663,6 +689,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     if (e.key === 'Escape') {
       if (typing) return // inputs own their Escape (the search clears/blurs itself)
       e.preventDefault()
+      const now = performance.now()
+      const doublePress = now - lastEscRef.current < DOUBLE_ESC_MS
+      lastEscRef.current = now
+      if (doublePress) {
+        resetView() // second quick press: back to the full vault in one go
+        return
+      }
       if (query !== '') setQuery('')
       else if (selection !== null) closeExplorer()
       else if (clusterStack.length > 0) setClusterStack((prev) => prev.slice(0, -1)) // pop one level
@@ -799,7 +832,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           <button
             className={`ctl${spotlight ? ' on' : ''}`}
             onClick={() => setSpotlight((v) => !v)}
-            title="Spotlight: hovering a node highlights its whole community and dims the rest; clicking isolates that community as its own view — and keeps drilling into sub-communities as long as the isolated cluster subdivides further. Esc backs out one level. Off by default."
+            title="Spotlight: hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities as it subdivides); click a node to open its page. Esc backs out one level, double-Esc resets everything. Off by default."
           >
             <Icon name="spotlight" /> Spotlight
           </button>
@@ -828,8 +861,10 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           text={
             <span className="shortcuts">
               <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
+              <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
               <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
               <span className="k"><kbd>Esc</kbd></span> <span>clear search · close panel · leave cluster · leave focus — and back out of a page</span>
+              <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters — show the whole vault</span>
               <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
               <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
               <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>

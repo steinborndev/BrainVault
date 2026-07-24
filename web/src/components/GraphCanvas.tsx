@@ -278,22 +278,6 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return map
   }, [clusters])
 
-  /**
-   * The node's community when a spotlight click would isolate it, else -1: spotlight on,
-   * real community, and a PROPER subset of the visible real nodes — a level that doesn't
-   * subdivide has nothing left to isolate.
-   */
-  const isolatableCidOf = useCallback(
-    (i: number): number => {
-      if (!spotlight || clusters === null) return -1
-      const cid = clusters[i] ?? -1
-      if (cid < 0) return -1
-      const set = clusterSets?.get(cid)
-      return set !== undefined && set.size < nodes.length - (ghostIndices?.size ?? 0) ? cid : -1
-    },
-    [spotlight, clusters, clusterSets, nodes.length, ghostIndices],
-  )
-
   // One guaranteed label per domain-region of every connected component big enough to read as
   // a cluster. Without this, the label loop's global degree sort + fixed budget fill every slot
   // from the densest regions, leaving small detached clusters (materials-science, unassigned)
@@ -471,9 +455,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const paddedHulls = new Map<number, Pt[]>()
       for (const [cid, pts] of members) {
         if (pts.length < 3) continue // 2 points make no area worth tinting
-        const hull = convexHull(pts)
-        const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
-        const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
+        const body = hullBody(pts)
+        const hull = convexHull(body)
+        const cx = body.reduce((s, p) => s + p[0], 0) / body.length
+        const cy = body.reduce((s, p) => s + p[1], 0) / body.length
         const padded = expandHull(hull, cx, cy, 26 / t.k)
         paddedHulls.set(cid, padded)
         ctx.beginPath()
@@ -1041,9 +1026,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         const pad = 26 / transformRef.current.k
         for (const [cid, pts] of members) {
           if (pts.length < 3) continue
-          const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
-          const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
-          cache.hulls.set(cid, expandHull(convexHull(pts), cx, cy, pad))
+          // Same trimmed body as the drawn hull, so the clickable surface matches the tint
+          // and doesn't reach into empty space along a cross-domain member's tongue.
+          const body = hullBody(pts)
+          const cx = body.reduce((s, p) => s + p[0], 0) / body.length
+          const cy = body.reduce((s, p) => s + p[1], 0) / body.length
+          cache.hulls.set(cid, expandHull(convexHull(body), cx, cy, pad))
         }
       }
       const { x, y } = toWorld(sx, sy)
@@ -1241,22 +1229,30 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         const hit = hitTest(e.clientX, e.clientY)
         if (hit !== null) {
           const node = nodes[hit]!
-          const last = lastTapRef.current
-          const now = performance.now()
-          if (onOpen !== undefined && last !== null && last.path === node.path && now - last.time < DOUBLE_TAP_MS) {
+          const isGhost = ghostIndices?.has(hit) ?? false
+          if (spotlight && onOpen !== undefined && !isGhost) {
+            // Spotlight/drill mode: a click ON a node opens its article directly. Isolating
+            // the community is the AREA click (below), so an article is reachable at any
+            // drill level without first bottoming out the cluster hierarchy.
             lastTapRef.current = null
             onOpen(node)
           } else {
-            lastTapRef.current = { time: now, path: node.path }
-            const cid = onClusterClick !== undefined ? isolatableCidOf(hit) : -1
-            if (cid >= 0) onClusterClick!(cid)
-            else onSelect(node)
+            // Normal mode: single click selects (opens the panel), double click opens.
+            const last = lastTapRef.current
+            const now = performance.now()
+            if (onOpen !== undefined && last !== null && last.path === node.path && now - last.time < DOUBLE_TAP_MS) {
+              lastTapRef.current = null
+              onOpen(node)
+            } else {
+              lastTapRef.current = { time: now, path: node.path }
+              onSelect(node)
+            }
           }
         } else {
           lastTapRef.current = null
-          // No node under the pointer — but inside a community's hull, the spotlight click
-          // still isolates: the hull is the clickable surface, not just its member dots.
-          const cid = onClusterClick !== undefined ? hitCluster(e.clientX, e.clientY) : -1
+          // No node under the pointer — inside a community's hull the spotlight click drills
+          // into (isolates) that community; the hull is the clickable surface, not just its dots.
+          const cid = spotlight && onClusterClick !== undefined ? hitCluster(e.clientX, e.clientY) : -1
           if (cid >= 0) onClusterClick!(cid)
           else onClear?.()
         }
@@ -1321,12 +1317,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Whether a click at the pointer would isolate a community (instead of selecting or
-  // clearing) — drives the zoom-in cursor and the tooltip hint, for both hover sources:
-  // a member node, or the hull area between nodes.
-  const hoverIsolatable =
-    onClusterClick !== undefined &&
-    ((hover !== null && isolatableCidOf(hover) >= 0) || (hover === null && hullHover !== null))
+  // Pointer affordances under the spotlight (drill mode): a click in the hull AREA drills
+  // into (isolates) the community — zoom-in cursor; a click ON a node opens its article —
+  // pointer cursor. The two are mutually exclusive (hullHover is only set when no node is hit).
+  const hoveredIsGhost = hover !== null && (ghostIndices?.has(hover) ?? false)
+  const hoverAreaDrills = hover === null && hullHover !== null && onClusterClick !== undefined
+  const hoverNodeOpens = hover !== null && spotlight && onOpen !== undefined && !hoveredIsGhost
 
   return (
     <div className="graph-canvas-wrap">
@@ -1352,9 +1348,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         role="img"
         aria-label={`Wikilink graph with ${nodes.length} pages`}
         style={{
-          // zoom-in signals that a click will isolate the hovered node's community rather
-          // than open the explorer panel (spotlight on + the node belongs to one).
-          cursor: hoverIsolatable ? 'zoom-in' : hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab',
+          // zoom-in on the hull area (a click drills into the community); pointer on a node
+          // (a click opens it, or selects it in normal mode); grab on empty canvas.
+          cursor: hoverAreaDrills ? 'zoom-in' : hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab',
           touchAction: 'none',
         }}
       />
@@ -1392,8 +1388,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
                 {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
                 {nodes[hover]!.out} out
               </span>
-              {hoverIsolatable ? (
-                <span className="tt-hint">click to isolate this community · double-click to open</span>
+              {hoverNodeOpens ? (
+                <span className="tt-hint">click to open the page</span>
               ) : (
                 onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>
               )}
@@ -1436,6 +1432,36 @@ function convexHull(points: Pt[]): Pt[] {
   lower.pop()
   upper.pop()
   return lower.concat(upper)
+}
+
+/** A member sitting farther than this multiple of the cluster's MEDIAN member distance is a
+ *  spatial outlier — the force layout dragged it toward its cross-cluster links, not its
+ *  community. Excluding it from the hull stops the tinted blob reaching as a tongue into empty
+ *  space where no cluster node sits (a cross-domain entity is the usual culprit). */
+const HULL_OUTLIER_FACTOR = 2.5
+
+/**
+ * The subset of member points the tinted hull should enclose: the cluster BODY, with spatial
+ * outliers trimmed. Distances are measured from the component-wise MEDIAN point (robust — one
+ * flung-out member doesn't drag the center toward itself the way a mean would), and a member
+ * past HULL_OUTLIER_FACTOR × the median distance is dropped. Only clusters with enough members
+ * to still leave a body are trimmed (< 5 keeps all — too few to tell a body from a corner);
+ * never trims below 3, the minimum for an area. The node itself still draws; it just isn't
+ * wrapped by the hull.
+ */
+export function hullBody(points: Pt[]): Pt[] {
+  if (points.length < 5) return points
+  const xs = points.map((p) => p[0]).sort((a, b) => a - b)
+  const ys = points.map((p) => p[1]).sort((a, b) => a - b)
+  const mid = points.length >> 1
+  const mx = xs[mid]!
+  const my = ys[mid]!
+  const dists = points.map(([x, y]) => Math.hypot(x - mx, y - my))
+  const medDist = [...dists].sort((a, b) => a - b)[mid]!
+  if (medDist <= 1e-6) return points
+  const threshold = medDist * HULL_OUTLIER_FACTOR
+  const body = points.filter((_, i) => dists[i]! <= threshold)
+  return body.length >= 3 ? body : points
 }
 
 /** Pushes each hull point outward from the centroid by `pad` world units — breathing room. */
@@ -1497,6 +1523,45 @@ export function boxIntersectsPolygon(box: Box, poly: Pt[]): boolean {
   for (const [x, y] of corners) if (pointInPolygon(x, y, poly)) return true
   for (const [x, y] of poly) if (x >= box[0] && x <= box[2] && y >= box[1] && y <= box[3]) return true
   return false
+}
+
+/** Average of a polygon's vertices — inside any convex polygon, so a ray from it exits once. */
+function vertexCentroid(poly: Pt[]): Pt {
+  let sx = 0
+  let sy = 0
+  for (const [x, y] of poly) {
+    sx += x
+    sy += y
+  }
+  return [sx / poly.length, sy / poly.length]
+}
+
+/**
+ * Distance from an interior point to the polygon boundary along unit direction (ux, uy).
+ * A ray from inside a convex polygon crosses the boundary exactly once; this returns that
+ * crossing distance, so a label can be anchored to the actual hull EDGE in each direction
+ * instead of to the bounding box (which for a round or diagonal hull sits well outside it).
+ * Falls back to the bounding half-extent along the direction if no crossing is found.
+ */
+function rayPolygonExit(cx: number, cy: number, ux: number, uy: number, poly: Pt[]): number {
+  let best = Infinity
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [x1, y1] = poly[j]!
+    const [x2, y2] = poly[i]!
+    const ex = x2 - x1
+    const ey = y2 - y1
+    const denom = ux * ey - uy * ex
+    if (Math.abs(denom) < 1e-9) continue // ray parallel to this edge
+    // Solve center + t*dir = edge_start + s*edge, for t (ray) and s (edge param in [0,1]).
+    const dx = x1 - cx
+    const dy = y1 - cy
+    const t = (dx * ey - dy * ex) / denom
+    const s = (dx * uy - dy * ux) / denom
+    if (t > 1e-6 && s >= -1e-9 && s <= 1 + 1e-9 && t < best) best = t
+  }
+  if (best !== Infinity) return best
+  const [minX, minY, maxX, maxY] = polygonBounds(poly)
+  return Math.abs(ux) * ((maxX - minX) / 2) + Math.abs(uy) * ((maxY - minY) / 2)
 }
 
 /** A cluster label to place: its hull is `hulls.get(key)`; wider clusters place first. */
@@ -1586,22 +1651,25 @@ export function placeRegionLabels(
   for (const label of order) {
     const own = hulls.get(label.key)
     if (own === undefined || own.length < 3) continue
-    const [minX, minY, maxX, maxY] = polygonBounds(own)
-    const cx = (minX + maxX) / 2
-    const cy = (minY + maxY) / 2
-    const hx = (maxX - minX) / 2
-    const hy = (maxY - minY) / 2
+    const minY = polygonBounds(own)[1]
+    // Anchor to the hull EDGE, not the bounding box: ray-cast from the vertex centroid so a
+    // round or diagonally-offset hull gets its label hugging the outline rather than floating
+    // off the bounding-box corner (which read as "far from the cluster").
+    const [cx, cy] = vertexCentroid(own)
     const halfW = label.width / 2
 
     let chosen: { x: number; y: number; box: Box } | null = null
     for (let tier = 0; tier <= LABEL_SEARCH_STEPS && chosen === null; tier++) {
       for (const [dx, dy] of LABEL_DIRECTIONS) {
-        // Distance from centroid to the box CENTER: clear the own hull and half the box in
-        // this direction, plus the margin, plus this tier's outward step.
-        const dist =
-          Math.abs(dx) * (hx + halfW) + Math.abs(dy) * (hy + labelH / 2) + margin + tier * step
-        const centerX = cx + dx * dist
-        const top = cy + dy * dist - labelH / 2
+        const len = Math.hypot(dx, dy) || 1
+        const ux = dx / len
+        const uy = dy / len
+        // Box CENTER: the hull edge in this direction, plus the margin, plus the half-box
+        // projected onto the direction, plus this tier's outward step.
+        const edge = rayPolygonExit(cx, cy, ux, uy, own)
+        const dist = edge + margin + Math.abs(ux) * halfW + Math.abs(uy) * (labelH / 2) + tier * step
+        const centerX = cx + ux * dist
+        const top = cy + uy * dist - labelH / 2
         const box: Box = [centerX - halfW, top, centerX + halfW, top + labelH]
         if (clears(box, label.key, placedBoxes)) {
           chosen = { x: centerX, y: top, box }

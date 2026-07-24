@@ -3,6 +3,7 @@ import {
   pointInPolygon,
   boxIntersectsPolygon,
   placeRegionLabels,
+  hullBody,
   type RegionLabelInput,
 } from '../src/components/GraphCanvas.tsx'
 
@@ -38,6 +39,44 @@ describe('boxIntersectsPolygon', () => {
   })
   it('false when the box is clear of the polygon', () => {
     expect(boxIntersectsPolygon([20, 20, 30, 30], square)).toBe(false)
+  })
+})
+
+describe('hullBody', () => {
+  it('drops a far spatial outlier from a compact cluster (the cross-domain-entity case)', () => {
+    // Four members bunched near the origin + one flung far right (a shared entity the layout
+    // pulled toward another cluster). The tongue toward it must not be part of the hull.
+    const body: Pt[] = [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ]
+    const withOutlier: Pt[] = [...body, [400, 5]]
+    const trimmed = hullBody(withOutlier)
+    expect(trimmed).toHaveLength(4)
+    expect(trimmed).not.toContainEqual([400, 5])
+  })
+
+  it('keeps a genuinely elongated cluster intact (no false outlier)', () => {
+    const line: Pt[] = [
+      [0, 0],
+      [10, 0],
+      [20, 0],
+      [30, 0],
+      [40, 0],
+    ]
+    expect(hullBody(line)).toHaveLength(5) // spread is uniform — nothing is an outlier
+  })
+
+  it('leaves small clusters (< 5) untouched — too few to tell a body from a corner', () => {
+    const pts: Pt[] = [
+      [0, 0],
+      [1, 1],
+      [200, 200],
+      [2, 0],
+    ]
+    expect(hullBody(pts)).toHaveLength(4)
   })
 })
 
@@ -113,6 +152,23 @@ describe('placeRegionLabels', () => {
     const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], hulls, LABEL_H, MARGIN)
     expect(placed!.fallback).toBe(false)
     expect(boxIntersectsPolygon(placed!.box, hulls.get(2)!)).toBe(false)
+  })
+
+  it('anchors the label near the hull edge, not the bounding-box corner', () => {
+    // A diamond (rotated square): its bounding box is much larger than the hull along the
+    // diagonals. The label goes straight up, so its bottom should sit just past the TOP
+    // VERTEX (y=-10), not out at some bounding-box-inflated distance.
+    const diamond: Pt[] = [
+      [0, -10],
+      [10, 0],
+      [0, 10],
+      [-10, 0],
+    ]
+    const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], new Map([[1, diamond]]), LABEL_H, MARGIN)
+    expect(placed!.fallback).toBe(false)
+    // Bottom of the label box is just above the top vertex + margin, not far above it.
+    expect(placed!.box[3]).toBeLessThanOrEqual(-10)
+    expect(placed!.box[3]).toBeGreaterThan(-10 - LABEL_H - MARGIN - 0.001)
   })
 
   it('places heavier clusters first (deterministic order)', () => {
