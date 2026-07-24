@@ -5,6 +5,7 @@
  *
  * Protocol (one long-lived worker per canvas mount, layouts are replaceable in flight):
  *   in : { gen, nodes: Array<{ degree: number }>, edges: Array<[number, number]>,
+ *          groups: Int32Array,   // domain group id per node, -1 = uncategorized
  *          seed: Float32Array,   // [x0, y0, …]; NaN pairs = unplaced, d3 places them
  *          alpha: number }       // 1 = cold start, ~0.3 = gentle reheat of a live layout
  *   out: { gen, type: 'tick' | 'done', positions: Float32Array }
@@ -29,11 +30,20 @@ import {
   forceY,
   type SimulationNodeDatum,
 } from 'd3-force'
+import {
+  LINK_DISTANCE,
+  LINK_STRENGTH,
+  CROSS_GROUP_DISTANCE,
+  CROSS_GROUP_STRENGTH,
+  crossGroup,
+  forceGroupCentroid,
+} from './graphForces.ts'
 
 interface LayoutRequest {
   gen: number
   nodes: Array<{ degree: number }>
   edges: Array<[number, number]>
+  groups: Int32Array
   seed: Float32Array
   alpha: number
 }
@@ -47,6 +57,7 @@ let timer: ReturnType<typeof setTimeout> | undefined
 
 self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
   const { gen, nodes, edges, seed, alpha } = ev.data
+  const groups = ev.data.groups ?? new Int32Array(nodes.length).fill(-1)
 
   // A new request supersedes whatever is still cooling.
   if (timer !== undefined) clearTimeout(timer)
@@ -67,17 +78,31 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
   })
   const simLinks = edges.map(([source, target]) => ({ source, target }))
 
+  // Centering pull, stronger the fewer links a node has. Without this, orphan and
+  // near-orphan pages have nothing but repulsion acting on them and drift far outside
+  // the cluster — which then blows up the bounding box and makes fit-to-view useless.
+  // Grouped nodes get only a token global pull: their drift protection is the domain
+  // centroid force below, which keeps them with their domain instead of at the origin.
+  const centerPull = (d: SimNode): number =>
+    (groups[d.index] ?? -1) >= 0 ? 0.02 : d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05
+  const groupPull = (d: SimNode): number => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.2 : 0.08)
+
   const sim = forceSimulation(simNodes)
-    .force('link', forceLink(simLinks).distance(60).strength(0.4))
+    // Cross-domain links are longer and much weaker springs (see graphForces.ts) — the
+    // layout-side twin of the Louvain cross-domain edge down-weight in communities.ts.
+    .force(
+      'link',
+      forceLink(simLinks)
+        .distance((l) => (crossGroup(groups, l) ? CROSS_GROUP_DISTANCE : LINK_DISTANCE))
+        .strength((l) => (crossGroup(groups, l) ? CROSS_GROUP_STRENGTH : LINK_STRENGTH)),
+    )
     // Barnes-Hut approximation (theta default 0.9) keeps this O(n log n) at scale.
     .force('charge', forceManyBody().strength(-120).distanceMax(600))
     .force('center', forceCenter(0, 0))
     .force('collide', forceCollide<SimNode>().radius((d) => 6 + Math.sqrt(d.degree) * 2))
-    // Centering pull, stronger the fewer links a node has. Without this, orphan and
-    // near-orphan pages have nothing but repulsion acting on them and drift far outside
-    // the cluster — which then blows up the bounding box and makes fit-to-view useless.
-    .force('x', forceX<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
-    .force('y', forceY<SimNode>(0).strength((d) => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05)))
+    .force('x', forceX<SimNode>(0).strength(centerPull))
+    .force('y', forceY<SimNode>(0).strength(centerPull))
+    .force('group', forceGroupCentroid<SimNode>(groups, groupPull))
     .alpha(alpha)
     .stop()
 

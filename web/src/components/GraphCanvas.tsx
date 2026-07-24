@@ -20,6 +20,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { GraphNode } from '../api/types.ts'
+import { domainGroups } from '../lib/graphForces.ts'
 
 /**
  * Smallest connected component that earns a guaranteed label (see `labelReps`). Below this a
@@ -203,6 +204,8 @@ interface LayoutMsg {
   paths: string[]
   degrees: Array<{ degree: number }>
   edges: Array<[number, number]>
+  /** Domain group id per node (-1 = uncategorized) — the worker's domain-aware forces. */
+  groups: Int32Array
   seed: Float32Array
   alpha: number
 }
@@ -767,10 +770,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const msg = lastMsgRef.current
     const worker = workerRef.current
     if (!msg || !worker) return
-    // The seed buffer is transferred, so every post ships a fresh copy.
+    // The seed buffer is transferred, so every post ships a fresh copy. `groups` is cloned,
+    // not transferred — the message must stay re-postable.
     const seed = msg.seed.slice()
     worker.postMessage(
-      { gen: layoutRef.current.gen, nodes: msg.degrees, edges: msg.edges, seed, alpha: msg.alpha },
+      { gen: layoutRef.current.gen, nodes: msg.degrees, edges: msg.edges, groups: msg.groups, seed, alpha: msg.alpha },
       { transfer: [seed.buffer] },
     )
   }, [])
@@ -824,15 +828,22 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       return
     }
 
+    // The layout's domain grouping (graphForces.ts). Deterministic from node order, so two
+    // builds over identical node lists yield identical arrays — comparable in the skip check.
+    const groups = domainGroups(nodes.map((n) => n.domain))
+
     // Structurally identical to the last posted layout (a refetch where only mtimes moved,
-    // or StrictMode's second effect pass)? Then there is nothing to re-settle — skip.
+    // or StrictMode's second effect pass)? Then there is nothing to re-settle — skip. A
+    // changed domain (governance reassignment) counts as structural: the grouping forces
+    // depend on it, so it must reheat the layout even with paths and edges unchanged.
     const prev = lastMsgRef.current
     if (
       prev !== null &&
       prev.paths.length === nodes.length &&
       prev.edges.length === edges.length &&
       nodes.every((n, i) => n.path === prev.paths[i]) &&
-      edges.every((e, i) => e[0] === prev.edges[i]![0] && e[1] === prev.edges[i]![1])
+      edges.every((e, i) => e[0] === prev.edges[i]![0] && e[1] === prev.edges[i]![1]) &&
+      groups.every((g, i) => g === prev.groups[i])
     ) {
       return
     }
@@ -903,6 +914,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       paths,
       degrees: nodes.map((n) => ({ degree: n.in + n.out })),
       edges,
+      groups,
       seed,
       alpha: cold ? 1 : 0.3,
     }
