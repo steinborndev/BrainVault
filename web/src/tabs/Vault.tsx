@@ -937,39 +937,35 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
           fitKey={`${[...selectedDomains].sort().join(',')}|${[...hiddenTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
-          // With the spotlight on, a click on a clustered node isolates its whole community
-          // (the hover already previews exactly this set) — recursively: inside a focus the
-          // ids come from re-detection on the isolated subgraph, so the click drills into a
-          // sub-community. It deliberately does NOT open the explorer panel — the click means
-          // "zoom in", not "inspect". The proper-subset guard is where the recursion ends: a
-          // level that doesn't subdivide yields one community spanning everything visible,
-          // and isolating that would push a no-op level — such clicks select normally, as do
-          // unclustered nodes (the canvas's hover fallback mirrors both cases).
-          onSelect={(n, i) => {
-            if (n.path.startsWith(GAP_PATH_PREFIX)) {
-              selectGap(n.title)
-              return
-            }
-            if (spotlight && clusterIds !== null) {
-              const cid = clusterIds[i] ?? -1
-              if (cid >= 0) {
-                const paths = new Set<string>()
-                nodes.forEach((m, j) => {
-                  if (clusterIds[j] === cid) paths.add(m.path)
-                })
-                if (paths.size < realCount) {
-                  const level: ClusterFocus = {
-                    paths,
-                    label: clusterLabels.get(cid) ?? '',
-                    domain: clusterDomains.get(cid) ?? null,
-                    anchor: n.path,
-                  }
-                  setClusterStack((prev) => [...prev, level])
-                  return
-                }
+          onSelect={(n) =>
+            n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
+          }
+          // The spotlight click, on a member node or anywhere in the community's hull: it
+          // isolates the community (the hover previews exactly this set) — recursively:
+          // inside a focus the ids come from re-detection on the isolated subgraph, so the
+          // click drills into a sub-community. It deliberately does NOT open the explorer
+          // panel — the click means "zoom in", not "inspect". The canvas only fires this
+          // for isolatable communities (spotlight on, proper subset of the visible real
+          // nodes) — a level that doesn't subdivide, and any unclustered node, falls back
+          // to the plain select above; the subset guard here is belt-and-braces.
+          onClusterClick={(cid) => {
+            if (clusterIds === null) return
+            const paths = new Set<string>()
+            let anchor = ''
+            nodes.forEach((m, j) => {
+              if (clusterIds[j] === cid) {
+                if (anchor === '') anchor = m.path
+                paths.add(m.path)
               }
+            })
+            if (paths.size === 0 || paths.size >= realCount) return
+            const level: ClusterFocus = {
+              paths,
+              label: clusterLabels.get(cid) ?? '',
+              domain: clusterDomains.get(cid) ?? null,
+              anchor,
             }
-            selectPage(n.path)
+            setClusterStack((prev) => [...prev, level])
           }}
           // Double-click goes straight to the article; a gap has no page to open, but
           // its explorer panel is already up from the first click of the pair.

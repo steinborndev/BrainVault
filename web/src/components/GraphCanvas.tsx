@@ -92,11 +92,15 @@ export interface GraphCanvasProps {
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
    */
   fitKey?: string
+  /** Single click/tap on a node (when the click doesn't isolate — see onClusterClick). */
+  onSelect: (node: GraphNode) => void
   /**
-   * Single click/tap on a node. `index` is the node's position in `nodes` — the caller needs
-   * it to look up cluster membership (the spotlight-click isolation) without a path scan.
+   * Spotlight click on an isolatable community — on one of its member nodes OR anywhere
+   * inside its hull (the hull is one clickable surface; demanding a precise node hit made
+   * the isolation gesture fiddly). The canvas guarantees the cid is isolatable (spotlight
+   * on, id ≥ 0, proper subset of the visible real nodes); the caller does the isolating.
    */
-  onSelect: (node: GraphNode, index: number) => void
+  onClusterClick?: (cid: number) => void
   /**
    * Double-click / double-tap on a node. The click-vs-open split mirrors every file
    * manager: single opens the explorer panel, double navigates to the page itself.
@@ -224,7 +228,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, onSelect, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, onSelect, onClusterClick, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -234,6 +238,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const [hover, setHover] = useState<number | null>(null)
   const hoverRef = useRef<number | null>(null)
   hoverRef.current = hover
+  // Hovered community HULL (spotlight only): the pointer is inside a cluster's tinted area
+  // without touching a node. Keeps the community highlight from flickering off between
+  // member nodes and makes the whole hull one clickable isolate-surface. Only ever holds an
+  // ISOLATABLE cid (the hit-test applies the proper-subset guard before setting it).
+  const [hullHover, setHullHover] = useState<number | null>(null)
+  const hullHoverRef = useRef<number | null>(null)
+  hullHoverRef.current = hullHover
   const [layouting, setLayouting] = useState(false)
   // Hover-driven neighborhood spotlight, OFF by default: it dims the rest of the graph and
   // drops their labels, which makes precise clicking hard as it flickers under the pointer.
@@ -266,6 +277,22 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     })
     return map
   }, [clusters])
+
+  /**
+   * The node's community when a spotlight click would isolate it, else -1: spotlight on,
+   * real community, and a PROPER subset of the visible real nodes — a level that doesn't
+   * subdivide has nothing left to isolate.
+   */
+  const isolatableCidOf = useCallback(
+    (i: number): number => {
+      if (!spotlight || clusters === null) return -1
+      const cid = clusters[i] ?? -1
+      if (cid < 0) return -1
+      const set = clusterSets?.get(cid)
+      return set !== undefined && set.size < nodes.length - (ghostIndices?.size ?? 0) ? cid : -1
+    },
+    [spotlight, clusters, clusterSets, nodes.length, ghostIndices],
+  )
 
   // One guaranteed label per domain-region of every connected component big enough to read as
   // a cluster. Without this, the label loop's global degree sort + fixed budget fill every slot
@@ -322,6 +349,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    // Anything worth redrawing may have moved the world — invalidate the hull hit cache.
+    drawEpochRef.current++
     const pos = positionsRef.current
     const t = transformRef.current
     const dpr = window.devicePixelRatio || 1
@@ -377,30 +406,36 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // node still keeps its own label + tooltip (via `interactive` below) so pointing still
     // tells you what a node is — only the neighborhood dimming is gated.
     const spotHover = hoverSpotlightRef.current ? hovered : null
-    // The hovered node's community, when it has one: the hover spotlight previews the exact
-    // set a click would isolate (Vault.tsx handles the click). Community-less nodes (id -1)
-    // fall back to the 1-hop neighborhood, and so do the persistent selection/focus
-    // spotlights — those answer "what does THIS page link to", not "what belongs together".
-    // A community spanning every visible real node subdivides nothing (an isolated cluster
-    // that Louvain can't split further) — treated as absent, mirroring the caller's
-    // proper-subset click guard, so the spotlight degrades to 1-hop instead of lighting
-    // everything up.
-    const rawSpotCid = spotHover !== null && clusters !== null ? clusters[spotHover] ?? -1 : -1
+    // The hovered COMMUNITY, from either source: a hovered member node, or the pointer
+    // resting inside the community's hull between nodes (hullHover) — one highlight, no
+    // flicker across the gap. It previews the exact set a click would isolate (Vault.tsx
+    // handles the click). Community-less nodes (id -1) fall back to the 1-hop neighborhood,
+    // and so do the persistent selection/focus spotlights — those answer "what does THIS
+    // page link to", not "what belongs together". A community spanning every visible real
+    // node subdivides nothing (an isolated cluster Louvain can't split further) — treated
+    // as absent, mirroring the click guard, so the spotlight degrades to 1-hop instead of
+    // lighting everything up.
+    const rawSpotCid =
+      clusters === null ? -1
+      : spotHover !== null ? clusters[spotHover] ?? -1
+      : hoverSpotlightRef.current && lastPointerRef.current !== null ? hullHoverRef.current ?? -1
+      : -1
     const realNodeCount = nodes.length - (ghostIndices?.size ?? 0)
     const spotCid =
       rawSpotCid >= 0 && (clusterSets?.get(rawSpotCid)?.size ?? 0) < realNodeCount ? rawSpotCid : -1
     const active = spotHover ?? selectedIndex ?? focusIndex
     const highlight =
-      active !== null
-        ? spotCid >= 0
-          ? clusterSets!.get(spotCid)!
-          : new Set([active, ...(neighbors.get(active) ?? [])])
-        : null
-    // The transient hover may dim hard; a selection/focus spotlight is long-lived, so it
-    // dims gently enough that the rest of the graph stays readable underneath it.
-    const dimNode = spotHover !== null ? 0.18 : 0.45
-    const dimEdge = spotHover !== null ? 0.08 : 0.18
-    const dimLabel = spotHover !== null ? 0.15 : 0.4
+      spotCid >= 0
+        ? clusterSets!.get(spotCid)!
+        : active !== null
+          ? new Set([active, ...(neighbors.get(active) ?? [])])
+          : null
+    // A transient hover (node or hull) may dim hard; a selection/focus spotlight is long-
+    // lived, so it dims gently enough that the rest of the graph stays readable underneath.
+    const transientSpot = spotHover !== null || spotCid >= 0
+    const dimNode = transientSpot ? 0.18 : 0.45
+    const dimEdge = transientSpot ? 0.08 : 0.18
+    const dimLabel = transientSpot ? 0.15 : 0.4
 
     // Visible world-rect for culling (small margin for radii/labels).
     const margin = 40 / t.k
@@ -975,6 +1010,65 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     [nodes, radius, toWorld],
   )
 
+  /**
+   * Community-hull hit-test for the spotlight (screen coords → isolatable cid, or -1): the
+   * whole tinted hull is one hover/click surface, so the highlight doesn't flicker off
+   * between member nodes and isolating doesn't demand a precise node hit. Padded hulls are
+   * rebuilt lazily, at most once per DRAWN frame — positions drift while the layout cools,
+   * and the draw epoch is the cheapest "world changed" signal there is. Overlapping hulls
+   * (a dense domain's sub-communities interleave) resolve to the nearest member's community.
+   * Spanning communities (nothing to isolate) are skipped, mirroring isolatableCidOf.
+   */
+  const drawEpochRef = useRef(0)
+  const hullHitCacheRef = useRef<{ epoch: number; hulls: Map<number, Pt[]> }>({ epoch: -1, hulls: new Map() })
+  const hitCluster = useCallback(
+    (sx: number, sy: number): number => {
+      if (!spotlight || clusters === null || clusterSets === null) return -1
+      const pos = positionsRef.current
+      if (pos.length < nodes.length * 2) return -1
+      const cache = hullHitCacheRef.current
+      if (cache.epoch !== drawEpochRef.current) {
+        cache.epoch = drawEpochRef.current
+        cache.hulls = new Map()
+        const members = new Map<number, Pt[]>()
+        for (let i = 0; i < nodes.length; i++) {
+          const cid = clusters[i] ?? -1
+          if (cid < 0) continue
+          const x = pos[i * 2]!
+          if (Number.isNaN(x)) continue
+          ;(members.get(cid) ?? members.set(cid, []).get(cid)!).push([x, pos[i * 2 + 1]!])
+        }
+        const pad = 26 / transformRef.current.k
+        for (const [cid, pts] of members) {
+          if (pts.length < 3) continue
+          const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length
+          const cy = pts.reduce((s, p) => s + p[1], 0) / pts.length
+          cache.hulls.set(cid, expandHull(convexHull(pts), cx, cy, pad))
+        }
+      }
+      const { x, y } = toWorld(sx, sy)
+      const realN = nodes.length - (ghostIndices?.size ?? 0)
+      let best = -1
+      let bestD = Infinity
+      for (const [cid, hull] of cache.hulls) {
+        if (!pointInPolygon(x, y, hull)) continue
+        const set = clusterSets.get(cid)
+        if (set === undefined || set.size >= realN) continue
+        for (const i of set) {
+          const dx = pos[i * 2]! - x
+          const dy = pos[i * 2 + 1]! - y
+          const d = dx * dx + dy * dy
+          if (d < bestD) {
+            bestD = d
+            best = cid
+          }
+        }
+      }
+      return best
+    },
+    [spotlight, clusters, clusterSets, nodes.length, ghostIndices, toWorld],
+  )
+
   // ---- hover refresh: the hover is only correct at the moment of a pointer event, but the
   // world also moves WITHOUT one — layout ticks drift nodes under a stationary cursor, a pan
   // ends with the world shifted, and a node-set change (filter/SSE) reuses the stale INDEX
@@ -988,7 +1082,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       setHover(next)
       scheduleDraw()
     }
-  }, [hitTest, scheduleDraw])
+    const hcid = at === null || next !== null ? -1 : hitCluster(at.x, at.y)
+    const nextHull = hcid >= 0 ? hcid : null
+    if (nextHull !== hullHoverRef.current) {
+      setHullHover(nextHull)
+      scheduleDraw()
+    }
+  }, [hitTest, hitCluster, scheduleDraw])
   const refreshHoverRef = useRef(refreshHover)
   refreshHoverRef.current = refreshHover
 
@@ -1004,6 +1104,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const onBlur = (): void => {
       lastPointerRef.current = null
       if (hoverRef.current !== null) setHover(null)
+      if (hullHoverRef.current !== null) setHullHover(null)
       scheduleDraw()
     }
     window.addEventListener('blur', onBlur)
@@ -1034,8 +1135,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // or it would flash at the wrap's origin.
   useLayoutEffect(() => {
     const at = lastPointerRef.current
-    if (hover !== null && at !== null) positionTooltip(at.x, at.y)
-  }, [hover, positionTooltip])
+    if ((hover !== null || hullHover !== null) && at !== null) positionTooltip(at.x, at.y)
+  }, [hover, hullHover, positionTooltip])
 
   /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
   const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
@@ -1118,6 +1219,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       setHover(hit)
       scheduleDraw()
     }
+    // Between member nodes the pointer is still INSIDE the community's hull — keep the
+    // cluster highlight up via the hull hit-test instead of letting it flicker off.
+    const hcid = hit === null ? hitCluster(e.clientX, e.clientY) : -1
+    const nextHull = hcid >= 0 ? hcid : null
+    if (nextHull !== hullHoverRef.current) {
+      setHullHover(nextHull)
+      scheduleDraw()
+    }
     positionTooltip(e.clientX, e.clientY)
   }
   const onPointerUp = (e: React.PointerEvent): void => {
@@ -1139,11 +1248,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
             onOpen(node)
           } else {
             lastTapRef.current = { time: now, path: node.path }
-            onSelect(node, hit)
+            const cid = onClusterClick !== undefined ? isolatableCidOf(hit) : -1
+            if (cid >= 0) onClusterClick!(cid)
+            else onSelect(node)
           }
         } else {
           lastTapRef.current = null
-          onClear?.()
+          // No node under the pointer — but inside a community's hull, the spotlight click
+          // still isolates: the hull is the clickable surface, not just its member dots.
+          const cid = onClusterClick !== undefined ? hitCluster(e.clientX, e.clientY) : -1
+          if (cid >= 0) onClusterClick!(cid)
+          else onClear?.()
         }
       }
       // A pan/pinch moved the world under the cursor while hover updates were suppressed —
@@ -1206,19 +1321,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Whether a click on the hovered node would isolate its community (instead of selecting) —
-  // drives the zoom-in cursor and the tooltip hint. Mirrors draw()'s spanning guard: a
-  // community covering every visible real node has nothing left to subdivide.
+  // Whether a click at the pointer would isolate a community (instead of selecting or
+  // clearing) — drives the zoom-in cursor and the tooltip hint, for both hover sources:
+  // a member node, or the hull area between nodes.
   const hoverIsolatable =
-    hover !== null &&
-    spotlight &&
-    clusters !== null &&
-    (() => {
-      const cid = clusters[hover] ?? -1
-      if (cid < 0) return false
-      const set = clusterSets?.get(cid)
-      return set !== undefined && set.size < nodes.length - (ghostIndices?.size ?? 0)
-    })()
+    onClusterClick !== undefined &&
+    ((hover !== null && isolatableCidOf(hover) >= 0) || (hover === null && hullHover !== null))
 
   return (
     <div className="graph-canvas-wrap">
@@ -1236,13 +1344,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
             setHover(null)
             scheduleDraw()
           }
+          if (hullHoverRef.current !== null) {
+            setHullHover(null)
+            scheduleDraw()
+          }
         }}
         role="img"
         aria-label={`Wikilink graph with ${nodes.length} pages`}
         style={{
           // zoom-in signals that a click will isolate the hovered node's community rather
           // than open the explorer panel (spotlight on + the node belongs to one).
-          cursor: hover !== null ? (hoverIsolatable ? 'zoom-in' : 'pointer') : drag.current ? 'grabbing' : 'grab',
+          cursor: hoverIsolatable ? 'zoom-in' : hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab',
           touchAction: 'none',
         }}
       />
@@ -1287,6 +1399,17 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
               )}
             </>
           )}
+        </div>
+      )}
+      {/* Hull hover (inside a community's tinted area, between nodes): name the community
+          the click would isolate — same pointer-following tooltip, node variant wins. */}
+      {hover === null && hullHover !== null && (
+        <div className="graph-tooltip" ref={tooltipRef}>
+          <strong>{clusterLabels?.get(hullHover) ?? 'community'}</strong>
+          <span>
+            {clusterSets?.get(hullHover)?.size ?? 0} pages
+            {onClusterClick !== undefined ? ' · click to isolate' : ''}
+          </span>
         </div>
       )}
     </div>
