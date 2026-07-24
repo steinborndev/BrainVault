@@ -19,6 +19,7 @@ import { GraphCanvas, domainColor, type Lens } from '../components/GraphCanvas.t
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { Tip } from '../components/Tip.tsx'
+import { linkifyText } from '../lib/linkify.tsx'
 import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { timeAgo } from '../lib/format.ts'
@@ -61,7 +62,10 @@ function frontmatter(markdown: string): { fields: Array<[string, string]>; body:
   return { fields, body: markdown.slice(m[0].length) }
 }
 
-/** Splits a frontmatter value into text and wikilink parts, rendering the links via `linkTo`. */
+/**
+ * Renders a frontmatter value: wikilinks become in-app navigation, and the plain text around
+ * them gets bare URLs and patent numbers auto-linked (so a `url:` or patent field is clickable).
+ */
 function renderMetaValue(
   value: string,
   linkTo: (target: string, label: string, key: string) => React.ReactNode,
@@ -72,15 +76,14 @@ function renderMetaValue(
   let m: RegExpExecArray | null
   let i = 0
   while ((m = re.exec(value)) !== null) {
-    if (m.index > last) parts.push(value.slice(last, m.index))
+    if (m.index > last) parts.push(...linkifyText(value.slice(last, m.index), `meta-t${i}`))
     const body = m[1]!
     const target = body.split('|')[0]!.split('#')[0]!.trim()
     const label = (body.split('|')[1] ?? body.split('#')[0])!.trim()
     parts.push(linkTo(target, label || target, `meta-${i++}`))
     last = m.index + m[0].length
   }
-  if (parts.length === 0) return value
-  if (last < value.length) parts.push(value.slice(last))
+  if (last < value.length) parts.push(...linkifyText(value.slice(last), `meta-t${i}`))
   return parts
 }
 

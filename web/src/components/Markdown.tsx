@@ -10,6 +10,7 @@
  */
 
 import type { ReactNode } from 'react'
+import { linkifyText } from '../lib/linkify.tsx'
 
 export type WikilinkRenderer = (target: string, label: string, key: string) => ReactNode
 
@@ -25,7 +26,8 @@ function inline(text: string, keyBase: string, ctx: InlineCtx): ReactNode[] {
   let m: RegExpExecArray | null
   let i = 0
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) nodes.push(text.slice(last, m.index))
+    // Plain text between tokens: auto-link bare URLs and patent numbers.
+    if (m.index > last) nodes.push(...linkifyText(text.slice(last, m.index), `${keyBase}-t${i}`))
     const tok = m[0]
     const key = `${keyBase}-${i++}`
     if (tok.startsWith('`')) {
@@ -60,7 +62,7 @@ function inline(text: string, keyBase: string, ctx: InlineCtx): ReactNode[] {
     }
     last = m.index + tok.length
   }
-  if (last < text.length) nodes.push(text.slice(last))
+  if (last < text.length) nodes.push(...linkifyText(text.slice(last), `${keyBase}-t${i}`))
   return nodes
 }
 
