@@ -41,7 +41,7 @@ import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
 import { readDomainRegistry, domainSystemPrompt } from './domains.js'
-import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
+import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST, TAG_HYGIENE_RULES } from './system-prompt.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { Mutex } from '../util/mutex.js'
@@ -842,6 +842,7 @@ export class IngestQueue {
         domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
         PAGE_HYGIENE_CHECKLIST,
         ENTITY_NOTABILITY_RULES,
+        TAG_HYGIENE_RULES,
       ]
         .filter(Boolean)
         .join('\n\n'),
@@ -1051,6 +1052,7 @@ export class IngestQueue {
         domainSystemPrompt(readDomainRegistry(this.vaultRoot)),
         PAGE_HYGIENE_CHECKLIST,
         ENTITY_NOTABILITY_RULES,
+        TAG_HYGIENE_RULES,
       ]
         .filter(Boolean)
         .join('\n\n'),

@@ -22,7 +22,28 @@ import type {
   DomainReviewEntry,
   CandidatesResponse,
 } from '../api/types.ts'
-import { computeTagReport } from '../lib/tagReport.ts'
+import { computeTagReport, type TagReport } from '../lib/tagReport.ts'
+import type { TagFixAction } from '../api/types.ts'
+
+/** The tag-fix route's hard cap on actions per run — mirrored so the button says what runs. */
+const MAX_TAG_ACTIONS = 20
+
+/** Merge direction for a variant pair: fold the less common spelling into the more common one. */
+const mergeDir = (v: { a: string; b: string; aCount: number; bCount: number }): [string, string] =>
+  v.aCount <= v.bCount ? [v.a, v.b] : [v.b, v.a]
+
+/** The concrete drop/merge actions for the currently-checked finding keys. */
+function selectedActions(report: TagReport, selected: ReadonlySet<string>): TagFixAction[] {
+  const actions: TagFixAction[] = []
+  for (const v of report.variants) {
+    const [from, to] = mergeDir(v)
+    if (selected.has(`merge|${from}|${to}`)) actions.push({ kind: 'merge', from, to })
+  }
+  for (const e of report.domainEchoes) {
+    if (e.domain !== 'unassigned' && selected.has(`drop|${e.tag}`)) actions.push({ kind: 'drop', tag: e.tag })
+  }
+  return actions
+}
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
@@ -204,8 +225,8 @@ export function Maintenance(): React.ReactElement {
           {domains.data?.installed && <DomainCandidates vaultName={vaultName} />}
         </div>
 
-        {/* Tag hygiene (read-only lint equivalent for tags) */}
-        <TagHygieneCard nodes={graph.data?.nodes} />
+        {/* Tag hygiene (lint equivalent for tags + the bounded repair run) */}
+        <TagHygieneCard nodes={graph.data?.nodes} vaultName={vaultName} />
       </div>
 
       <div className="mcol">
@@ -224,16 +245,49 @@ export function Maintenance(): React.ReactElement {
 }
 
 /**
- * Tag hygiene (level 2 of the tag plan): the deterministic, read-only lint equivalent for
- * tags — likely spelling variants, tags implied by another tag, tags that just echo a
- * domain, and single-use tags. Computed client-side from the graph the tab already loads;
- * nothing is written. The repair itself stays a (future) sanctioned agent run per hard
- * rule 1 — this card is the evidence such a run would act on.
+ * Tag hygiene: the deterministic, read-only lint equivalent for tags (level 2 of the tag
+ * plan) — likely spelling variants, tags implied by another tag, tags that just echo a
+ * domain, and single-use tags — plus the bounded repair (level 3): actionable findings get
+ * a checkbox, "Fix selected" starts an agent run over exactly those drop/merge actions
+ * (hard rule 1: the agent writes, one revertable commit). Variants repair as a merge into
+ * the more common spelling; domain echoes as a drop — except echoes of the `unassigned`
+ * bucket, which are missing DOMAINS, not redundancy, and get no checkbox.
  */
-function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }): React.ReactElement | null {
+function TagHygieneCard({
+  nodes,
+  vaultName,
+}: {
+  nodes: readonly GraphNode[] | undefined
+  vaultName: string
+}): React.ReactElement | null {
+  const qc = useQueryClient()
   const report = useMemo(() => (nodes !== undefined ? computeTagReport(nodes) : null), [nodes])
   const [showSingletons, setShowSingletons] = useState(false)
+  /** Selected repair actions, keyed "merge|from|to" / "drop|tag" (stale keys simply no-op). */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  const fix = useMaintenanceRun(() =>
+    api.tagFix(
+      (report === null ? [] : selectedActions(report, selected)).slice(0, MAX_TAG_ACTIONS),
+    ),
+  )
+  // A finished fix changed frontmatter → the graph (and with it this report) is stale.
+  const fixedOk = fix.result?.ok === true
+  useEffect(() => {
+    if (fixedOk) {
+      setSelected(new Set())
+      void qc.invalidateQueries({ queryKey: ['graph'] })
+    }
+  }, [fixedOk, qc])
   if (report === null) return null
+  const actions = selectedActions(report, selected)
+  const toggle = (key: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
   const findingCount = report.variants.length + report.implications.length + report.domainEchoes.length
   const CAP = 8 // evidence, not an endless list — the counts carry the "how bad is it"
   return (
@@ -241,8 +295,20 @@ function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }):
       <div className="section-head">
         <h3 className="section-title">
           Tags — hygiene
-          <Tip text="Deterministic tag lint, computed from the live graph — nothing is written. Variants: two tags that look like spellings of the same thing. Implied: a tag whose pages (almost) always carry another tag too. Domain echoes: a tag that just repeats the page's domain. Single-use: tags with exactly one page. Repairing (merging/dropping tags) will be an agent run using this report as its plan." />
+          <Tip text="Deterministic tag lint, computed from the live graph — the report itself writes nothing. Variants: two tags that look like spellings of the same thing (fix = merge into the more common one). Implied: a tag whose pages (almost) always carry another tag too (informational). Domain echoes: a tag that just repeats the page's domain (fix = drop it). Single-use: tags with exactly one page. 'Fix selected' runs an agent over exactly the checked actions — frontmatter tags only, one revertable git commit." />
         </h3>
+        <button
+          className="btn primary"
+          disabled={actions.length === 0 || fix.running}
+          onClick={fix.start}
+          title={
+            actions.length === 0
+              ? 'Check findings below to build the repair plan'
+              : `Apply ${Math.min(actions.length, MAX_TAG_ACTIONS)} tag repair${actions.length === 1 ? '' : 's'} (one git commit — revertable)`
+          }
+        >
+          {fix.running ? 'Fixing…' : `Fix selected${actions.length > 0 ? ` (${Math.min(actions.length, MAX_TAG_ACTIONS)})` : ''}`}
+        </button>
       </div>
       <div className="tool-meta">
         {report.distinctTags} distinct tags on {report.taggedPages} of {report.knowledgePages} knowledge pages
@@ -256,17 +322,28 @@ function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }):
               <h4>
                 Likely variants <span className="cnt">{report.variants.length}</span>
               </h4>
-              {report.variants.slice(0, CAP).map((v) => (
-                <div key={`${v.a}|${v.b}`} className="trow">
-                  <span className="pair">
-                    <code>#{v.a}</code> <span className="sep">≈</span> <code>#{v.b}</code>
-                  </span>
-                  <span className="meta">
-                    {v.aCount} + {v.bCount} pages
-                    {v.both > 0 ? ` · ${v.both} carry both` : ''}
-                  </span>
-                </div>
-              ))}
+              {report.variants.slice(0, CAP).map((v) => {
+                const [, to] = mergeDir(v)
+                const key = `merge|${mergeDir(v).join('|')}`
+                return (
+                  <label key={key} className="trow selectable">
+                    <span className="pair">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(key)}
+                        onChange={() => toggle(key)}
+                        disabled={fix.running}
+                        aria-label={`Merge into #${to}`}
+                      />
+                      <code>#{v.a}</code> <span className="sep">≈</span> <code>#{v.b}</code>
+                    </span>
+                    <span className="meta">
+                      {v.aCount} + {v.bCount} pages
+                      {v.both > 0 ? ` · ${v.both} carry both` : ''} · merge → <code>#{to}</code>
+                    </span>
+                  </label>
+                )
+              })}
               {report.variants.length > CAP && <div className="more">+{report.variants.length - CAP} more</div>}
             </section>
           )}
@@ -295,19 +372,32 @@ function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }):
               <h4>
                 Domain echoes <span className="cnt">{report.domainEchoes.length}</span>
               </h4>
-              {report.domainEchoes.slice(0, CAP).map((e) => (
-                <div key={`${e.tag}|${e.domain}`} className="trow">
-                  <span className="pair">
-                    <code>#{e.tag}</code> <span className="sep">≙</span> <span className="dom">{e.domain}</span>
-                  </span>
-                  <span className="meta">
-                    {e.inDomain} of {e.domainSize} pages in the domain · {e.tagCount} uses overall
-                    {/* A tag blanketing the unassigned bucket isn't redundancy — it's the
-                        domain those pages are waiting for. */}
-                    {e.domain === 'unassigned' ? ' · likely a missing domain' : ''}
-                  </span>
-                </div>
-              ))}
+              {report.domainEchoes.slice(0, CAP).map((e) => {
+                const missing = e.domain === 'unassigned'
+                const key = `drop|${e.tag}`
+                return (
+                  <label key={`${e.tag}|${e.domain}`} className={`trow${missing ? '' : ' selectable'}`}>
+                    <span className="pair">
+                      {/* A tag blanketing the unassigned bucket isn't redundancy — it's the
+                          domain those pages are waiting for. No drop offered. */}
+                      {!missing && (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(key)}
+                          onChange={() => toggle(key)}
+                          disabled={fix.running}
+                          aria-label={`Drop #${e.tag}`}
+                        />
+                      )}
+                      <code>#{e.tag}</code> <span className="sep">≙</span> <span className="dom">{e.domain}</span>
+                    </span>
+                    <span className="meta">
+                      {e.inDomain} of {e.domainSize} pages in the domain · {e.tagCount} uses overall
+                      {missing ? ' · likely a missing domain' : ' · drop'}
+                    </span>
+                  </label>
+                )
+              })}
               {report.domainEchoes.length > CAP && (
                 <div className="more">+{report.domainEchoes.length - CAP} more</div>
               )}
@@ -335,6 +425,9 @@ function TagHygieneCard({ nodes }: { nodes: readonly GraphNode[] | undefined }):
           )}
         </div>
       )}
+      {fix.running && <JobLog jobId="maintenance:tag-fix" seed={false} />}
+      {fix.error && <div className="toast err">{fix.error}</div>}
+      {fix.result && <RunResult result={fix.result} vaultName={vaultName} label="Fixed" />}
     </div>
   )
 }

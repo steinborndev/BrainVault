@@ -1761,6 +1761,16 @@ details.hot-cache[open] .hc-summary::before {
 }
 .tagrep .trow .pair {
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tagrep .trow.selectable {
+  cursor: pointer;
+}
+.tagrep .trow input[type='checkbox'] {
+  margin: 0 4px 0 0;
+  accent-color: var(--accent);
 }
 .tagrep .trow .sep {
   color: var(--text-faint);

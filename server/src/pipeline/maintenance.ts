@@ -20,7 +20,7 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { runAgent, EMPTY_USAGE, type AgentAuth, type AgentRunResult, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
-import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST } from './system-prompt.js'
+import { ENTITY_NOTABILITY_RULES, PAGE_HYGIENE_CHECKLIST, TAG_HYGIENE_RULES } from './system-prompt.js'
 import { formatMessage } from './format-message.js'
 import { commitVault, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
 import { RunRegistry } from './run-registry.js'
@@ -53,6 +53,7 @@ export type MaintenanceKind =
   | 'domain-review'
   | 'cleanup'
   | 'repair'
+  | 'tag-fix'
   | 'retrieve-index'
 
 /**
@@ -64,6 +65,16 @@ export type MaintenanceKind =
 export type RepairTask =
   | { readonly kind: 'connect'; readonly path: string; readonly reason?: string }
   | { readonly kind: 'edge'; readonly from: string; readonly to: string; readonly reason?: string }
+
+/**
+ * One user-selected tag repair from the dashboard's tag-hygiene report (level 3 of the tag
+ * plan): `drop` removes a redundant tag everywhere (domain echoes), `merge` folds a spelling
+ * variant into its canonical form. The route validates every tag against the live graph's
+ * tag set before this reaches a prompt.
+ */
+export type TagFixAction =
+  | { readonly kind: 'drop'; readonly tag: string }
+  | { readonly kind: 'merge'; readonly from: string; readonly to: string }
 
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
@@ -391,6 +402,40 @@ export class MaintenanceRunner {
   }
 
   /**
+   * Applies user-selected tag repairs from the dashboard's tag-hygiene report (level 3 of
+   * the tag plan; the report in web/src/lib/tagReport.ts is the detector). Bounded to
+   * exactly the actions the USER picked — never a vault-wide "clean the tags" sweep — and
+   * frontmatter-only by construction, the same discipline as the domain backfill. One
+   * revertable commit.
+   */
+  startTagFix(actions: readonly TagFixAction[]): MaintenanceRun {
+    if (actions.length === 0) throw new Error('tag fix started with no actions (route validates — wiring bug)')
+    const lines = actions.map((a, i) =>
+      a.kind === 'drop' ? `${i + 1}. DROP #${a.tag}` : `${i + 1}. MERGE #${a.from} INTO #${a.to}`,
+    )
+    return this.start(
+      'tag-fix',
+      'The user reviewed the wiki\'s tag-hygiene report and selected these tag repairs. ' +
+        `Apply ONLY them:\n\n${lines.join('\n')}\n\n` +
+        'Rules:\n' +
+        '- Edits are limited to YAML frontmatter of pages under wiki/: the `tags:` list, plus ' +
+        'bumping `updated:` on every page you change.\n' +
+        '- DROP <tag>: remove exactly that tag from the `tags:` list of every page carrying it.\n' +
+        '- MERGE <from> INTO <to>: on every page carrying <from>, replace it with <to>; when ' +
+        '<to> is already present, just remove <from> — never leave a duplicate tag.\n' +
+        '- Find affected pages exhaustively (Grep the frontmatter for each tag, exact match) — ' +
+        'a page missed is a report finding that comes straight back.\n' +
+        '- Match tags EXACTLY: never touch a tag that merely contains or resembles a listed ' +
+        'one, and leave every other tag in place.\n' +
+        '- Do not touch the `domain:` field, any other frontmatter field, page bodies, titles, ' +
+        'wikilinks or file names. Do not create, delete, rename or merge any page.\n\n' +
+        'Finish by reporting, per action, how many pages you changed.',
+      'ingest',
+      { commitMessage: `maintenance: tag fix (${actions.length} action${actions.length === 1 ? '' : 's'})` },
+    )
+  }
+
+  /**
    * Files every existing wiki page under a registry domain (SPEC.md §12.4 Stufe 2). Two jobs
    * in one: the catch-up for pages written before the registry existed, and the adoption step
    * after a human adds a domain — `unassigned` pages are re-classified against the CURRENT
@@ -671,7 +716,7 @@ export class MaintenanceRunner {
       // on ingest runs: any of these runs may write pages.
       const systemPromptExtra =
         opts.systemPromptExtra ??
-        [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST, ENTITY_NOTABILITY_RULES]
+        [domainSystemPrompt(readDomainRegistry(this.vaultRoot)), PAGE_HYGIENE_CHECKLIST, ENTITY_NOTABILITY_RULES, TAG_HYGIENE_RULES]
           .filter(Boolean)
           .join('\n\n')
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash

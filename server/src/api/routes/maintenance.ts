@@ -12,7 +12,12 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
-import { DomainRegistryMissingError, LintReportMissingError, type RepairTask } from '../../pipeline/maintenance.js'
+import {
+  DomainRegistryMissingError,
+  LintReportMissingError,
+  type RepairTask,
+  type TagFixAction,
+} from '../../pipeline/maintenance.js'
 import { RetrieveScriptsMissingError, retrieveIndexStats } from '../../pipeline/retrieve-index.js'
 import { readDomainRegistry, DOMAIN_REGISTRY_PATH } from '../../pipeline/domains.js'
 import { findDomainCandidates } from '../../pipeline/domain-candidates.js'
@@ -126,6 +131,53 @@ export function registerMaintenanceRoute(
       }
     }
     return reply.code(202).send(maintenance.startGraphRepair(tasks))
+  })
+
+  /**
+   * Tag repair (the Maintenance tab's tag-hygiene card): a bounded agent run over
+   * user-selected drop/merge actions. Tags are attacker-adjacent input headed for a
+   * prompt — every named tag must exist in the LIVE graph (no free-text tags), any invalid
+   * action rejects the whole request (the user selected specific repairs; silently dropping
+   * one would repair less than they asked), and the action count is hard-capped.
+   */
+  app.post('/api/v1/maintenance/tag-fix', async (req, reply) => {
+    if (credentialMissing(reply)) return reply
+    if (graph === undefined) return reply.code(409).send({ error: 'graph unavailable' })
+    const known = new Set(graph.build().nodes.flatMap((n) => n.tags))
+    const cleanTag = (v: unknown): string | undefined => {
+      if (typeof v !== 'string') return undefined
+      const s = v.trim().replace(/^#/, '')
+      return s !== '' && s.length <= 100 && known.has(s) ? s : undefined
+    }
+    const body = (req.body ?? {}) as { actions?: unknown }
+    const raw = Array.isArray(body.actions) ? body.actions : []
+    if (raw.length === 0 || raw.length > 20) {
+      return reply.code(400).send({ error: 'provide "actions": 1-20 tag repairs' })
+    }
+    const actions: TagFixAction[] = []
+    const seen = new Set<string>()
+    for (const item of raw) {
+      const a = (item ?? {}) as Record<string, unknown>
+      if (a['kind'] === 'drop') {
+        const tag = cleanTag(a['tag'])
+        if (tag === undefined) {
+          return reply.code(400).send({ error: `drop action names no known tag: ${String(a['tag'])}` })
+        }
+        if (!seen.has(`drop|${tag}`)) actions.push({ kind: 'drop', tag })
+        seen.add(`drop|${tag}`)
+      } else if (a['kind'] === 'merge') {
+        const from = cleanTag(a['from'])
+        const to = cleanTag(a['to'])
+        if (from === undefined || to === undefined || from === to) {
+          return reply.code(400).send({ error: `merge action needs two distinct known tags: ${String(a['from'])} -> ${String(a['to'])}` })
+        }
+        if (!seen.has(`merge|${from}|${to}`)) actions.push({ kind: 'merge', from, to })
+        seen.add(`merge|${from}|${to}`)
+      } else {
+        return reply.code(400).send({ error: 'each action needs kind "drop" or "merge"' })
+      }
+    }
+    return reply.code(202).send(maintenance.startTagFix(actions))
   })
 
   // The domain backfill (SPEC.md §12.4 Stufe 2). 409 when no registry is installed — the

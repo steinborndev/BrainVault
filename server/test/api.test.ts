@@ -1173,6 +1173,66 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(prompt).toContain('Do not create, delete, rename or merge')
   })
 
+  it('tag-fix validates tags against the live graph and bounds the run to the actions', async () => {
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(
+      path.join(vaultRoot, 'wiki', 'concepts', 'Tag Fiber.md'),
+      '---\ntags:\n  - fiber\n  - brewing\n---\nx',
+    )
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Tag Fibre.md'), '---\ntags:\n  - fibre\n---\nx')
+
+    // A tag that exists nowhere in the live graph rejects the WHOLE request — the user
+    // selected specific repairs, silently dropping one would repair less than they asked.
+    const unknown = await fetch(`${baseUrl}/api/v1/maintenance/tag-fix`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actions: [{ kind: 'drop', tag: 'no-such-tag' }] }),
+    })
+    expect(unknown.status).toBe(400)
+    const selfMerge = await fetch(`${baseUrl}/api/v1/maintenance/tag-fix`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actions: [{ kind: 'merge', from: 'fiber', to: 'fiber' }] }),
+    })
+    expect(selfMerge.status).toBe(400)
+    const badKind = await fetch(`${baseUrl}/api/v1/maintenance/tag-fix`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actions: [{ kind: 'rename', tag: 'fiber' }] }),
+    })
+    expect(badKind.status).toBe(400)
+
+    let prompt = ''
+    let extra = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      extra = opts.systemPromptExtra ?? ''
+      return okResult('tags fixed')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/tag-fix`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        actions: [
+          { kind: 'merge', from: '#fibre', to: 'fiber' }, // leading # is tolerated
+          { kind: 'drop', tag: 'brewing' },
+        ],
+      }),
+    })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun
+    expect(started.channel).toBe('maintenance:tag-fix')
+
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    // Bounded to exactly the selected actions, frontmatter-only, and the prevention rules
+    // ride along on the system prompt.
+    expect(prompt).toContain('MERGE #fibre INTO #fiber')
+    expect(prompt).toContain('DROP #brewing')
+    expect(prompt).toContain('Do not touch the `domain:` field')
+    expect(extra).toContain('<tag_hygiene>')
+  })
+
   it('research requires a topic; hot-cache starts and settles', async () => {
     const bad = await fetch(`${baseUrl}/api/v1/maintenance/research`, {
       method: 'POST',

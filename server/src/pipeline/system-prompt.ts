@@ -113,6 +113,34 @@ inline-attribution path exists for.
 `.trim()
 
 /**
+ * Tag-hygiene policy appended to every vault-WRITING run, alongside the hygiene checklist.
+ * Motivating case (2026-07-24 tag-hygiene report): 288 distinct tags on 390 pages, with two
+ * domain-synonym tags on nearly every page of one domain, five more tags blanketing exactly
+ * their domain, and 53% of all tags used once — the drift of many independent ingest runs
+ * each coining their own vocabulary. Prevention side; the deterministic tag report in the
+ * dashboard (web/src/lib/tagReport.ts) is the detector, and the tag-fix maintenance run the
+ * repair — keep the three aligned.
+ */
+export const TAG_HYGIENE_RULES = `
+<tag_hygiene>
+Tags say what a page is ABOUT beyond what its frontmatter already encodes. Before adding
+tags to any page:
+
+- Reuse before coining: check the tags that already exist (Grep frontmatter for candidates)
+  and prefer an existing tag over a new spelling of the same idea. Never introduce a
+  variant (singular/plural, hyphenation, near-synonym) of an existing tag.
+- Never tag a page with its own domain, the domain's name in other words, or a synonym of
+  it — the \`domain:\` field already carries that. (One exception: the domain key mirrored
+  into \`tags:\` where the vault's domain rules explicitly require it.)
+- Do not tag what the frontmatter already says elsewhere: no type-mirroring tags beyond the
+  structural ones the vault prescribes (a page with \`type: entity\` needs no extra
+  #organization tag to say so).
+- Prefer few, specific tags over many broad ones. A tag that would apply to most of a
+  domain's pages distinguishes nothing — pick the tags that set THIS page apart.
+</tag_hygiene>
+`.trim()
+
+/**
  * System-prompt extension for the READ-ONLY query runner (SPEC.md §5, §6.3). The chat
  * answers from the wiki and must not mutate it — the sandbox denies vault writes, and this
  * tells the model why so it doesn't waste turns trying to "file the answer back" (a default

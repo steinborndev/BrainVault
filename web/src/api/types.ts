@@ -328,7 +328,13 @@ export type MaintenanceKind =
   | 'domain-review'
   | 'cleanup'
   | 'repair'
+  | 'tag-fix'
   | 'retrieve-index'
+
+/** One tag repair from the tag-hygiene card (POST /maintenance/tag-fix). */
+export type TagFixAction =
+  | { kind: 'drop'; tag: string }
+  | { kind: 'merge'; from: string; to: string }
 
 /** Retrieval-index status (GET /maintenance/retrieve-index, SPEC §12.6). */
 export interface RetrieveIndexStatus {

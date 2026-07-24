@@ -18,6 +18,7 @@ import type {
   RevertResponse,
   RetrieveIndexStatus,
   RepairTask,
+  TagFixAction,
   ResearchProfilesResponse,
   DomainsResponse,
   CandidatesResponse,
@@ -186,6 +187,14 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ pages }),
+    }).then(json<MaintenanceRun>),
+
+  /** Tag repair: a bounded agent run over user-selected drop/merge tag actions. */
+  tagFix: (actions: readonly TagFixAction[]): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/tag-fix`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actions }),
     }).then(json<MaintenanceRun>),
 
   /** Graph repair: a bounded agent run over user-selected connectivity problems. */
