@@ -36,6 +36,10 @@ it are in the frontend deep review; the task list is `docs/tasks/TASKS-REDESIGN.
   never resets where you were.
 - **Vertical rhythm:** sections stack with 20px gaps (`.section`); cards use
   `.card.card-pad` (16/18px padding). No ad-hoc margins between siblings.
+- **One row, one height.** Controls sitting side by side (topbar pills, toolbar buttons,
+  search triggers) take their height from `--control-h`, not from padding, and their row
+  centers them. Padding-derived heights drift apart as soon as one control carries
+  different content (a `<kbd>`, an icon, another font size).
 - **Canvas-like areas** (the graph) carry their controls ON the canvas: zoom top-left,
   search top-right, legend bottom-right, trail bottom-left. Panels beside a canvas **dock**
   (the canvas shrinks) - they never overlay a corner that holds a control.

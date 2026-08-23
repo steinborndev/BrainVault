@@ -51,3 +51,32 @@ export function pageFromPath(path: string): string | null {
   if (prefix === null) return null
   return path.slice(prefix.length).split('/').map(decodeURIComponent).join('/')
 }
+
+/**
+ * Where a page view returns to. A page can be entered from the library, the graph, the
+ * palette, the activity feed or a citation, so "back" has to mean "the screen I came from"
+ * rather than one fixed destination.
+ *
+ * Deliberately the last NON-page path: after a chain of wikilink hops, leaving means going
+ * out to that screen, not stepping back one hop per press (the documented Esc semantic).
+ * A cold deep link into a page has no origin and falls back to the graph, where the page's
+ * neighborhood is visible.
+ */
+let originPathValue = '/graph'
+
+export function originPath(): string {
+  return originPathValue
+}
+
+function trackOrigin(): void {
+  const p = currentPath()
+  if (pageFromPath(p) === null) originPathValue = p
+}
+
+if (typeof window !== 'undefined') {
+  trackOrigin()
+  // navigate() dispatches NAV_EVENT after the location changed, so both listeners observe
+  // the NEW path — the one we may have to come back to later.
+  window.addEventListener('popstate', trackOrigin)
+  window.addEventListener(NAV_EVENT, trackOrigin)
+}

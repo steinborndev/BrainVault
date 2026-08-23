@@ -20,7 +20,7 @@ import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { linkifyText } from '../lib/linkify.tsx'
-import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
+import { navigate, pageRoute, pageFromPath, originPath } from '../lib/router.ts'
 import { detectClusters } from '../lib/communities.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { timeAgo } from '../lib/format.ts'
@@ -1931,13 +1931,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   }, [menuOpen])
   const [copiedPath, setCopiedPath] = useState(false)
 
-  // Escape leaves the page for the graph - the round-trip partner of the canvas
-  // double-click. It goes straight to /graph (not history.back): after a chain of wikilink
-  // hops, one press means "out to the graph", not one step back per hop. The back BUTTON
-  // does exactly the same thing, so the two gestures can't disagree (they used to: the
-  // button ran history.back and could leave the screen entirely). Inert while editing -
-  // Escape must never cost a draft - and while typing or a menu is open; gated on this
-  // screen being visible (screens stay mounted, hidden via [hidden]).
+  // Escape leaves the page for the screen it was opened from (library, graph, wherever) -
+  // `originPath()` tracks the last non-page route. After a chain of wikilink hops one press
+  // still means "out to that screen", not one step back per hop. The back BUTTON does
+  // exactly the same thing, so the two gestures can't disagree (they used to: the button
+  // ran history.back and could leave the screen entirely). Inert while editing - Escape
+  // must never cost a draft - and while typing or a menu is open; gated on this screen
+  // being visible (screens stay mounted, hidden via [hidden]).
   const rootRef = useRef<HTMLDivElement>(null)
   const escRef = useRef<(e: KeyboardEvent) => void>(() => {})
   escRef.current = (e: KeyboardEvent): void => {
@@ -1951,7 +1951,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       return
     }
     e.preventDefault()
-    navigate('/graph')
+    navigate(originPath())
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => escRef.current(e)
@@ -2013,6 +2013,19 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     [pageQ.data],
   )
 
+  // What the back gesture is called: it names the screen this page was opened from, so the
+  // hint can never promise a destination the key does not go to.
+  const origin = originPath().split('?')[0]!
+  const backLabel = origin.startsWith('/library')
+    ? 'library'
+    : origin.startsWith('/research')
+      ? 'research'
+      : origin === '/'
+        ? 'home'
+        : origin.startsWith('/inbox')
+          ? 'inbox'
+          : 'graph'
+
   return (
     <div className="vault-page" ref={rootRef}>
       <div className="page-head">
@@ -2020,9 +2033,9 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
           className="btn ghost"
           onClick={() => {
             if (editing && !leaveEditor()) return
-            navigate('/graph')
+            navigate(originPath())
           }}
-          title="Back to the graph (same as Esc)"
+          title={`Back to the ${backLabel} (same as Esc)`}
         >
           <Icon name="back" />
         </button>
@@ -2034,7 +2047,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
           </span>
         ) : (
           <span className="key-hint" aria-hidden>
-            <kbd>Esc</kbd> graph
+            <kbd>Esc</kbd> {backLabel}
           </span>
         )}
         <span className="spacer" />

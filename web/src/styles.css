@@ -28,6 +28,9 @@
   --research: #a78bfa;
   --radius: 12px;
   --radius-sm: 8px;
+  /* Row controls (topbar pills, search trigger, inline buttons) all use this height, so a
+     row can never end up with three slightly different box heights. */
+  --control-h: 32px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -267,6 +270,7 @@ button {
   height: 52px;
   flex: 0 0 52px;
   display: flex;
+  /* Every child is --control-h tall and centered: one row, one height, one baseline. */
   align-items: center;
   gap: 12px;
   padding: 0 16px 0 22px;
@@ -304,12 +308,14 @@ button {
   align-items: center;
   gap: 8px;
   min-width: 240px;
+  height: var(--control-h);
   border: 1px solid var(--border);
   background: var(--bg-elev);
   border-radius: var(--radius-sm);
-  padding: 6px 10px;
+  padding: 0 10px;
   color: var(--text-faint);
   font-size: 13px;
+  line-height: 1;
 }
 .searchbtn:hover {
   border-color: var(--border-strong);
@@ -322,6 +328,7 @@ button {
 }
 .searchbtn kbd {
   margin-left: auto;
+  line-height: 1.5;
 }
 
 .screens {
@@ -391,12 +398,14 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  height: var(--control-h);
   border: 1px solid var(--border);
   background: var(--bg-elev-2);
   color: var(--text-dim);
   font-size: 13px;
   border-radius: 999px;
-  padding: 4px 12px;
+  padding: 0 12px;
+  line-height: 1;
 }
 .status-pill:hover {
   border-color: var(--border-strong);
