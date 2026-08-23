@@ -1,22 +1,22 @@
 /**
  * Community detection for the vault graph (SPEC.md §12.4): deterministic multi-level Louvain
  * plus the cluster labelling/tinting metadata the canvas draws. Lives outside the Vault tab
- * because it is pure graph algorithmics — no React, no view state — and is unit-tested on
+ * because it is pure graph algorithmics - no React, no view state - and is unit-tested on
  * its own (web/test/detectClusters.test.ts).
  */
 
 import type { GraphNode } from '../api/types.ts'
 
-/** Clusters below this many members aren't tinted — a hull needs a body to be worth drawing. */
+/** Clusters below this many members aren't tinted - a hull needs a body to be worth drawing. */
 const MIN_CLUSTER = 4
 
 /**
  * Weight of an edge whose two endpoints carry different `domain:` values, relative to a
  * same-domain edge (1). Below 1 so a cross-domain link (typically a shared person/org entity
- * bridging two fields) is a weak tie the modularity gain rarely rewards merging across — a
+ * bridging two fields) is a weak tie the modularity gain rarely rewards merging across - a
  * lone bridge no longer drags a whole foreign domain into a community. Not 0: a genuinely
  * dense cross-domain seam (two topics that really do interleave) can still merge if the links
- * are many. Edges touching an uncategorized page (no `domain:`) keep full weight — we don't
+ * are many. Edges touching an uncategorized page (no `domain:`) keep full weight - we don't
  * penalize what we can't classify.
  */
 const CROSS_DOMAIN_WEIGHT = 0.25
@@ -26,7 +26,7 @@ const DOMAIN_PURITY = 0.7
 
 /**
  * One Louvain level: greedily move each node into the neighbouring community that most
- * raises modularity, until no move helps. Deterministic — nodes are visited in index order
+ * raises modularity, until no move helps. Deterministic - nodes are visited in index order
  * and equal gains break toward the lowest community id, so there is no run-to-run jitter.
  * `self[i]` is a node's self-loop weight (super-nodes accrue it during aggregation).
  */
@@ -76,13 +76,13 @@ function louvainLevel(
  *
  * This replaced label propagation, which collapsed a dense vault into a single giant
  * cross-domain "community": the meta hub pages (index/log/hot/overview) link into every
- * domain, and LP floods one label across those bridges — the biomedical hull swallowed
+ * domain, and LP floods one label across those bridges - the biomedical hull swallowed
  * cooking, finance, … Modularity resists it: merging weakly-linked domains lowers the score,
  * so Louvain keeps them apart while still finding real sub-communities inside a domain.
  *
  * `weightOf(a, b)` is the weight of the edge; the topology is otherwise link-only. It lets the
  * caller down-weight cross-`domain:` edges so a single bridge node (e.g. a person who authored
- * papers in two unrelated fields) can no longer glue two domains into one community — the
+ * papers in two unrelated fields) can no longer glue two domains into one community - the
  * authoritative `domain:` metadata nudges the purely link-based detection without overriding it.
  */
 export function louvainCommunities(
@@ -143,7 +143,7 @@ export function louvainCommunities(
  * the tail, are excluded and get id -1). Uses multi-level Louvain (see louvainCommunities)
  * so a dense vault yields coherent, domain-respecting communities instead of one giant blob.
  * Returns a per-node id array (compacted, clusters < MIN_CLUSTER folded to -1) and each
- * cluster's label from its most DISTINCTIVE shared tags (see topDistinct — plain frequency
+ * cluster's label from its most DISTINCTIVE shared tags (see topDistinct - plain frequency
  * let one ubiquitous tag label every sub-community of a domain identically).
  */
 export function detectClusters(
@@ -194,10 +194,10 @@ export function detectClusters(
   /**
    * The n most DISTINCTIVE tags of a cluster, not its most frequent ones: score = share of
    * members carrying the tag minus its share outside the cluster. A ubiquitous tag scores
-   * ~0 — #biomedical inside a drilled-into biomedical cluster is on every page in AND
+   * ~0 - #biomedical inside a drilled-into biomedical cluster is on every page in AND
    * outside each sub-community, so it can no longer label every sub-cluster identically;
    * the tags that actually tell the clusters apart win. Structural tags (#source, #concept)
-   * die the same death without needing a list — they are everywhere. Falls back to raw
+   * die the same death without needing a list - they are everywhere. Falls back to raw
    * order when nothing scores clearly positive: a cluster whose members share only
    * ubiquitous tags still deserves its best label. Deterministic: score, count, then name.
    */
@@ -217,7 +217,7 @@ export function detectClusters(
   }
 
   // Each cluster's dominant domain (for the hull tint) and its label. A domain-pure cluster
-  // keeps the tag label; a domain-MIXED one is labelled by its dominant domain instead — the
+  // keeps the tag label; a domain-MIXED one is labelled by its dominant domain instead - the
   // honest name for a community a bridge node stitched across two domains.
   const clusterDomains = new Map<number, string>()
   const clusterLabels = new Map<number, string>()

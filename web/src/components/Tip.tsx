@@ -1,7 +1,7 @@
 /**
  * Info tooltip (ⓘ) for explanatory text. Replaces native `title=` where the text carries
  * meaning: styled, keyboard-reachable (focus shows it, Escape closes) and touch-friendly
- * (tap toggles) — a `title` attribute is none of those.
+ * (tap toggles) - a `title` attribute is none of those.
  */
 
 import { useEffect, useRef, useState } from 'react'

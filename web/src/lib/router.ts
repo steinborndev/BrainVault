@@ -1,6 +1,6 @@
 /**
  * A hand-rolled history router (SPEC.md §12.4 needs deep-linkable vault pages, and the
- * project deliberately avoids a router dependency — it hand-rolls markdown, charts, SSE
+ * project deliberately avoids a router dependency - it hand-rolls markdown, charts, SSE
  * and icons for the same reason). pushState + popstate, exposed as one hook.
  *
  * The server's SPA fallback (`registerFrontend` in api/server.ts) serves index.html for
@@ -20,7 +20,7 @@ export function navigate(path: string, opts: { replace?: boolean } = {}): void {
 }
 
 export function currentPath(): string {
-  // Query string included — the graph view keeps its focus target in `?focus=`.
+  // Query string included - the graph view keeps its focus target in `?focus=`.
   return `${window.location.pathname}${window.location.search}`
 }
 
@@ -46,7 +46,7 @@ export function pageRoute(pagePath: string): string {
 
 /** Inverse of pageRoute: the vault-relative page path, or null if not a page route. */
 export function pageFromPath(path: string): string | null {
-  // `/vault/page/…` is the pre-redesign route — old bookmarks and PWA shortcuts carry it.
+  // `/vault/page/…` is the pre-redesign route - old bookmarks and PWA shortcuts carry it.
   const prefix = path.startsWith('/page/') ? '/page/' : path.startsWith('/vault/page/') ? '/vault/page/' : null
   if (prefix === null) return null
   return path.slice(prefix.length).split('/').map(decodeURIComponent).join('/')

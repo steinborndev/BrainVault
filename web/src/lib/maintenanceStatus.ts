@@ -1,12 +1,12 @@
 /**
  * The maintenance status model (SPEC §12.7 Stufe b): a deterministic, token-free derivation
  * of "what's due" from data the dashboard already loads. Every item carries the three fields
- * the concept demands — WHAT (title), WHY NOW (the concrete number), COST (agent run vs.
- * deterministic) — plus a severity with tab-wide semantics:
+ * the concept demands - WHAT (title), WHY NOW (the concrete number), COST (agent run vs.
+ * deterministic) - plus a severity with tab-wide semantics:
  *
  *   due          blocks other maintenance or degrades quality until handled
  *   recommended  worth doing soon, nothing depends on it
- *   healthy      explicitly fine — "all healthy" is a state, not an empty screen
+ *   healthy      explicitly fine - "all healthy" is a state, not an empty screen
  *
  * Pure function over plain inputs (no fetching, no Date.now inside) so the thresholds stay
  * unit-testable; the `useMaintenanceStatus` hook feeds it from the live queries.
@@ -32,11 +32,11 @@ export interface MaintStatusInput {
   readonly registryInstalled: boolean
   /** Open (non-dismissed) domain candidates waiting for a decision. */
   readonly candidateCount: number
-  /** `unassigned` domain echoes in the tag report — likely missing domains. */
+  /** `unassigned` domain echoes in the tag report - likely missing domains. */
   readonly missingDomainEchoes: number
   /** Preselected conflict-free tag repairs (recommendedKeys().size). */
   readonly tagRepairCount: number
-  /** Newest lint report: its date (YYYY-MM-DD, possibly null) — or null when none exists. */
+  /** Newest lint report: its date (YYYY-MM-DD, possibly null) - or null when none exists. */
   readonly lintReport: { date: string | null } | null
   /** mtime of wiki/hot.md, or null when never refreshed. */
   readonly hotCacheUpdatedAt: string | null
@@ -52,9 +52,9 @@ export interface MaintStatus {
   readonly healthy: number
 }
 
-/** A lint report older than this counts as stale (recommended, never due — nothing blocks on it). */
+/** A lint report older than this counts as stale (recommended, never due - nothing blocks on it). */
 export const LINT_STALE_DAYS = 14
-/** The hot cache serves every agent run's first read — stale earlier than the lint report. */
+/** The hot cache serves every agent run's first read - stale earlier than the lint report. */
 export const HOT_CACHE_STALE_DAYS = 7
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -254,7 +254,7 @@ export interface RunPlanStep {
 
 /**
  * The guided run's plan: only what the status model says is actually due or worth doing,
- * in dependency order (SPEC §12.7). `backfill2` is planned whenever domain decisions are —
+ * in dependency order (SPEC §12.7). `backfill2` is planned whenever domain decisions are -
  * whether it RUNS depends on what the user decides (skipped when nothing was created).
  * The retrieval index never appears: it refreshes itself after ingests.
  */

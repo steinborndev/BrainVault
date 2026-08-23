@@ -1,6 +1,6 @@
 /**
  * Domain-aware layout forces for the vault graph, shared between the layout worker and its
- * unit tests (the worker itself has no exports — `self.onmessage` is its whole surface).
+ * unit tests (the worker itself has no exports - `self.onmessage` is its whole surface).
  *
  * The force layout used to be domain-blind: clusters emerged purely from link attraction vs
  * charge repulsion, so a domain that links heavily into a neighboring one was pulled INTO
@@ -30,7 +30,7 @@ export const CROSS_GROUP_STRENGTH = 0.1
 
 /**
  * Compact group id per node from its `domain:` value; null (uncategorized) → -1, which every
- * force here treats as "no group": full-weight links and no centroid pull — we don't penalize
+ * force here treats as "no group": full-weight links and no centroid pull - we don't penalize
  * what we can't classify, exactly like the community detection.
  */
 export function domainGroups(domains: ReadonlyArray<string | null>): Int32Array {
@@ -66,7 +66,7 @@ export function crossGroup(groups: Int32Array, link: { source: LinkEnd; target: 
 
 /**
  * Custom force: every tick, pull each grouped node toward its group's current centroid
- * (velocity += delta · strength(node) · alpha — the standard d3 positioning-force shape).
+ * (velocity += delta · strength(node) · alpha - the standard d3 positioning-force shape).
  * The centroid moves WITH the group, so this compacts each domain around wherever the link
  * topology placed it rather than pinning domains to fixed slots; separation between the
  * compacted blobs then comes from charge repulsion and the weakened cross-group springs.

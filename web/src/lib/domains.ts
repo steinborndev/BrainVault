@@ -1,13 +1,13 @@
 /**
  * Domain color + page-health constants, shared between the graph canvas and the library.
- * Lives outside GraphCanvas so the library (main bundle) never pulls in d3-force — the
+ * Lives outside GraphCanvas so the library (main bundle) never pulls in d3-force - the
  * graph stays the only lazy chunk that pays for it.
  */
 
 /**
  * Deterministic color for a domain: string hash → hue, fixed saturation/lightness that read
  * on both themes. Domains are open-ended (the user coins new ones), so a fixed palette can't
- * work — and hashing keeps a domain's color stable across sessions with zero bookkeeping.
+ * work - and hashing keeps a domain's color stable across sessions with zero bookkeeping.
  */
 export function domainHue(domain: string): number {
   let h = 0

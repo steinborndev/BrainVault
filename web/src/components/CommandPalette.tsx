@@ -1,5 +1,5 @@
 /**
- * Ctrl+K command palette — the one search that works everywhere (redesign 2026-08).
+ * Ctrl+K command palette - the one search that works everywhere (redesign 2026-08).
  * Pages come from the shared `['graph']` query (already cached for the graph/library),
  * actions are navigation plus a research handoff for the typed text. Deliberately no
  * agent-run triggers in here: anything that costs money keeps its consent surface.

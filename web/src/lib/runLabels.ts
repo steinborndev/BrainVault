@@ -1,4 +1,4 @@
-/** Friendly names for maintenance run kinds — shared by the Home feed and Health history. */
+/** Friendly names for maintenance run kinds - shared by the Home feed and Health history. */
 export const RUN_TITLES: Record<string, string> = {
   lint: 'Lint report written',
   'lint-fix': 'Safe lint fixes applied',

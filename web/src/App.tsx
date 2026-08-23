@@ -16,7 +16,7 @@ import { Icon, type IconName } from './components/Icon.tsx'
 import { usePath, navigate } from './lib/router.ts'
 
 // Code-split: the vault viewer pulls in d3-force + the canvas machinery, which the other
-// screens never need — keep the shell light.
+// screens never need - keep the shell light.
 const Vault = lazy(() => import('./tabs/Vault.tsx').then((m) => ({ default: m.Vault })))
 
 /**
@@ -100,7 +100,7 @@ export function App(): React.ReactElement {
   // One SSE connection for the whole app; drives live invalidation + the connection dot.
   const { connected } = useEvents()
 
-  // Outstanding work for the Inbox badge — running ingests are otherwise invisible
+  // Outstanding work for the Inbox badge - running ingests are otherwise invisible
   // from every other screen. Rides the shared ['stats'] query (SSE keeps it fresh).
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const outstanding = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
@@ -113,7 +113,7 @@ export function App(): React.ReactElement {
   const healthRec = maint.data?.status.recommended ?? 0
 
   // First-run setup mode: the server runs without a credential and every agent feature is
-  // off — surface that on every screen, with the path to fix it (Settings).
+  // off - surface that on every screen, with the path to fix it (Settings).
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   const setupMode = health.data ? !health.data.credentialConfigured : false
 
@@ -129,7 +129,7 @@ export function App(): React.ReactElement {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Screens stay MOUNTED and are hidden via [hidden] — unmounting threw away the graph
+  // Screens stay MOUNTED and are hidden via [hidden] - unmounting threw away the graph
   // camera, the active chat session, filters and scroll positions on every switch.
   // The vault screen keeps its last inner route while other screens own the URL; null
   // until first visited, so the lazy chunk still loads on demand.

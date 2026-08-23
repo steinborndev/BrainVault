@@ -4,7 +4,7 @@
  * accumulating: two deletions with 2 + 3 backlinks show one banner with 5.
  *
  * sessionStorage-backed so the banner survives in-app navigation and a reload, but does not
- * outlive the browser session — after a lint (or a dismiss) it is gone, and stale state can
+ * outlive the browser session - after a lint (or a dismiss) it is gone, and stale state can
  * never linger for weeks. Same useSyncExternalStore pattern as the log store.
  */
 
@@ -42,13 +42,13 @@ function write(state: StaleLinksState): void {
     if (state.count === 0) sessionStorage.removeItem(KEY)
     else sessionStorage.setItem(KEY, JSON.stringify(state))
   } catch {
-    /* storage full/blocked — the in-memory copy still drives the banner */
+    /* storage full/blocked - the in-memory copy still drives the banner */
   }
   for (const l of listeners) l()
 }
 
 export const staleLinks = {
-  /** Records a deletion. `count` may be 0 (nothing linked here) — then nothing changes. */
+  /** Records a deletion. `count` may be 0 (nothing linked here) - then nothing changes. */
   add(count: number, pageTitle: string): void {
     if (count <= 0) return
     // Deduped: the titles double as the payload for the reference-cleanup run.

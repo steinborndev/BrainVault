@@ -1,5 +1,5 @@
 /**
- * Settings screen — configuration stands alone (redesign 2026-08). Everything here used to
+ * Settings screen - configuration stands alone (redesign 2026-08). Everything here used to
  * live inside the Maintenance tab's "Expert tools" right column, which forced setup mode to
  * open the whole expert view just to reach the credential form. Now the app banner and
  * setup mode land here directly; Maintenance keeps only actual maintenance.

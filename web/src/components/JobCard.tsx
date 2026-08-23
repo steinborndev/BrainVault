@@ -28,7 +28,7 @@ const PHASES: Array<{ status: JobStatus; label: string }> = [
   { status: 'ingesting', label: 'Ingest' },
 ]
 
-/** Ticking elapsed time since `since` — re-renders once a second while mounted. */
+/** Ticking elapsed time since `since` - re-renders once a second while mounted. */
 function Elapsed({ since }: { since: string }): React.ReactElement {
   const [now, setNow] = useState(() => new Date().toISOString())
   useEffect(() => {
@@ -38,7 +38,7 @@ function Elapsed({ since }: { since: string }): React.ReactElement {
   return <span className="elapsed">{duration(since, now)}</span>
 }
 
-/** Where the job is in the pipeline, as steps — overview before the log detail. */
+/** Where the job is in the pipeline, as steps - overview before the log detail. */
 function Stepper({ job }: { job: Job }): React.ReactElement {
   const current = PHASES.findIndex((p) => p.status === job.status)
   return (
@@ -90,7 +90,7 @@ export function JobCard({
     onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
   // Undo of one ingest (SPEC §9). Two-step arm rather than window.confirm, matching the other
-  // destructive actions — it writes the vault, so it must not be a single stray click.
+  // destructive actions - it writes the vault, so it must not be a single stray click.
   const [armedRevert, setArmedRevert] = useState(false)
   const revert = useMutation({
     mutationFn: () => api.revertJob(job.id),
@@ -174,7 +174,7 @@ export function JobCard({
       {revert.error && <div className="job-error">{(revert.error as Error).message}</div>}
       {armedRevert && !revert.isPending && (
         <div className="tab-hint">
-          Reverts this ingest&apos;s vault commit as a new commit — the pages it created go away, the
+          Reverts this ingest&apos;s vault commit as a new commit - the pages it created go away, the
           history stays.{batchWarning} Click again to confirm.
         </div>
       )}

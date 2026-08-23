@@ -1,6 +1,6 @@
 /**
  * Telegram bot configuration (SPEC.md §4.3): token + user-id allowlist, POSTed once to
- * /settings/telegram (which writes the service env file) and never displayed again — the
+ * /settings/telegram (which writes the service env file) and never displayed again - the
  * same lifecycle as the credential. Both fields travel together because the server side is
  * fail-closed (a token without an allowlist refuses startup).
  *
@@ -17,7 +17,7 @@ import type { TelegramSettingsResponse } from '../api/types.ts'
 
 /**
  * Non-allowlisted senders the bot dropped (SPEC.md §9): the journal warns once per sender,
- * this list shows the live counts — including the operator's own mistyped id. Rendered only
+ * this list shows the live counts - including the operator's own mistyped id. Rendered only
  * while the bot is configured; ids and usernames only, never message content.
  */
 function DroppedSenders(): React.ReactElement | null {
@@ -26,7 +26,7 @@ function DroppedSenders(): React.ReactElement | null {
     queryFn: api.telegramStatus,
     refetchInterval: 30_000,
   })
-  // Always visible while the bot is configured — an operator looking for "the log" must be
+  // Always visible while the bot is configured - an operator looking for "the log" must be
   // able to see that it exists and is empty, not wonder whether the feature is there at all.
   if (!q.data) return null
   return (
@@ -93,7 +93,7 @@ export function TelegramSetup({ status }: { status: string }): React.ReactElemen
           if ((result.expect === 'on') === (telegram !== 'off')) window.location.reload()
         })
         .catch(() => {
-          /* server mid-restart — keep polling */
+          /* server mid-restart - keep polling */
         })
     }, 2000)
     return () => clearInterval(timer)
@@ -103,11 +103,11 @@ export function TelegramSetup({ status }: { status: string }): React.ReactElemen
     return (
       <div className="toast warn">
         {result.res.restart === 'auto' ? (
-          <>Telegram settings saved. The service is restarting — this page reloads automatically…</>
+          <>Telegram settings saved. The service is restarting - this page reloads automatically…</>
         ) : (
           <>
             Telegram settings saved to the service env file. Restart the service to activate them (
-            <code>systemctl --user restart vault-service</code>) — this page reloads automatically
+            <code>systemctl --user restart vault-service</code>) - this page reloads automatically
             once it is back.
           </>
         )}
@@ -146,7 +146,7 @@ export function TelegramSetup({ status }: { status: string }): React.ReactElemen
     <div className="credential-setup">
       <p className="setting-hint">
         Queue ingests and check status from your phone. Create a bot via @BotFather (it answers
-        with the token) and get your numeric user id from @userinfobot — the bot answers ONLY the
+        with the token) and get your numeric user id from @userinfobot - the bot answers ONLY the
         ids listed here. Both values are stored in the service env file on this machine (never in
         the database or the browser) and are not shown again.
       </p>

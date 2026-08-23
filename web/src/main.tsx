@@ -2,7 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './App.tsx'
-// Self-hosted type (no CDN — the PWA stays offline-capable): Instrument Sans carries the
+// Self-hosted type (no CDN - the PWA stays offline-capable): Instrument Sans carries the
 // UI, Bricolage Grotesque the display landmarks, IBM Plex Mono the data/log surfaces.
 import '@fontsource/instrument-sans/400.css'
 import '@fontsource/instrument-sans/500.css'
@@ -39,7 +39,7 @@ createRoot(document.getElementById('root')!).render(
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {
-      /* SW is a progressive enhancement — the app works without it */
+      /* SW is a progressive enhancement - the app works without it */
     })
     // The SW calls skipWaiting(), so a new deploy swaps the controller under a running tab.
     // Reload once so the page and its (possibly already-deleted) old assets can't diverge

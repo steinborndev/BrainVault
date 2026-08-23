@@ -1,8 +1,8 @@
-/* BrainVault dashboard — one cohesive visual system, theme-aware (dark default + light).
+/* BrainVault dashboard - one cohesive visual system, theme-aware (dark default + light).
    No UI-framework lock-in (SPEC.md §7): hand-rolled CSS. Redesign 2026-08: night-blue
    ground, gold brand accent (sparingly: brand mark, working-edge highlights), self-hosted
    type (Bricolage Grotesque display / Instrument Sans UI / IBM Plex Mono data). Token
-   NAMES are stable — components style through them, never through raw hex. */
+   NAMES are stable - components style through them, never through raw hex. */
 
 :root {
   --bg: #0c101b;
@@ -17,13 +17,13 @@
   --bg-side: #0a0d16;
   --accent: #7fa7ff;
   /* Text ON accent fills (primary buttons, active badges). The dark theme's accent is
-     light, so white-on-accent would wash out — the ground color is the readable ink. */
+     light, so white-on-accent would wash out - the ground color is the readable ink. */
   --accent-ink: #0c101b;
   --accent-soft: #1b2947;
   /* Brand gold: the mark, the Home "now" edge, design accents. Never a status color. */
   --gold: #e2b45c;
   --gold-bg: #332812;
-  /* The research composer mode — visually distinct from Ask because it has side effects
+  /* The research composer mode - visually distinct from Ask because it has side effects
      (web access + vault writes). Violet, validated against both surfaces. */
   --research: #a78bfa;
   --radius: 12px;
@@ -44,7 +44,7 @@
   --muted: #7c88a1;
   --muted-bg: #232a3a;
 
-  /* Categorical page-type scale for the graph's type lens — deliberately NOT the status
+  /* Categorical page-type scale for the graph's type lens - deliberately NOT the status
      colors: a bucket is a category, never a health signal. */
   --type-concept: #6fa1f5;
   --type-entity: #d08bd6;
@@ -355,7 +355,7 @@ button {
   flex: 1;
 }
 
-/* Activity badge (sidebar Inbox item) — outstanding jobs, visible from every screen. */
+/* Activity badge (sidebar Inbox item) - outstanding jobs, visible from every screen. */
 .tab-badge {
   display: inline-flex;
   align-items: center;
@@ -478,7 +478,7 @@ button {
   background: var(--warn);
 }
 
-/* ---- Info tooltip (ⓘ) — hover, focus AND tap; replaces native title=… ---- */
+/* ---- Info tooltip (ⓘ) - hover, focus AND tap; replaces native title=… ---- */
 .tip {
   position: relative;
   display: inline-flex;
@@ -609,7 +609,7 @@ button {
   .ov-grid .col-5 { grid-column: span 12; }
 }
 
-/* ---- Status strip (Overview) — the states that can go wrong, as pills ---- */
+/* ---- Status strip (Overview) - the states that can go wrong, as pills ---- */
 .status-strip {
   display: flex;
   flex-wrap: wrap;
@@ -644,7 +644,7 @@ button {
 .spill .d.ok { background: var(--ok); }
 .spill .d.warn { background: var(--warn); }
 .spill .d.dim { background: var(--muted); }
-/* A spill that navigates (the maintenance badge) — same look, button semantics. */
+/* A spill that navigates (the maintenance badge) - same look, button semantics. */
 button.spill-link {
   font-family: inherit;
   cursor: pointer;
@@ -1098,7 +1098,7 @@ button.spill-link:hover {
   opacity: 0.8;
 }
 
-/* Armed (two-step) destructive confirm — red fill + visible countdown. */
+/* Armed (two-step) destructive confirm - red fill + visible countdown. */
 .btn.armed {
   background: var(--err);
   border-color: var(--err);
@@ -1164,7 +1164,7 @@ button.spill-link:hover {
   border-color: var(--accent);
   text-decoration: none;
 }
-/* The chip's anchor part — the buttons are siblings, not children (valid HTML). */
+/* The chip's anchor part - the buttons are siblings, not children (valid HTML). */
 .pagelink-main {
   display: inline-flex;
   align-items: center;
@@ -1306,7 +1306,7 @@ button.spill-link:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
-/* Domain legend dot inside a filter chip — wears the same color as the domain's nodes. */
+/* Domain legend dot inside a filter chip - wears the same color as the domain's nodes. */
 .chip-dot {
   display: inline-block;
   width: 8px;
@@ -1329,7 +1329,7 @@ button.spill-link:hover {
   max-height: 420px;
   overflow-y: auto;
 }
-/* Collapsed by default — the hot cache is the one arbitrarily long block on the overview.
+/* Collapsed by default - the hot cache is the one arbitrarily long block on the overview.
    The summary row carries the cache's age + the refresh action (no trip to Maintenance). */
 details.hot-cache summary {
   cursor: pointer;
@@ -1343,7 +1343,7 @@ details.hot-cache[open] summary {
   margin-bottom: 10px;
 }
 .hc-summary {
-  /* display:flex drops the native ::marker — the ::before chevron below replaces it. */
+  /* display:flex drops the native ::marker - the ::before chevron below replaces it. */
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1617,7 +1617,7 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text);
 }
 
-/* Save-to-vault at the end of the thread — next to the result it saves. */
+/* Save-to-vault at the end of the thread - next to the result it saves. */
 .savebar {
   display: flex;
   align-items: center;
@@ -1639,7 +1639,7 @@ details.hot-cache[open] .hc-summary::before {
 
 /* One bordered card: hint line (research mode only), then [Ask|Research] · borderless
    textarea · send. The mode toggle is part of the input, not a floating row of chips.
-   Research mode wears its own accent — it has side effects (web access + vault writes),
+   Research mode wears its own accent - it has side effects (web access + vault writes),
    so the composer must not look like a harmless filter switch. */
 .composer {
   display: flex;
@@ -1846,7 +1846,7 @@ details.hot-cache[open] .hc-summary::before {
   gap: 16px;
   align-items: start;
 }
-/* Focused mode: one status item was clicked — exactly one tool, full width. */
+/* Focused mode: one status item was clicked - exactly one tool, full width. */
 .maint.single {
   grid-template-columns: 1fr;
 }
@@ -1956,7 +1956,7 @@ details.hot-cache[open] .hc-summary::before {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-  /* Settings rows adapt to the COLUMN's width (≈5/12 of the lane), not the viewport —
+  /* Settings rows adapt to the COLUMN's width (≈5/12 of the lane), not the viewport -
      a media query can't see that, a container query can. */
   container-type: inline-size;
 }
@@ -2294,7 +2294,7 @@ details.hot-cache[open] .hc-summary::before {
   gap: 12px 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  /* Never let a fixed-width input push past the card edge — wrap below the label instead. */
+  /* Never let a fixed-width input push past the card edge - wrap below the label instead. */
   flex-wrap: wrap;
 }
 .setting:last-child { border-bottom: none; }
@@ -2343,7 +2343,7 @@ details.hot-cache[open] .hc-summary::before {
   accent-color: var(--accent);
 }
 
-/* Inline tag — deliberately not .badge, which carries a status dot. */
+/* Inline tag - deliberately not .badge, which carries a status dot. */
 .setting-tag {
   font-size: 11px;
   font-weight: 600;
@@ -2400,7 +2400,7 @@ details.hot-cache[open] .hc-summary::before {
 }
 
 /* Narrow settings COLUMN (Maintenance right column on desktop): stack label over control,
-   full-width text inputs — same treatment the small-viewport media query applies. */
+   full-width text inputs - same treatment the small-viewport media query applies. */
 @container (max-width: 480px) {
   .setting {
     flex-direction: column;
@@ -2458,13 +2458,13 @@ details.hot-cache[open] .hc-summary::before {
     flex-shrink: 0;
     max-width: 220px;
   }
-  /* On the strip, the meta line is noise — title + actions are enough. */
+  /* On the strip, the meta line is noise - title + actions are enough. */
   .sess-main .sm {
     display: none;
   }
 }
 
-/* Autoresearch block inside the chat thread (not a bubble — it writes vault pages). */
+/* Autoresearch block inside the chat thread (not a bubble - it writes vault pages). */
 .research-block {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2595,7 +2595,7 @@ details.hot-cache[open] .hc-summary::before {
   letter-spacing: 0.04em;
 }
 /* View-bar control: dropdown trigger or toggle. Rectangular (radius-sm), unlike the round
-   filter chips — the shape difference IS the filter-vs-view distinction. */
+   filter chips - the shape difference IS the filter-vs-view distinction. */
 .ctl {
   display: inline-flex;
   align-items: center;
@@ -2631,7 +2631,7 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--accent);
 }
 
-/* Communities control: one bordered unit — a label plus two segmented toggles (Areas /
+/* Communities control: one bordered unit - a label plus two segmented toggles (Areas /
    Bridges), the two views of the same clustering. Sized to sit flush with the .ctl buttons in
    the overlays row: same border, radius, vertical padding (6px) and font (12.5px), so the box
    height matches exactly and nothing rides higher. */
@@ -2654,7 +2654,7 @@ details.hot-cache[open] .hc-summary::before {
   padding: 6px 11px;
   font-size: 12.5px;
   /* Match the .ctl buttons' line box. .ctl is a <button>, and form controls do NOT inherit
-     the body line-height — they render at the UA `line-height: normal` (~15px box at 12.5px).
+     the body line-height - they render at the UA `line-height: normal` (~15px box at 12.5px).
      The label is a <span>, so it must state `normal` explicitly or it would inherit the body
      1.5 and stand ~4px taller than the neighbouring .ctl buttons (measured). */
   line-height: normal;
@@ -2694,7 +2694,7 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--accent);
 }
 
-/* View-bar dropdowns sit at the LEFT of the row now — anchor their menus left so they
+/* View-bar dropdowns sit at the LEFT of the row now - anchor their menus left so they
    can't extend past the viewport edge (the generic .dropdown-menu anchors right). */
 .viewbar .dropdown-menu {
   left: 0;
@@ -2742,7 +2742,7 @@ details.hot-cache[open] .hc-summary::before {
   overflow-x: auto;
   /* No visible scrollbar: a space-taking one shifts the chips off the band's vertical
      center by exactly its height, and how much that is depends on the browser's scrollbar
-     mode (classic vs overlay) — not compensatable in CSS. The edge fades signal overflow,
+     mode (classic vs overlay) - not compensatable in CSS. The edge fades signal overflow,
      wheel/drag still scroll, and the "All domains" panel reaches everything regardless. */
   scrollbar-width: none;
   padding: 2px 4px;
@@ -2840,7 +2840,7 @@ details.hot-cache[open] .hc-summary::before {
   display: grid;
   /* minmax(0, 1fr): without the explicit 0 minimum, a long domain name's min-content
      width wins over the fr split, pushes the columns past the panel and forces a
-     horizontal scrollbar — the names must ellipsize instead. */
+     horizontal scrollbar - the names must ellipsize instead. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
   max-height: 260px;
@@ -3010,7 +3010,7 @@ details.hot-cache[open] .hc-summary::before {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: var(--shadow);
-  /* Show as many matches as the canvas has room for, then scroll — the whole point is
+  /* Show as many matches as the canvas has room for, then scroll - the whole point is
      that no match is out of reach. Bounded so it never runs off the drawing area. */
   max-height: min(60vh, 540px);
   overflow-y: auto;
@@ -3168,7 +3168,7 @@ details.hot-cache[open] .hc-summary::before {
   font-weight: 600;
 }
 
-/* ⋯ overflow menu (page head) — rare/destructive actions, not bare icons in the row. */
+/* ⋯ overflow menu (page head) - rare/destructive actions, not bare icons in the row. */
 .overflow-wrap {
   position: relative;
 }
@@ -3280,7 +3280,7 @@ details.hot-cache[open] .hc-summary::before {
 
 /* Graph stage: canvas + explorer side by side. The panel used to be absolutely positioned
    over the canvas's right edge, where it covered the search overlay (same z-index, later in
-   the DOM) — pressing `/` then focused an invisible field. It docks now: the canvas shrinks,
+   the DOM) - pressing `/` then focused an invisible field. It docks now: the canvas shrinks,
    every canvas-corner control stays reachable. */
 .graph-stage {
   position: relative;
@@ -3308,7 +3308,7 @@ details.hot-cache[open] .hc-summary::before {
   color: color-mix(in srgb, var(--accent) 80%, var(--text));
 }
 
-/* Breadcrumb trail of visited pages, bottom-left of the canvas — its slot alone now that
+/* Breadcrumb trail of visited pages, bottom-left of the canvas - its slot alone now that
    the tooltip follows the pointer; the zoom controls live up top. */
 .graph-trail {
   position: absolute;
@@ -3439,7 +3439,7 @@ details.hot-cache[open] .hc-summary::before {
   background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--ok));
 }
 
-/* Explorer side panel — docked beside the canvas when a node or gap is selected. */
+/* Explorer side panel - docked beside the canvas when a node or gap is selected. */
 .graph-explorer {
   flex: 0 0 340px;
   width: 340px;
@@ -3822,7 +3822,7 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--accent);
 }
 
-/* Frontmatter shown as properties, the way Obsidian does — not as prose. */
+/* Frontmatter shown as properties, the way Obsidian does - not as prose. */
 .page-meta {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -4024,7 +4024,7 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 13px;
   margin: 10px 0 0;
 }
-/* Candidate member pages, collapsed by default — the count is in the card head already. */
+/* Candidate member pages, collapsed by default - the count is in the card head already. */
 .cand-pages {
   margin-top: 8px;
 }
@@ -4089,7 +4089,7 @@ details.hot-cache[open] .hc-summary::before {
 
 /* ---- Keyboard hints (vault view shortcuts, 2026-07-21) ---- */
 
-/* A key chip — used in the shortcut legend and the page-head Esc hint. */
+/* A key chip - used in the shortcut legend and the page-head Esc hint. */
 kbd {
   font: 600 10.5px/1.7 ui-monospace, 'SF Mono', Menlo, monospace;
   color: var(--text-dim);
@@ -4123,7 +4123,7 @@ kbd {
   white-space: nowrap;
 }
 
-/* The viewbar tip sits at the top of the content — drop its bubble DOWN and anchor it to
+/* The viewbar tip sits at the top of the content - drop its bubble DOWN and anchor it to
    the right edge, or it would open upward into the header / off-screen. */
 .viewbar .tip-body {
   top: calc(100% + 8px);
@@ -4173,7 +4173,7 @@ kbd {
   color: var(--err);
   font-size: 12px;
 }
-/* Page links written inline in the health prose — not the list-row shape. */
+/* Page links written inline in the health prose - not the list-row shape. */
 .gx-health .gx-link.inline {
   display: inline;
   width: auto;
@@ -5157,7 +5157,7 @@ kbd {
   gap: 4px;
 }
 
-/* Unsaved-editor badge in the page head — the draft guard's visible half. */
+/* Unsaved-editor badge in the page head - the draft guard's visible half. */
 .dirty-badge {
   display: inline-flex;
   align-items: center;

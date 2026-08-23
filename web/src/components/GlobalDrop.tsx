@@ -1,6 +1,6 @@
 /**
  * Window-level drop target (redesign 2026-08): dropping files anywhere in the app queues
- * them as one batch — before, the only drop target was one div on the Ingestion tab and a
+ * them as one batch - before, the only drop target was one div on the Ingestion tab and a
  * miss navigated the browser away from the app. File drags only; text drags stay with the
  * Inbox intake card, which knows how to title notes.
  */

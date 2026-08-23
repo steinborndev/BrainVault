@@ -1,5 +1,5 @@
 /**
- * Canvas renderer for the vault graph (SPEC.md §12.4). Canvas 2D, not SVG — an SVG DOM node
+ * Canvas renderer for the vault graph (SPEC.md §12.4). Canvas 2D, not SVG - an SVG DOM node
  * per page is exactly what makes graph views fall over as a vault grows; a single canvas
  * draws tens of thousands of nodes without breaking a sweat. Layout comes from the d3-force
  * web worker (lib/graphLayout.worker.ts), so the UI thread only ever draws.
@@ -8,14 +8,14 @@
  *   - label level-of-detail: at low zoom only hub labels draw, zooming in reveals the rest
  *   - viewport culling: off-screen nodes/labels are skipped
  *   - the simulation cools and stops; re-layout only when the node set actually changes
- *   - hover/click hit-testing is O(n) over a typed array — fine far beyond 10k nodes
+ *   - hover/click hit-testing is O(n) over a typed array - fine far beyond 10k nodes
  *
- * Live updates (SPEC.md §12.4): positions are keyed by page PATH, not by array index — the
+ * Live updates (SPEC.md §12.4): positions are keyed by page PATH, not by array index - the
  * server sorts nodes by path, so one new page shifts every index after it. When the node set
  * changes (vault SSE event mid-ingest, filter toggle, local mode), known pages keep their
  * place and the simulation re-heats gently instead of being thrown away; brand-new pages
  * appear at their neighbors' centroid and flash briefly. The camera NEVER moves on a live
- * update — auto-fit happens only on the very first layout.
+ * update - auto-fit happens only on the very first layout.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react'
@@ -24,7 +24,7 @@ import { domainGroups } from '../lib/graphForces.ts'
 
 /**
  * Smallest connected component that earns a guaranteed label (see `labelReps`). Below this a
- * blob is an orphan or a stray pair, not a cluster worth reserving a label slot for — and the
+ * blob is an orphan or a stray pair, not a cluster worth reserving a label slot for - and the
  * graph carries hundreds of gap nodes we must not each force onto the canvas.
  */
 const MIN_LABELED_CLUSTER = 3
@@ -49,7 +49,7 @@ export interface GraphCanvasProps {
   /** Indices matching the current search, highlighted. */
   matches: ReadonlySet<number>
   /**
-   * The color lens — how nodes are tinted (SPEC §12.4). `domain`/`type` are categorical
+   * The color lens - how nodes are tinted (SPEC §12.4). `domain`/`type` are categorical
    * axes; `authority`/`orphans`/`stubs`/`recency` re-encode a metric so the same graph
    * answers a different question ("where are the hubs / dead ends / thin pages / new pages").
    */
@@ -64,13 +64,13 @@ export interface GraphCanvasProps {
   /**
    * Cluster id → its dominant `domain:` (the domain most of its pages carry), when the
    * cluster has one. The hull is tinted in that domain's color instead of an arbitrary
-   * per-id hue, so a hull's color carries real meaning — and a domain-mixed community (a
+   * per-id hue, so a hull's color carries real meaning - and a domain-mixed community (a
    * bridge node gluing two domains) no longer hides behind a neutral tint.
    */
   clusterDomains?: ReadonlyMap<number, string>
   /**
    * Draw the tinted cluster hulls + region labels. Split from `clusters` because the network
-   * lens needs the cluster ids to classify edges (intra vs bridge) WITHOUT drawing hulls — so
+   * lens needs the cluster ids to classify edges (intra vs bridge) WITHOUT drawing hulls - so
    * `clusters` may be present while hulls stay off.
    */
   showHulls?: boolean
@@ -82,21 +82,21 @@ export interface GraphCanvasProps {
   network?: boolean
   /**
    * When on, hovering a node spotlights its whole community (from `clusters`, falling back
-   * to its direct neighbors when it has none) and dims the rest — previewing exactly the set
+   * to its direct neighbors when it has none) and dims the rest - previewing exactly the set
    * a click would isolate (the caller handles that via onSelect). Controlled from the viewbar
-   * (the toggle used to live inside the canvas); off by default — easier to click.
+   * (the toggle used to live inside the canvas); off by default - easier to click.
    */
   spotlight?: boolean
   /**
    * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
-   * depth) — each change re-fits the view so the filtered graph fills the canvas again.
+   * depth) - each change re-fits the view so the filtered graph fills the canvas again.
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
    */
   fitKey?: string
-  /** Single click/tap on a node (when the click doesn't isolate — see onClusterClick). */
+  /** Single click/tap on a node (when the click doesn't isolate - see onClusterClick). */
   onSelect: (node: GraphNode) => void
   /**
-   * Spotlight click on an isolatable community — on one of its member nodes OR anywhere
+   * Spotlight click on an isolatable community - on one of its member nodes OR anywhere
    * inside its hull (the hull is one clickable surface; demanding a precise node hit made
    * the isolation gesture fiddly). The canvas guarantees the cid is isolatable (spotlight
    * on, id ≥ 0, proper subset of the visible real nodes); the caller does the isolating.
@@ -109,7 +109,7 @@ export interface GraphCanvasProps {
   onOpen?: (node: GraphNode) => void
   /**
    * Click/tap on EMPTY canvas. Standard canvas convention: clicking the background clears
-   * the selection — without this, an accidental node tap leaves its spotlight stuck until
+   * the selection - without this, an accidental node tap leaves its spotlight stuck until
    * the user finds the panel's ✕ or Esc.
    */
   onClear?: () => void
@@ -120,7 +120,7 @@ export interface GraphCanvasProps {
 /**
  * Bucket → CSS variable. A CATEGORICAL scale of its own (--type-*): reusing the status
  * tokens painted every source amber and every question red, so a healthy graph read as a
- * field of warnings — and the orphans lens (red) collided with the question color. Falls
+ * field of warnings - and the orphans lens (red) collided with the question color. Falls
  * back to --muted for unknown buckets. Exported so the type legend renders swatches from
  * the same mapping the canvas colors nodes with.
  */
@@ -195,7 +195,7 @@ interface LayoutMsg {
   paths: string[]
   degrees: Array<{ degree: number }>
   edges: Array<[number, number]>
-  /** Domain group id per node (-1 = uncategorized) — the worker's domain-aware forces. */
+  /** Domain group id per node (-1 = uncategorized) - the worker's domain-aware forces. */
   groups: Int32Array
   seed: Float32Array
   alpha: number
@@ -203,14 +203,14 @@ interface LayoutMsg {
 
 /**
  * Camera + layout memory that OUTLIVES the component: the canvas unmounts on every
- * graph ↔ page-view switch, and refs die with it — which used to reset the user's zoom
+ * graph ↔ page-view switch, and refs die with it - which used to reset the user's zoom
  * and re-run the whole force layout each time. Module scope is safe because the app has
  * exactly one graph view.
  */
 const persist = {
   /** Positions aligned with the CURRENT `nodes` prop, [x0, y0, x1, y1, …]; NaN = unplaced. */
   positions: { current: new Float32Array(0) as Float32Array },
-  /** The persistent position memory, keyed by page path — index-stable across updates. */
+  /** The persistent position memory, keyed by page path - index-stable across updates. */
   posByPath: { current: new Map<string, { x: number; y: number }>() },
   transform: { current: { x: 0, y: 0, k: 1 } as Transform },
   /** Set once the user pans/zooms, so an automatic re-fit never yanks the view away. */
@@ -218,7 +218,7 @@ const persist = {
   fitted: { current: false },
   /** The last posted layout, re-postable (remounts and StrictMode re-create the worker). */
   lastMsg: { current: null as LayoutMsg | null },
-  /** True once the posted layout finished cooling — a remount then skips the replay. */
+  /** True once the posted layout finished cooling - a remount then skips the replay. */
   settled: { current: true },
 }
 
@@ -275,7 +275,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // One guaranteed label per domain-region of every connected component big enough to read as
   // a cluster. Without this, the label loop's global degree sort + fixed budget fill every slot
   // from the densest regions, leaving small detached clusters (materials-science, unassigned)
-  // anonymous — their local hubs never reach the global cutoff. Grouping by (component, domain)
+  // anonymous - their local hubs never reach the global cutoff. Grouping by (component, domain)
   // rather than component alone means a domain bridged into a larger component still keeps its
   // own label, and a domain split across two blobs gets one in each. Union-find over the edges;
   // memoised on the node/edge set, not per frame.
@@ -327,7 +327,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    // Anything worth redrawing may have moved the world — invalidate the hull hit cache.
+    // Anything worth redrawing may have moved the world - invalidate the hull hit cache.
     drawEpochRef.current++
     const pos = positionsRef.current
     const t = transformRef.current
@@ -377,20 +377,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // selection, then the URL-level focus. Whichever is active dims everything outside its
     // neighborhood so the local structure reads out of a dense cluster.
     //
-    // Hover only counts while a pointer is actually over the canvas — a hover index that
+    // Hover only counts while a pointer is actually over the canvas - a hover index that
     // outlived its pointer (capture edge cases, focus loss) must never keep the graph dimmed.
     const hovered = lastPointerRef.current === null ? null : hoverRef.current
     // Hover only spotlights when the toggle is on; a click selection always does. The hovered
     // node still keeps its own label + tooltip (via `interactive` below) so pointing still
-    // tells you what a node is — only the neighborhood dimming is gated.
+    // tells you what a node is - only the neighborhood dimming is gated.
     const spotHover = hoverSpotlightRef.current ? hovered : null
     // The hovered COMMUNITY, from either source: a hovered member node, or the pointer
-    // resting inside the community's hull between nodes (hullHover) — one highlight, no
+    // resting inside the community's hull between nodes (hullHover) - one highlight, no
     // flicker across the gap. It previews the exact set a click would isolate (Vault.tsx
     // handles the click). Community-less nodes (id -1) fall back to the 1-hop neighborhood,
-    // and so do the persistent selection/focus spotlights — those answer "what does THIS
+    // and so do the persistent selection/focus spotlights - those answer "what does THIS
     // page link to", not "what belongs together". A community spanning every visible real
-    // node subdivides nothing (an isolated cluster Louvain can't split further) — treated
+    // node subdivides nothing (an isolated cluster Louvain can't split further) - treated
     // as absent, mirroring the click guard, so the spotlight degrades to 1-hop instead of
     // lighting everything up.
     const rawSpotCid =
@@ -424,7 +424,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const visible = (x: number, y: number): boolean => x >= minX && x <= maxX && y >= minY && y <= maxY
 
     // Cluster hulls, drawn FIRST so everything else sits on top. Each community becomes a
-    // tinted, tag-labelled convex blob — making the graph's implicit structure explicit.
+    // tinted, tag-labelled convex blob - making the graph's implicit structure explicit.
     //
     // Region labels are placed in a SECOND pass (placeRegionLabels): each label used to draw
     // above its OWN hull top with no collision test, so overlapping communities (the central
@@ -433,7 +433,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // collision list below so a page title can't overwrite a group label either.
     const regionLabelBoxes: Array<[number, number, number, number]> = []
     // With hulls off, the spotlight still traces the HOVERED community's hull (and its label,
-    // via the shared `members` map below) — the preview of what a click would isolate.
+    // via the shared `members` map below) - the preview of what a click would isolate.
     if (clusters !== null && (showHulls || spotCid >= 0)) {
       const members = new Map<number, Array<[number, number]>>()
       for (let i = 0; i < nodes.length; i++) {
@@ -488,7 +488,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // Edges first, faint; highlighted edges stronger. NaN endpoints (a node the worker
     // hasn't placed yet, mid live-update) simply don't draw this frame.
     //
-    // Network lens: same 1px thickness (deliberately — brightness/colour carry the emphasis,
+    // Network lens: same 1px thickness (deliberately - brightness/colour carry the emphasis,
     // not weight). Intra-cluster edges lift from 0.35 to 0.5 so the mesh reads; cross-cluster
     // BRIDGES render in a from→to node-colour gradient with a direction arrowhead, turning the
     // point-cloud into a legible network. Classification needs cluster ids and is skipped for
@@ -502,7 +502,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       if (Number.isNaN(x1) || Number.isNaN(x2)) continue
       if (!visible(x1, y1) && !visible(x2, y2)) continue
       const lit = highlight !== null && highlight.has(a) && highlight.has(b)
-      // Links into a gap are drawn dashed — they point at a page that isn't there yet.
+      // Links into a gap are drawn dashed - they point at a page that isn't there yet.
       const toGhost = ghostIndices !== undefined && (ghostIndices.has(a) || ghostIndices.has(b))
       const netOn = network && clusters !== null && !toGhost
       const ca = clusters?.[a] ?? -1
@@ -609,7 +609,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       }
     }
 
-    // Labels: every visible node is a candidate — no global hub threshold. The old
+    // Labels: every visible node is a candidate - no global hub threshold. The old
     // top-8%-by-degree gate concentrated all low-zoom labels in the densest domains
     // (where they overlapped) and left small clusters entirely anonymous, because their
     // local hubs never reached a global cutoff. Candidates draw in priority order
@@ -662,7 +662,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const n = nodes[i]!
       const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
       const full = interactive(i)
-      // Long titles are the main space hogs — truncate unless the node is the one the
+      // Long titles are the main space hogs - truncate unless the node is the one the
       // user is interacting with (the tooltip carries the full title regardless).
       const text = !full && n.title.length > 30 ? `${n.title.slice(0, 28)}…` : n.title
       ctx.font = `${isGhost ? 'italic ' : ''}${11 / t.k}px system-ui, sans-serif`
@@ -670,7 +670,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const x = pos[i * 2]!
       const y = pos[i * 2 + 1]! + radius(i) + 3 / t.k
       const box: [number, number, number, number] = [x - w / 2 - padX, y, x + w / 2 + padX, y + labelH]
-      // Interactive labels skip the cull — "what am I pointing at" must always answer.
+      // Interactive labels skip the cull - "what am I pointing at" must always answer.
       if (!full && placed.some((p) => box[0] < p[2] && box[2] > p[0] && box[1] < p[3] && box[3] > p[1])) {
         continue
       }
@@ -704,9 +704,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const dpr = window.devicePixelRatio || 1
     const w = canvas.width / dpr
     const h = canvas.height / dpr
-    // Fit the FULL extent by default — cropping to an inner percentile leaves real nodes
+    // Fit the FULL extent by default - cropping to an inner percentile leaves real nodes
     // outside the initial frame ("the graph doesn't fit"). Only when a few stragglers blow
-    // the extent far beyond the body of the graph (full span > 3× the 5–95 core) does the
+    // the extent far beyond the body of the graph (full span > 3× the 5-95 core) does the
     // fit fall back to the core; those outliers stay reachable by panning.
     const xs: number[] = []
     const ys: number[] = []
@@ -744,7 +744,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   //
   // ONE worker for the whole mount; each node/edge change posts a new layout generation.
   // The worker interrupts whatever it was cooling and frames tagged with an old generation
-  // are dropped here — so a burst of live updates can never interleave stale positions.
+  // are dropped here - so a burst of live updates can never interleave stale positions.
 
   const workerRef = useRef<Worker | null>(null)
   /** The generation counter and the path list the in-flight layout was posted with. */
@@ -762,7 +762,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const worker = workerRef.current
     if (!msg || !worker) return
     // The seed buffer is transferred, so every post ships a fresh copy. `groups` is cloned,
-    // not transferred — the message must stay re-postable.
+    // not transferred - the message must stay re-postable.
     const seed = msg.seed.slice()
     worker.postMessage(
       { gen: layoutRef.current.gen, nodes: msg.degrees, edges: msg.edges, groups: msg.groups, seed, alpha: msg.alpha },
@@ -775,7 +775,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     workerRef.current = worker
     worker.onmessage = (ev: MessageEvent<WorkerFrame>) => {
       const { gen, type, positions } = ev.data
-      if (gen !== layoutRef.current.gen) return // superseded layout — drop the frame
+      if (gen !== layoutRef.current.gen) return // superseded layout - drop the frame
       positionsRef.current = positions
       const byPath = posByPathRef.current
       const paths = layoutRef.current.paths
@@ -787,20 +787,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         setLayouting(false)
         // Frame the FIRST finished layout once, so a graph of any size lands filling the
         // viewport instead of as a speck. Later layouts (live updates, filter toggles)
-        // leave the camera alone — nothing yanks the user away mid-look.
+        // leave the camera alone - nothing yanks the user away mid-look.
         if (fitPendingRef.current) {
           fitPendingRef.current = false
           fittedRef.current = true
           fitToView()
         }
       }
-      // Nodes just moved under a possibly stationary cursor — re-resolve the hover, or a
+      // Nodes just moved under a possibly stationary cursor - re-resolve the hover, or a
       // node that drifted away from the pointer keeps its neighborhood highlight stuck.
       refreshHoverRef.current()
       scheduleDrawRef.current?.()
     }
     // A recreated worker (remount, dev StrictMode double-mount) starts empty. Replay only
-    // when the last layout was still cooling — a settled layout's positions are already
+    // when the last layout was still cooling - a settled layout's positions are already
     // persisted, and re-posting would make the graph jiggle on every return to this view.
     if (!persist.settled.current) postLayout()
     return () => {
@@ -820,11 +820,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     }
 
     // The layout's domain grouping (graphForces.ts). Deterministic from node order, so two
-    // builds over identical node lists yield identical arrays — comparable in the skip check.
+    // builds over identical node lists yield identical arrays - comparable in the skip check.
     const groups = domainGroups(nodes.map((n) => n.domain))
 
     // Structurally identical to the last posted layout (a refetch where only mtimes moved,
-    // or StrictMode's second effect pass)? Then there is nothing to re-settle — skip. A
+    // or StrictMode's second effect pass)? Then there is nothing to re-settle - skip. A
     // changed domain (governance reassignment) counts as structural: the grouping forces
     // depend on it, so it must reheat the layout even with paths and edges unchanged.
     const prev = lastMsgRef.current
@@ -856,7 +856,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     }
 
     // New nodes start at their placed neighbors' centroid (plus a small golden-angle offset
-    // so siblings don't stack) — a page appearing mid-ingest surfaces where it belongs
+    // so siblings don't stack) - a page appearing mid-ingest surfaces where it belongs
     // instead of flying across the view from d3's default spiral.
     if (!firstLayout && newPaths.length > 0) {
       const adj = new Map<number, number[]>()
@@ -887,14 +887,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     }
 
     // Cold start when nothing is placed yet or the view changed shape substantially
-    // (unhiding a whole bucket); gentle reheat for everything else — that is what keeps a
+    // (unhiding a whole bucket); gentle reheat for everything else - that is what keeps a
     // live update a "reorientation" instead of a re-deal.
     const cold = firstLayout || newPaths.length > nodes.length * COLD_RESTART_SHARE
     if (firstLayout) fitPendingRef.current = true
     if (cold) setLayouting(true)
 
     // Align the drawn positions with the new node order IMMEDIATELY (indices shift when the
-    // sorted node list changes) — known nodes render in place this very frame, before the
+    // sorted node list changes) - known nodes render in place this very frame, before the
     // worker's first tick arrives; unplaced ones are NaN and skip drawing.
     positionsRef.current = seed.slice()
     scheduleDraw()
@@ -913,7 +913,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     postLayout()
   }, [nodes, edges, scheduleDraw, postLayout])
 
-  // A changed fitKey = the user changed the visible subgraph (filter/depth toggle) — re-fit
+  // A changed fitKey = the user changed the visible subgraph (filter/depth toggle) - re-fit
   // so the remaining graph fills the canvas. Runs AFTER the layout effect above, so
   // `persist.settled` already reflects whether that change posted a re-layout: fit now on
   // the seeded positions (survivors keep their place), and when a re-layout is cooling,
@@ -942,7 +942,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       canvas.style.width = `${parent.clientWidth}px`
       canvas.style.height = `${parent.clientHeight}px`
       // Re-frame on resize (including the first layout pass, which lands before the
-      // element has its final size) — but never fight a user who has panned or zoomed.
+      // element has its final size) - but never fight a user who has panned or zoomed.
       if (fittedRef.current && !userMovedRef.current) fitToView()
       else scheduleDraw()
     }
@@ -959,7 +959,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   }, [scheduleDraw, fitToView])
 
   // Repaint when pure-presentation props change (search rings, focus, selection, color axis)
-  // — these must not depend on a pointer move or a layout tick happening to come along.
+  // - these must not depend on a pointer move or a layout tick happening to come along.
   useEffect(() => {
     scheduleDraw()
   }, [matches, focusIndex, selectedIndex, ghostIndices, lens, clusters, clusterLabels, spotlight, scheduleDraw])
@@ -1002,7 +1002,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
    * Community-hull hit-test for the spotlight (screen coords → isolatable cid, or -1): the
    * whole tinted hull is one hover/click surface, so the highlight doesn't flicker off
    * between member nodes and isolating doesn't demand a precise node hit. Padded hulls are
-   * rebuilt lazily, at most once per DRAWN frame — positions drift while the layout cools,
+   * rebuilt lazily, at most once per DRAWN frame - positions drift while the layout cools,
    * and the draw epoch is the cheapest "world changed" signal there is. Overlapping hulls
    * (a dense domain's sub-communities interleave) resolve to the nearest member's community.
    * Spanning communities (nothing to isolate) are skipped, mirroring isolatableCidOf.
@@ -1061,7 +1061,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   )
 
   // ---- hover refresh: the hover is only correct at the moment of a pointer event, but the
-  // world also moves WITHOUT one — layout ticks drift nodes under a stationary cursor, a pan
+  // world also moves WITHOUT one - layout ticks drift nodes under a stationary cursor, a pan
   // ends with the world shifted, and a node-set change (filter/SSE) reuses the stale INDEX
   // for a different page. One mechanism covers all three: remember where the pointer is and
   // re-hit-test there whenever the world changed.
@@ -1083,13 +1083,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const refreshHoverRef = useRef(refreshHover)
   refreshHoverRef.current = refreshHover
 
-  // A changed node set means the old hover index labels a DIFFERENT page now — re-resolve
+  // A changed node set means the old hover index labels a DIFFERENT page now - re-resolve
   // it from the cursor position (or clear it when the pointer is off-canvas).
   useEffect(() => {
     refreshHover()
   }, [nodes, refreshHover])
 
-  // Losing window focus (alt-tab, devtools) fires no pointerleave — drop the hover there
+  // Losing window focus (alt-tab, devtools) fires no pointerleave - drop the hover there
   // too, or the spotlight would greet the user dimmed when they come back.
   useEffect(() => {
     const onBlur = (): void => {
@@ -1103,7 +1103,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   }, [scheduleDraw])
 
   /**
-   * The tooltip follows the pointer, clamped inside the wrap — its old fixed bottom-left
+   * The tooltip follows the pointer, clamped inside the wrap - its old fixed bottom-left
    * slot is the trail's, and the two overlapped on every hover once a trail existed (the
    * trail's CSS even claimed otherwise). Positioned by direct style writes, not state: a
    * React re-render per pointermove would be pure waste when only the transform changes.
@@ -1122,7 +1122,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if (y + tip.offsetHeight + pad > rect.height) y = clientY - rect.top - tip.offsetHeight - 14
     tip.style.transform = `translate(${Math.max(pad, x)}px, ${Math.max(pad, y)}px)`
   }, [])
-  // The div mounts one commit AFTER the hover begins — place it before that first paint,
+  // The div mounts one commit AFTER the hover begins - place it before that first paint,
   // or it would flash at the wrap's origin.
   useLayoutEffect(() => {
     const at = lastPointerRef.current
@@ -1160,11 +1160,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const pointers = useRef<Map<number, { x: number; y: number }>>(new Map())
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const pinch = useRef<{ dist: number; k: number } | null>(null)
-  /** True from pinch start until the last finger lifts — suppresses the tap-select. */
+  /** True from pinch start until the last finger lifts - suppresses the tap-select. */
   const pinchedRef = useRef(false)
   /**
    * The previous tap, for double-tap detection. Hand-rolled (not onDoubleClick) because it
-   * must work for touch too, and keyed by PATH, not index — a live update between the two
+   * must work for touch too, and keyed by PATH, not index - a live update between the two
    * taps shifts indices, and opening the wrong page would be worse than missing the gesture.
    */
   const lastTapRef = useRef<{ time: number; path: string } | null>(null)
@@ -1210,7 +1210,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       setHover(hit)
       scheduleDraw()
     }
-    // Between member nodes the pointer is still INSIDE the community's hull — keep the
+    // Between member nodes the pointer is still INSIDE the community's hull - keep the
     // cluster highlight up via the hull hit-test instead of letting it flicker off.
     const hcid = hit === null ? hitCluster(e.clientX, e.clientY) : -1
     const nextHull = hcid >= 0 ? hcid : null
@@ -1253,14 +1253,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
           }
         } else {
           lastTapRef.current = null
-          // No node under the pointer — inside a community's hull the spotlight click drills
+          // No node under the pointer - inside a community's hull the spotlight click drills
           // into (isolates) that community; the hull is the clickable surface, not just its dots.
           const cid = spotlight && onClusterClick !== undefined ? hitCluster(e.clientX, e.clientY) : -1
           if (cid >= 0) onClusterClick!(cid)
           else onClear?.()
         }
       }
-      // A pan/pinch moved the world under the cursor while hover updates were suppressed —
+      // A pan/pinch moved the world under the cursor while hover updates were suppressed -
       // re-resolve now instead of leaving whatever was highlighted when the drag began.
       if (wasDrag || wasPinch) refreshHover()
     }
@@ -1275,7 +1275,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // Wheel zoom is a NATIVE non-passive listener: React's synthetic wheel event can't
   // preventDefault (browsers register it passive), so the page would scroll along with
   // every zoom. And because zooming moves the world under a stationary pointer, the hover
-  // must be re-hit-tested — otherwise a node grazed on the way out stays "hovered" and its
+  // must be re-hit-tested - otherwise a node grazed on the way out stays "hovered" and its
   // neighborhood highlight keeps the rest of the graph dimmed.
   const onWheelRef = useRef<(e: WheelEvent) => void>(() => {})
   onWheelRef.current = (e: WheelEvent): void => {
@@ -1296,7 +1296,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
   // View shortcuts: f = fit, +/− = zoom. Window-level because the canvas isn't focusable
   // (role="img"); the ref indirection keeps one stable listener (same pattern as the wheel).
-  // Guarded against typing contexts and against firing while another tab is shown — tabs
+  // Guarded against typing contexts and against firing while another tab is shown - tabs
   // stay MOUNTED but hidden (App.tsx), and a hidden element has no offsetParent.
   const onKeyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   onKeyRef.current = (e: KeyboardEvent): void => {
@@ -1321,7 +1321,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   }, [])
 
   // Pointer affordances under the spotlight (drill mode): a click in the hull AREA drills
-  // into (isolates) the community — zoom-in cursor; a click ON a node opens its article —
+  // into (isolates) the community - zoom-in cursor; a click ON a node opens its article -
   // pointer cursor. The two are mutually exclusive (hullHover is only set when no node is hit).
   const hoveredIsGhost = hover !== null && (ghostIndices?.has(hover) ?? false)
   const hoverAreaDrills = hover === null && hullHover !== null && onClusterClick !== undefined
@@ -1337,7 +1337,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
         onPointerLeave={() => {
-          // Off-canvas: no position to re-resolve against — later refreshes must clear, not stick.
+          // Off-canvas: no position to re-resolve against - later refreshes must clear, not stick.
           lastPointerRef.current = null
           if (hoverRef.current !== null) {
             setHover(null)
@@ -1401,7 +1401,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         </div>
       )}
       {/* Hull hover (inside a community's tinted area, between nodes): name the community
-          the click would isolate — same pointer-following tooltip, node variant wins. */}
+          the click would isolate - same pointer-following tooltip, node variant wins. */}
       {hover === null && hullHover !== null && (
         <div className="graph-tooltip" ref={tooltipRef}>
           <strong>{clusterLabels?.get(hullHover) ?? 'community'}</strong>
@@ -1438,17 +1438,17 @@ function convexHull(points: Pt[]): Pt[] {
 }
 
 /** A member sitting farther than this multiple of the cluster's MEDIAN member distance is a
- *  spatial outlier — the force layout dragged it toward its cross-cluster links, not its
+ *  spatial outlier - the force layout dragged it toward its cross-cluster links, not its
  *  community. Excluding it from the hull stops the tinted blob reaching as a tongue into empty
  *  space where no cluster node sits (a cross-domain entity is the usual culprit). */
 const HULL_OUTLIER_FACTOR = 2.5
 
 /**
  * The subset of member points the tinted hull should enclose: the cluster BODY, with spatial
- * outliers trimmed. Distances are measured from the component-wise MEDIAN point (robust — one
+ * outliers trimmed. Distances are measured from the component-wise MEDIAN point (robust - one
  * flung-out member doesn't drag the center toward itself the way a mean would), and a member
  * past HULL_OUTLIER_FACTOR × the median distance is dropped. Only clusters with enough members
- * to still leave a body are trimmed (< 5 keeps all — too few to tell a body from a corner);
+ * to still leave a body are trimmed (< 5 keeps all - too few to tell a body from a corner);
  * never trims below 3, the minimum for an area. The node itself still draws; it just isn't
  * wrapped by the hull.
  */
@@ -1467,7 +1467,7 @@ export function hullBody(points: Pt[]): Pt[] {
   return body.length >= 3 ? body : points
 }
 
-/** Pushes each hull point outward from the centroid by `pad` world units — breathing room. */
+/** Pushes each hull point outward from the centroid by `pad` world units - breathing room. */
 function expandHull(hull: Pt[], cx: number, cy: number, pad: number): Pt[] {
   return hull.map(([x, y]) => {
     const dx = x - cx
@@ -1528,7 +1528,7 @@ export function boxIntersectsPolygon(box: Box, poly: Pt[]): boolean {
   return false
 }
 
-/** Average of a polygon's vertices — inside any convex polygon, so a ray from it exits once. */
+/** Average of a polygon's vertices - inside any convex polygon, so a ray from it exits once. */
 function vertexCentroid(poly: Pt[]): Pt {
   let sx = 0
   let sy = 0
@@ -1601,7 +1601,7 @@ const LABEL_DIRECTIONS: ReadonlyArray<Pt> = [
   [0, 1], // down
 ]
 
-/** Radial search resolution — how many distance tiers between "touching the hull" and the cap. */
+/** Radial search resolution - how many distance tiers between "touching the hull" and the cap. */
 const LABEL_SEARCH_STEPS = 40
 
 /**
@@ -1610,7 +1610,7 @@ const LABEL_SEARCH_STEPS = 40
  *
  * Deterministic ring search, largest cluster first (weight desc, then key): for each label, walk
  * outward from the cluster centroid in tiers, and within a tier try each direction (up first).
- * The first position whose box clears every OTHER hull and all already-placed labels wins — the
+ * The first position whose box clears every OTHER hull and all already-placed labels wins - the
  * NEAREST escape, tie-broken toward "above". Walking outward (rather than only touching the own
  * hull) is what frees a small cluster embedded inside a larger one: its label steps past the
  * enclosing blob instead of staying buried in it. The search radius derives from the union of

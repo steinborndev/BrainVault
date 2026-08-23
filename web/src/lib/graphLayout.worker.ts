@@ -1,6 +1,6 @@
 /**
  * Force-layout worker for the vault graph (SPEC.md §12.4). The d3-force simulation runs
- * entirely off the UI thread — the page stays responsive while the layout "warms up", which
+ * entirely off the UI thread - the page stays responsive while the layout "warms up", which
  * is exactly the failure mode of Obsidian's graph under WSLg that this view replaces.
  *
  * Protocol (one long-lived worker per canvas mount, layouts are replaceable in flight):
@@ -10,14 +10,14 @@
  *          alpha: number }       // 1 = cold start, ~0.3 = gentle reheat of a live layout
  *   out: { gen, type: 'tick' | 'done', positions: Float32Array }
  *
- * `gen` (generation) ties every outgoing frame to the request that produced it — the main
+ * `gen` (generation) ties every outgoing frame to the request that produced it - the main
  * thread bumps it per layout and drops stale frames, so a superseded layout can never
  * scribble over a newer one.
  *
  * Ticking is timer-sliced, NOT a blocking while-loop: between batches the worker yields to
  * its message queue, so a new layout request (live vault update mid-ingest, filter toggle)
  * interrupts the current one immediately. The simulation still cools and STOPS (alphaMin)
- * — no perpetual ticking, no idle CPU burn.
+ * - no perpetual ticking, no idle CPU burn.
  */
 
 import {
@@ -67,7 +67,7 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
     const x = seed[i * 2]
     const y = seed[i * 2 + 1]
     // Seeded nodes keep their place (live update / filter toggle); unseeded ones are left
-    // undefined so d3's phyllotaxis initialization spreads them — except that the main
+    // undefined so d3's phyllotaxis initialization spreads them - except that the main
     // thread pre-seeds new nodes at their neighbors' centroid, so mid-ingest arrivals
     // surface where they belong instead of flying in from the origin.
     if (x !== undefined && y !== undefined && !Number.isNaN(x) && !Number.isNaN(y)) {
@@ -80,7 +80,7 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
 
   // Centering pull, stronger the fewer links a node has. Without this, orphan and
   // near-orphan pages have nothing but repulsion acting on them and drift far outside
-  // the cluster — which then blows up the bounding box and makes fit-to-view useless.
+  // the cluster - which then blows up the bounding box and makes fit-to-view useless.
   // Grouped nodes get only a token global pull: their drift protection is the domain
   // centroid force below, which keeps them with their domain instead of at the origin.
   const centerPull = (d: SimNode): number =>
@@ -88,7 +88,7 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
   const groupPull = (d: SimNode): number => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.2 : 0.08)
 
   const sim = forceSimulation(simNodes)
-    // Cross-domain links are longer and much weaker springs (see graphForces.ts) — the
+    // Cross-domain links are longer and much weaker springs (see graphForces.ts) - the
     // layout-side twin of the Louvain cross-domain edge down-weight in communities.ts.
     .force(
       'link',

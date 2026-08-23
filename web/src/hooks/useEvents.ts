@@ -1,12 +1,12 @@
 /**
- * The SSE client hook (TASKS-M3 §2) — subscribes once to `/api/v1/events` and turns the
+ * The SSE client hook (TASKS-M3 §2) - subscribes once to `/api/v1/events` and turns the
  * live bus into React-Query invalidations + live log appends:
  *
  *  - `job`   → invalidate the jobs list and this job's detail; a terminal status also
  *              refreshes stats (counts changed).
  *  - `log`   → merge the line into the live log store (the DoD's streaming agent log).
  *  - `stats` → invalidate stats (a commit landed; page counts/history changed).
- *  - `vault` → invalidate the graph (wiki pages changed on disk, possibly mid-ingest —
+ *  - `vault` → invalidate the graph (wiki pages changed on disk, possibly mid-ingest -
  *              this is what makes the graph view grow live while an agent writes pages).
  *
  * EventSource reconnects on its own (the server sends `retry:`), so there's no manual
@@ -27,7 +27,7 @@ export function useEvents(): { connected: boolean } {
     const es = new EventSource('/api/v1/events')
 
     // Events emitted while the stream was down are gone for good (no server-side replay), so a
-    // reconnect — laptop sleep, Wi-Fi blip, server restart — must resync by refetch or the UI
+    // reconnect - laptop sleep, Wi-Fi blip, server restart - must resync by refetch or the UI
     // silently diverges until the user reloads. Same for a mobile PWA resumed from background.
     const resync = (): void => {
       void qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -83,7 +83,7 @@ export function useEvents(): { connected: boolean } {
     }
 
     // Deliberately NOT invalidating ['page-full'] here: refetching an open page while the
-    // user edits it would silently refresh `baseMtime` and defeat the optimistic lock —
+    // user edits it would silently refresh `baseMtime` and defeat the optimistic lock -
     // a concurrent change must surface as a 409 on save, not vanish.
     const onVault = (): void => {
       qc.invalidateQueries({ queryKey: ['graph'] })

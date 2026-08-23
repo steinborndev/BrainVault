@@ -1,6 +1,6 @@
 /**
  * Settings editor (SPEC.md §6.4 "Einstellungen"): watch folder, concurrency, file limit,
- * git commit behaviour — plus the read-only API-key STATUS. The key itself is never shown:
+ * git commit behaviour - plus the read-only API-key STATUS. The key itself is never shown:
  * the server only ever sends its source/mode (hard rule 3).
  *
  * Precedence mirrors the server's single model: env/env-file is the start-time baseline, these
@@ -116,7 +116,7 @@ export function SettingsEditor(): React.ReactElement {
         {row(
           'concurrency',
           'Concurrency',
-          'Simultaneous ingest runs (1–8). Takes effect immediately.',
+          'Simultaneous ingest runs (1-8). Takes effect immediately.',
           <input
             type="number"
             min={1}
@@ -204,7 +204,7 @@ export function SettingsEditor(): React.ReactElement {
         )}
       </div>
       <p className="setting-hint">
-        The API key itself is never shown or stored — only its source. The bind address is
+        The API key itself is never shown or stored - only its source. The bind address is
         deliberately not changeable through the UI.
       </p>
       <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />

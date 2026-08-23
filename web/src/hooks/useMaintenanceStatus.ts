@@ -1,11 +1,11 @@
 /**
  * Feeds the deterministic status model (lib/maintenanceStatus.ts, SPEC §12.7 Stufe b) from
- * the queries the dashboard already runs — every key here is shared with the Maintenance
+ * the queries the dashboard already runs - every key here is shared with the Maintenance
  * tab's cards, so mounting this hook in a second place (the Overview badge) costs no extra
  * fetches thanks to TanStack's dedup. SSE keeps `stats`/`graph` fresh; the candidate and
  * state queries refetch with the tab's own invalidations.
  *
- * Returns null until every input is loaded — a half-derived status would flicker between
+ * Returns null until every input is loaded - a half-derived status would flicker between
  * severities on first paint.
  */
 
@@ -23,7 +23,7 @@ export interface MaintenanceStatusData {
 }
 
 export interface MaintenanceStatusResult {
-  /** Null while loading — or while failed (check `failed` to tell the two apart). */
+  /** Null while loading - or while failed (check `failed` to tell the two apart). */
   readonly data: MaintenanceStatusData | null
   /** True when any input query errored: the head must offer a retry, not spin forever. */
   readonly failed: boolean

@@ -25,11 +25,14 @@ export function JobDrawer({
   vaultName,
   authMode,
   onClose,
+  onOpenJob,
 }: {
   jobId: string
   vaultName: string
   authMode: AuthMode
   onClose: () => void
+  /** Follow a duplicate to the job it repeats (schema v11 persists the link). */
+  onOpenJob?: (id: string) => void
 }): React.ReactElement {
   const qc = useQueryClient()
   // Shares the `['job', id]` key the SSE bus invalidates on status transitions.
@@ -57,7 +60,7 @@ export function JobDrawer({
     mutationFn: () => api.revertJob(jobId),
     onSuccess: (res) => {
       setArmedRevert(false)
-      // The response says what actually happened — surface it instead of discarding it.
+      // The response says what actually happened - surface it instead of discarding it.
       setRevertNote(
         res.reverted
           ? `Reverted as ${res.revertCommit ?? 'a new commit'}${res.affectedJobs > 1 ? ` · ${res.affectedJobs} jobs in the shared batch commit` : ''}`
@@ -161,6 +164,20 @@ export function JobDrawer({
                     <dd>
                       <code title={job.batch_id}>{job.batch_id.slice(0, 10)}</code>
                       <span className="dim"> · one commit for all members</span>
+                    </dd>
+                  </>
+                )}
+                {job.duplicate_of != null && (
+                  <>
+                    <dt>Duplicate of</dt>
+                    <dd>
+                      {onOpenJob !== undefined ? (
+                        <button className="linkish" onClick={() => onOpenJob(job.duplicate_of!)}>
+                          the earlier job with the same content
+                        </button>
+                      ) : (
+                        <code>{job.duplicate_of}</code>
+                      )}
                     </dd>
                   </>
                 )}

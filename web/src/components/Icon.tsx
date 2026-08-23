@@ -1,4 +1,4 @@
-/** Inline SVG icon set — no icon-font dependency, theme-inheriting via `currentColor`. */
+/** Inline SVG icon set - no icon-font dependency, theme-inheriting via `currentColor`. */
 
 export type IconName =
   | 'logo'
@@ -92,7 +92,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <path d="M8.2 7l7.4 0.7M7 8.2l1.4 7.4M16.4 10l-5.8 6.3" />
     </>
   ),
-  // A real page linking into a dashed, not-yet-written one — the ghost-node treatment itself.
+  // A real page linking into a dashed, not-yet-written one - the ghost-node treatment itself.
   gap: (
     <>
       <circle cx="6.5" cy="6.5" r="2.5" />
@@ -100,7 +100,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="15" r="5" strokeDasharray="2.6 2.6" />
     </>
   ),
-  // Member dots inside a tinted hull outline — the cluster overlay in miniature.
+  // Member dots inside a tinted hull outline - the cluster overlay in miniature.
   cluster: (
     <>
       <ellipse cx="12" cy="12" rx="8.5" ry="6" />
@@ -109,7 +109,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="9.5" r="1.4" />
     </>
   ),
-  // Two nodes with the directed bridge between them — the network lens's arrowed edge.
+  // Two nodes with the directed bridge between them - the network lens's arrowed edge.
   network: (
     <>
       <circle cx="5.5" cy="18.5" r="2.5" />
@@ -152,7 +152,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <path d="M10 21v-6h4v6" />
     </>
   ),
-  // Two facing book halves — the library's paired shelves.
+  // Two facing book halves - the library's paired shelves.
   book: (
     <>
       <path d="M4 4h7v16H4z" />
@@ -166,7 +166,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
     </>
   ),
-  // A pulse line — the vault's vitals, not a wrench.
+  // A pulse line - the vault's vitals, not a wrench.
   health: <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />,
   flask: (
     <>
@@ -176,7 +176,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     </>
   ),
   play: <path d="M8 5.5v13l10-6.5z" />,
-  // A commit on its line — one revertable point in history.
+  // A commit on its line - one revertable point in history.
   commit: (
     <>
       <circle cx="12" cy="12" r="3.5" />

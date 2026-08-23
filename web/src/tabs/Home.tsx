@@ -2,7 +2,7 @@
  * Home (redesign 2026-08, replaces the Overview widget grid). Answers three questions in
  * order: is anything happening right now (the NOW band), how is the vault doing (stat tiles
  * that navigate), and what changed lately (ONE activity stream instead of the old
- * recently-changed / recent-commits / history triplication — an ingest, a research run, a
+ * recently-changed / recent-commits / history triplication - an ingest, a research run, a
  * maintenance run and a manual edit are all the same event: something changed the vault,
  * each carrying its commit and its pages).
  *
@@ -143,14 +143,14 @@ export function Home(): React.ReactElement {
       {data.hotCache && <HotCache stats={data} />}
 
       {drawerJob !== null && (
-        <JobDrawer jobId={drawerJob} vaultName={data.vaultName} authMode={data.authMode} onClose={() => setDrawerJob(null)} />
+        <JobDrawer jobId={drawerJob} vaultName={data.vaultName} authMode={data.authMode} onClose={() => setDrawerJob(null)} onOpenJob={setDrawerJob} />
       )}
     </div>
   )
 }
 
 /**
- * The NOW band: is anything happening, is anything due, are the channels alive. Gold edge —
+ * The NOW band: is anything happening, is anything due, are the channels alive. Gold edge -
  * this is the working edge of the vault, the one place Home is allowed a brand moment.
  */
 function NowBand({
@@ -248,7 +248,7 @@ function Delta({ now, prev, invert = false }: { now: number; prev: number; inver
   )
 }
 
-/** Stat tiles that navigate — every number is a door, not a dead end. */
+/** Stat tiles that navigate - every number is a door, not a dead end. */
 function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }): React.ReactElement {
   const doneDaily = dense(stats.kpisDaily, 'done', 14)
   const failedDaily = dense(stats.kpisDaily, 'failed', 14)
@@ -335,7 +335,7 @@ interface FeedEvent {
 /**
  * One stream of change. Sources: finished jobs (with their commit + pages), the per-kind
  * maintenance state, and commits neither of those explains (manual edits, deletes, saves).
- * Commits within 90s of a maintenance settle are treated as that run's commit — the state
+ * Commits within 90s of a maintenance settle are treated as that run's commit - the state
  * record carries no hash, so time proximity is the join.
  */
 function ActivityFeed({
@@ -492,7 +492,7 @@ function ActivityFeed({
   )
 }
 
-/** Page counts as horizontal bars — proportions read at a glance, direct labels right. */
+/** Page counts as horizontal bars - proportions read at a glance, direct labels right. */
 function TypeBars({ byDir }: { byDir: Record<string, number> }): React.ReactElement {
   const entries = Object.entries(byDir)
     .filter(([, n]) => n > 0)
@@ -514,7 +514,7 @@ function TypeBars({ byDir }: { byDir: Record<string, number> }): React.ReactElem
   )
 }
 
-/** Hot cache, collapsed — with its age and the refresh action right here in the summary. */
+/** Hot cache, collapsed - with its age and the refresh action right here in the summary. */
 function HotCache({ stats }: { stats: Stats }): React.ReactElement {
   const hot = useMaintenanceRun(() => api.hotCache())
   return (
@@ -531,7 +531,7 @@ function HotCache({ stats }: { stats: Stats }): React.ReactElement {
             className="btn"
             disabled={hot.running}
             onClick={(e) => {
-              // The button lives inside <summary> — don't let the click also toggle the panel.
+              // The button lives inside <summary> - don't let the click also toggle the panel.
               e.preventDefault()
               e.stopPropagation()
               hot.start()

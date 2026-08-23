@@ -25,7 +25,7 @@ export interface MaintenanceRunState {
 }
 
 /**
- * `starter` may close over component state (e.g. the research topic or the active session id) —
+ * `starter` may close over component state (e.g. the research topic or the active session id) -
  * it is read fresh at click time, not captured once.
  */
 export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): MaintenanceRunState {
@@ -47,7 +47,7 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
 
   const settled = poll.data !== undefined && poll.data.status !== 'running'
   useEffect(() => {
-    // A settled run may have committed pages / refreshed the hot cache — refresh stats and
+    // A settled run may have committed pages / refreshed the hot cache - refresh stats and
     // the per-kind settle state that feeds the status head (SPEC §12.7 Stufe b). The graph
     // and domain queries refresh too: the guided run's later steps derive their decision
     // data from them, and the dependency ordering the wizard exists for only holds when a

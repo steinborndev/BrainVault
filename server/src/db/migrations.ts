@@ -282,6 +282,16 @@ CREATE TABLE maintenance_state (
 );
 `
 
+/**
+ * v11: persist which job a duplicate duplicates. `duplicateOf` was only ever in the enqueue
+ * RESPONSE, so a duplicate in the history could never answer "duplicate of what?" - the
+ * dashboard's job drawer links the original now. Additive and nullable: existing duplicate
+ * rows simply keep no link.
+ */
+const V11 = `
+ALTER TABLE jobs ADD COLUMN duplicate_of TEXT;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -293,4 +303,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 8, up: V8 },
   { version: 9, up: V9 },
   { version: 10, up: V10 },
+  { version: 11, up: V11 },
 ]

@@ -1,12 +1,12 @@
 /**
- * The in-dashboard vault viewer (SPEC.md §12.4) — the tab that makes the Obsidian app
+ * The in-dashboard vault viewer (SPEC.md §12.4) - the tab that makes the Obsidian app
  * optional for everyday use. Two deep-linkable routes:
  *
  *   /vault                → the wikilink graph (search, type filters, local-neighborhood mode)
  *   /vault/page/<path>    → one rendered page: markdown with clickable [[wikilinks]],
  *                           a backlinks panel, and the obsidian:// bridge link
  *
- * Strictly read-only — everything here is derived from GET /graph and GET /pages
+ * Strictly read-only - everything here is derived from GET /graph and GET /pages
  * (hard rule 1: the vault is only ever written by agent runs).
  */
 
@@ -27,7 +27,7 @@ import { timeAgo } from '../lib/format.ts'
 
 /**
  * Splits YAML frontmatter off a page. Obsidian renders it as a properties panel rather than
- * body text, and so do we — dumping `type: concept created: …` into the prose is just noise.
+ * body text, and so do we - dumping `type: concept created: …` into the prose is just noise.
  * Deliberately shallow (top-level `key: value` and `- item` lists); anything it can't read
  * stays in the body rather than being silently dropped.
  */
@@ -132,7 +132,7 @@ const NO_DOMAIN = ''
 /** Synthetic path prefix marking a ghost (gap) node in the canvas node list. */
 const GAP_PATH_PREFIX = '#gap:'
 
-/** Two Escape presses within this window are a "double Esc" — reset the whole graph view. */
+/** Two Escape presses within this window are a "double Esc" - reset the whole graph view. */
 const DOUBLE_ESC_MS = 400
 
 /** The explorer selection: a real page (by path) or a knowledge gap (by title). */
@@ -140,10 +140,10 @@ type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string }
 
 /**
  * One level of isolated community (spotlight click, SPEC §12.4): the graph shows only these
- * pages until Esc. Levels stack — Louvain re-runs on the isolated subgraph and usually finds
+ * pages until Esc. Levels stack - Louvain re-runs on the isolated subgraph and usually finds
  * sub-communities, so a spotlight click inside a focused cluster drills one level deeper;
- * Esc pops one level. Each level is a snapshot by PATH, not by subgraph index — indices churn
- * on every filter change and SSE live update (same reasoning as `Selection`) — and a proper
+ * Esc pops one level. Each level is a snapshot by PATH, not by subgraph index - indices churn
+ * on every filter change and SSE live update (same reasoning as `Selection`) - and a proper
  * SUBSET of the level above, so the keep-filter only ever needs the top of the stack.
  * `anchor` is the clicked page, keying the camera re-fit; label/domain feed the clusterbar.
  * A cluster is NOT a domain: one domain typically splits into several Louvain communities,
@@ -157,11 +157,11 @@ interface ClusterFocus {
 }
 
 
-/** Missing `kind` (ghost nodes, old cached responses) counts as knowledge — never hide it. */
+/** Missing `kind` (ghost nodes, old cached responses) counts as knowledge - never hide it. */
 const isKnowledge = (n: GraphNode): boolean => (n.kind ?? 'knowledge') === 'knowledge'
 
 /**
- * Tags that mirror a page's `type:`/kind rather than its subject — they say WHAT a page is,
+ * Tags that mirror a page's `type:`/kind rather than its subject - they say WHAT a page is,
  * not what it's ABOUT, so they carry no thematic signal for "Related by tag". Every source
  * page shares `#source`, so matching on it drags in the whole source corpus. Mirrors the
  * server's KNOWLEDGE_TYPES/ARTIFACT_TYPES plus structural markers (server/src/pipeline/graph.ts).
@@ -172,16 +172,16 @@ const STRUCTURAL_TAGS: ReadonlySet<string> = new Set([
 ])
 const isThematicTag = (t: string): boolean => !STRUCTURAL_TAGS.has(t.toLowerCase())
 
-/** localStorage key of the RETIRED standalone System toggle — read once as a migration
+/** localStorage key of the RETIRED standalone System toggle - read once as a migration
  *  fallback when the combined prefs key below doesn't exist yet. */
 const SHOW_SYSTEM_KEY = 'vault.showSystem'
 
 /**
- * localStorage key for the graph view preferences — the how-it's-drawn choices (lens, type
+ * localStorage key for the graph view preferences - the how-it's-drawn choices (lens, type
  * visibility, domain filter, overlay toggles, System). Persisted so an F5 keeps the graph
  * the user set up; System used to be the only survivor, which read as random amnesia.
  * Exploration state (search, selection, trail, cluster drill-down) stays session-only on
- * purpose — it describes where the user currently IS, not how they like the graph shown.
+ * purpose - it describes where the user currently IS, not how they like the graph shown.
  * The payload carries a `v` field: bump it on shape changes and stale prefs fall back to
  * defaults instead of half-applying.
  */
@@ -192,7 +192,7 @@ const LENS_VALUES: ReadonlySet<string> = new Set(['domain', 'type', 'authority',
 interface ViewPrefs {
   // v2: the type filter flipped from hide-set (`hiddenTypes`) to solo-select (`selectedTypes`),
   // mirroring the domain filter. The two carry OPPOSITE meaning, so a v1 payload must be
-  // discarded, not read as the new field — the version bump is what makes the loader do that.
+  // discarded, not read as the new field - the version bump is what makes the loader do that.
   v: 2
   lens: Lens
   selectedTypes: string[]
@@ -231,7 +231,7 @@ export function loadViewPrefs(): LoadedPrefs {
       showSystem: bool(o.showSystem),
     }
   } catch {
-    return {} // storage unavailable (private mode) or corrupt JSON — defaults win
+    return {} // storage unavailable (private mode) or corrupt JSON - defaults win
   }
 }
 
@@ -239,7 +239,7 @@ const savedPrefs = loadViewPrefs()
 
 /**
  * GraphView state that OUTLIVES the component: graph and page view are mutually exclusive
- * routes, so opening an article unmounts the graph — without this, a double-click →
+ * routes, so opening an article unmounts the graph - without this, a double-click →
  * article → Escape round trip would come back to reset filters, lens, search, selection
  * and trail. Same module-scope pattern (and rationale) as the canvas's camera memory in
  * GraphCanvas.tsx; safe because the app has exactly one graph view. The ViewPrefs subset
@@ -260,7 +260,7 @@ const viewMemory = {
   trail: [] as string[],
 }
 
-/** Last-written prefs JSON — the snapshot effect runs on every commit, writes only on change. */
+/** Last-written prefs JSON - the snapshot effect runs on every commit, writes only on change. */
 let lastSavedPrefs: string | null = null
 
 function saveViewPrefs(): void {
@@ -281,7 +281,7 @@ function saveViewPrefs(): void {
   try {
     localStorage.setItem(VIEW_PREFS_KEY, json)
   } catch {
-    // Storage unavailable (private mode) — the prefs still hold for this session.
+    // Storage unavailable (private mode) - the prefs still hold for this session.
   }
 }
 
@@ -294,7 +294,7 @@ interface SuspiciousEdge {
 /**
  * Deterministic connectivity findings over the FULL graph (filters don't change whether a
  * page is isolated). Feeds the explorer panel's "Repair" action:
- *  - isolated: knowledge pages with no edge to another knowledge page — invisible to graph
+ *  - isolated: knowledge pages with no edge to another knowledge page - invisible to graph
  *    exploration (their only neighbors, if any, are system pages like lint reports).
  *  - suspicious: the SINGLE edge between two domains that share no other link. One lone
  *    wire between e.g. cooking and finance is almost always an incidental aside, not
@@ -359,14 +359,14 @@ function useDebounced<T>(value: T, delay: number): T {
 
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
   // `input` is what the field shows; `query` is what the graph reacts to. Without the delay
-  // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera — typing a
+  // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera - typing a
   // six-letter word moved the view six times.
   const [input, setInput] = useState(viewMemory.query)
   const query = useDebounced(input, SEARCH_DEBOUNCE_MS)
   /**
    * Type filter, SOLO-select like the domains (was a hide-set): clicking "concepts" means
    * "show me concepts", so an empty set = every type visible and a non-empty set = only those
-   * types. Same inclusion semantics on both axes — a checked box now means "shown", not "not
+   * types. Same inclusion semantics on both axes - a checked box now means "shown", not "not
    * hidden" (the old double negative).
    */
   const [selectedTypes, setSelectedTypes] = useState<ReadonlySet<string>>(viewMemory.selectedTypes)
@@ -376,7 +376,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * domains. (The old hide-semantics did the exact opposite of what a click intends.)
    */
   const [selectedDomains, setSelectedDomains] = useState<ReadonlySet<string>>(viewMemory.selectedDomains)
-  // The color lens. Domain is the default — the meta-categories are the axis the user
+  // The color lens. Domain is the default - the meta-categories are the axis the user
   // actually thinks in; type + the metric lenses (authority/orphans/stubs/recency) live in
   // the lens dropdown.
   const [lens, setLens] = useState<Lens>(viewMemory.lens)
@@ -384,7 +384,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // Cluster hulls: auto-detected communities as tinted, tag-labelled blobs. Off by default.
   const [showClusters, setShowClusters] = useState(viewMemory.showClusters)
   // Gaps view: overlays the unresolved link targets as ghost nodes (SPEC §12.4). Off by
-  // default — it is an exploration mode, not the resting state of the graph.
+  // default - it is an exploration mode, not the resting state of the graph.
   const [showGaps, setShowGaps] = useState(viewMemory.showGaps)
   // Network lens: lift the connection lines out of the point-cloud read (intra-cluster edges
   // brighten, cross-cluster bridges get a directional gradient). Off by default. Reuses the
@@ -396,7 +396,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   const [spotlight, setSpotlight] = useState(viewMemory.spotlight)
   // The stack of isolated communities: each spotlight click pushes one level (the clicked
   // node's community, re-detected on the isolated subgraph), Esc pops one, the clusterbar
-  // jumps to any level. Empty = the full graph. The spotlight stays live inside a focus —
+  // jumps to any level. Empty = the full graph. The spotlight stays live inside a focus -
   // it highlights the SUB-communities of the current level; when a level doesn't subdivide
   // any further, the canvas falls back to the 1-hop neighborhood and clicks select normally
   // (the drill-down ends exactly where there is nothing left to subdivide).
@@ -412,11 +412,11 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   /**
    * The explorer selection, keyed stably (path for a page, title for a gap) so it survives
    * the index churn a filter change causes. Clicking a node opens the panel instead of
-   * navigating; "Open page" inside the panel is the explicit navigation — or a double-click
+   * navigating; "Open page" inside the panel is the explicit navigation - or a double-click
    * right on the node.
    */
   const [selection, setSelection] = useState<Selection>(viewMemory.selection)
-  /** Breadcrumb of visited PAGES (not gaps) — every hop is a chip you can jump back to. */
+  /** Breadcrumb of visited PAGES (not gaps) - every hop is a chip you can jump back to. */
   const [trail, setTrail] = useState<string[]>(viewMemory.trail)
 
   // Write-through into the module-scope memory: every committed render snapshots the view
@@ -462,7 +462,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   )
 
   // Type/domain lists reflect the system filter: with system pages hidden, the meta/root
-  // buckets and the `meta` domain would be dead entries — chips that filter nothing.
+  // buckets and the `meta` domain would be dead entries - chips that filter nothing.
   const types = useMemo(() => {
     const counts = new Map<string, number>()
     for (const n of graph.nodes) {
@@ -472,7 +472,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
   }, [graph, showSystem])
 
-  // Meta-categories from frontmatter `domain:`. Pages without one gather under NO_DOMAIN —
+  // Meta-categories from frontmatter `domain:`. Pages without one gather under NO_DOMAIN -
   // deliberately a visible bucket, not a blind spot: it shows how much of the vault is still
   // uncategorized (the evidence base for the domain-registry backfill, SPEC §12.4).
   const domains = useMemo(() => {
@@ -491,7 +491,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   // Displayed subgraph: type + domain filters first, then (optionally) the BFS neighborhood
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
-  // graph — that is also what keeps the force layout small in local mode on a huge vault.
+  // graph - that is also what keeps the force layout small in local mode on a huge vault.
   // When the gaps view is on, the unresolved targets are appended as synthetic ghost nodes.
   const { nodes, edges, focusIndex, ghostIndices, realCount, realEdgeCount, matches } = useMemo(() => {
     let keep: boolean[] = graph.nodes.map(
@@ -529,8 +529,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     }
 
     // Search NARROWS the graph, it does not merely highlight (the old behaviour): with a
-    // query present, keep only the pages related to it — the ones that match, plus their
-    // direct neighbours so a match keeps its context — intersected with the filters already
+    // query present, keep only the pages related to it - the ones that match, plus their
+    // direct neighbours so a match keeps its context - intersected with the filters already
     // applied above. Emptying the query restores the full (filtered) graph. Multi-word
     // queries are AND: every term must hit the title, a tag, or the domain.
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -595,7 +595,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     }
 
     // The exact matches, in SUBGRAPH indices, for the ring highlight and the results list.
-    // Neighbours pulled in for context are deliberately NOT matches — they render as plain
+    // Neighbours pulled in for context are deliberately NOT matches - they render as plain
     // context around the ringed hits.
     const matches = new Set<number>()
     for (const f of matchFull) {
@@ -616,9 +616,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   }, [nodes, selection])
 
   // Community detection (Louvain) over the currently-visible page graph. Computed when the
-  // hulls OR the network lens OR the spotlight are on — the network lens classifies edges as
+  // hulls OR the network lens OR the spotlight are on - the network lens classifies edges as
   // intra-cluster vs bridge and so needs the ids even when no hull is drawn, and the spotlight
-  // highlights (and isolates on click) whole communities. Ghost nodes are excluded (id -1) — a
+  // highlights (and isolates on click) whole communities. Ghost nodes are excluded (id -1) - a
   // missing page has no community. Small clusters (< MIN_CLUSTER) are dropped so the canvas
   // isn't peppered with singleton blobs. Each surviving cluster is labelled by its tags.
   const { clusterIds, clusterLabels, clusterDomains } = useMemo(() => {
@@ -627,7 +627,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return detectClusters(nodes, edges, realCount)
   }, [showClusters, showNetwork, spotlight, nodes, edges, realCount])
 
-  // The clickable result list under the search box — the rings in the graph show WHERE the
+  // The clickable result list under the search box - the rings in the graph show WHERE the
   // matches are, this shows WHAT they are. Every match is listed (the dropdown scrolls);
   // capping it forced the user to hunt the rest in the graph, which is the exact friction
   // a result list should remove. Title matches first (they read as more direct than
@@ -646,7 +646,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return list
   }, [matches, nodes, query])
 
-  // Known domains matching the query — surfaced ABOVE the page hits so "carbon" offers the
+  // Known domains matching the query - surfaced ABOVE the page hits so "carbon" offers the
   // carbon-fiber domain as its first result; picking one solo-selects that domain filter.
   const domainResults = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -663,7 +663,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setSelectedTypes(next)
   }
 
-  // Persisted with the rest of the view prefs by the snapshot effect — no standalone key.
+  // Persisted with the rest of the view prefs by the snapshot effect - no standalone key.
   const toggleSystem = (): void => setShowSystem((v) => !v)
 
   // Solo-select semantics: empty = all; a click adds/removes a domain from the selection,
@@ -682,7 +682,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   /**
    * Reset every VIEW control to its default so the whole vault is shown again (the double-Esc
    * escape hatch out of a deep filter/drill state). Clears filters, lens, overlays, cluster
-   * drill-down, focus depth, search and selection. `showSystem` is deliberately kept — it is a
+   * drill-down, focus depth, search and selection. `showSystem` is deliberately kept - it is a
    * persistent preference (localStorage), not a filter the user is trying to escape.
    */
   const resetView = (): void => {
@@ -702,7 +702,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   // ---- keyboard layer. Window-level (the canvas isn't focusable), via the same stable-
   // listener ref pattern the canvas uses for wheel/zoom keys; gated on this view being the
-  // VISIBLE tab — tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
+  // VISIBLE tab - tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
   // Escape peels back one UI layer per press: search → explorer panel → cluster focus →
   // gaps list → focus; a DOUBLE Escape (two presses within DOUBLE_ESC_MS) resets the whole
   // view at once.
@@ -748,7 +748,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   }, [])
 
   // The search lives INSIDE the drawing area (top-right), like the zoom controls
-  // (top-left) — it searches the canvas, so it sits on the canvas.
+  // (top-left) - it searches the canvas, so it sits on the canvas.
   const searchOverlay = (
     <div className="graph-search graph-search-overlay">
       <Icon name="search" />
@@ -765,7 +765,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             if (only) navigate(pageRoute(only.path))
           }
           // Escape: first press restores the full graph, on an empty box it leaves the
-          // field — so the next press reaches the window-level Escape ladder.
+          // field - so the next press reaches the window-level Escape ladder.
           if (e.key === 'Escape') {
             e.preventDefault()
             if (input !== '') setInput('')
@@ -782,7 +782,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               <button
                 className="dom-hit"
                 // REPLACES the domain selection, deliberately diverging from the accumulating
-                // chips/panel: search is a refocus — whoever had cooking soloed and then
+                // chips/panel: search is a refocus - whoever had cooking soloed and then
                 // searches carbon fiber has moved on; the old selection lost its relevance
                 // the moment they typed. The tooltip says so.
                 onClick={() => {
@@ -819,7 +819,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   return (
     <div className="vault-graph" ref={rootRef}>
       <StaleLinksBanner />
-      {/* ═══ Tier 1 — the VIEW bar: how the graph is drawn (color lens, type visibility,
+      {/* ═══ Tier 1 - the VIEW bar: how the graph is drawn (color lens, type visibility,
           overlays, stats). Deliberately stable: nothing in this row grows with the vault,
           so a filter change can never reflow the render controls (mockup 2026-07-21). ═══ */}
       <div className="viewbar">
@@ -829,14 +829,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         <button
           className={`ctl${showSystem ? ' on' : ''}`}
           onClick={toggleSystem}
-          title="Show system pages: index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default — they organize or document the vault rather than hold knowledge."
+          title="Show system pages: index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default - they organize or document the vault rather than hold knowledge."
         >
           <Icon name="wrench" /> System
         </button>
         <span className="vb-sep" aria-hidden />
         <span className="overlays">
           <span className="grp-label">Overlays</span>
-          {/* Communities: one grouped control for the two views of the SAME clustering —
+          {/* Communities: one grouped control for the two views of the SAME clustering -
               Areas (tinted hulls) and Bridges (edge emphasis). Was two loose "Clusters" and
               "Network" buttons whose shared basis and hull-vs-edge split weren't legible. The
               two aspects stay independent (both can be on); state is unchanged underneath. */}
@@ -846,7 +846,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               className={`cm-seg${showClusters ? ' on' : ''}`}
               onClick={() => setShowClusters((v) => !v)}
               aria-pressed={showClusters}
-              title="Areas: outline each auto-detected community as a tinted, tag-labelled hull — which pages group together."
+              title="Areas: outline each auto-detected community as a tinted, tag-labelled hull - which pages group together."
             >
               Areas
             </button>
@@ -854,7 +854,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               className={`cm-seg${showNetwork ? ' on' : ''}`}
               onClick={() => setShowNetwork((v) => !v)}
               aria-pressed={showNetwork}
-              title="Bridges: brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead — how the groups connect."
+              title="Bridges: brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead - how the groups connect."
             >
               Bridges
             </button>
@@ -874,7 +874,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                 setShowGaps(next)
                 if (!next && selection?.kind === 'gap') closeExplorer()
               }}
-              title="Show unresolved links as ghost nodes — the pages your vault still wants written"
+              title="Show unresolved links as ghost nodes - the pages your vault still wants written"
             >
               <Icon name="gap" /> Gaps
             </button>
@@ -889,7 +889,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               <button
                 className="linklike"
                 // Same landing as the Gaps overlay toggle: the gaps view with the explorer's
-                // ranked list (it shows whenever gaps are on and nothing is selected) — the
+                // ranked list (it shows whenever gaps are on and nothing is selected) - the
                 // two entry points used to diverge, this one additionally auto-selecting the
                 // first gap, which surprise-opened a specific page's panel.
                 onClick={() => setShowGaps(true)}
@@ -906,8 +906,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
               <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
               <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
-              <span className="k"><kbd>Esc</kbd></span> <span>clear search · close panel · leave cluster · leave focus — and back out of a page</span>
-              <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters — show the whole vault</span>
+              <span className="k"><kbd>Esc</kbd></span> <span>clear search · close panel · leave cluster · leave focus - and back out of a page</span>
+              <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters - show the whole vault</span>
               <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
               <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
               <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>
@@ -916,7 +916,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         />
       </div>
 
-      {/* ═══ Tier 2 — the DOMAIN filter band: what is in the graph. The one zone that
+      {/* ═══ Tier 2 - the DOMAIN filter band: what is in the graph. The one zone that
           grows with the vault, so it owns its own row: the chips (legend + filter + count
           in one control) scroll horizontally, and the full set lives in the searchable
           "All domains" panel. ═══ */}
@@ -932,7 +932,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
-          the "· domain" suffix make the cluster ≠ domain distinction visible — one domain
+          the "· domain" suffix make the cluster ≠ domain distinction visible - one domain
           usually splits into several communities, and this row names exactly one of them. */}
       {clusterFocus !== null && (
         <div className="clusterbar" role="status">
@@ -1019,12 +1019,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
           }
           // The spotlight click, on a member node or anywhere in the community's hull: it
-          // isolates the community (the hover previews exactly this set) — recursively:
+          // isolates the community (the hover previews exactly this set) - recursively:
           // inside a focus the ids come from re-detection on the isolated subgraph, so the
           // click drills into a sub-community. It deliberately does NOT open the explorer
-          // panel — the click means "zoom in", not "inspect". The canvas only fires this
+          // panel - the click means "zoom in", not "inspect". The canvas only fires this
           // for isolatable communities (spotlight on, proper subset of the visible real
-          // nodes) — a level that doesn't subdivide, and any unclustered node, falls back
+          // nodes) - a level that doesn't subdivide, and any unclustered node, falls back
           // to the plain select above; the subset guard here is belt-and-braces.
           onClusterClick={(cid) => {
             if (clusterIds === null) return
@@ -1051,7 +1051,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             if (!n.path.startsWith(GAP_PATH_PREFIX)) navigate(pageRoute(n.path))
           }}
           // Click on empty canvas: drop the selection (an accidental node tap is undone
-          // with one click). Deliberately keeps the trail — only the panel's ✕ resets it.
+          // with one click). Deliberately keeps the trail - only the panel's ✕ resets it.
           onClear={() => setSelection(null)}
           overlay={
             <>
@@ -1105,7 +1105,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
  * The node explorer: click a page or a knowledge gap in the graph and browse it as lists.
  * Backlinks, outgoing links and tag-siblings are computed from the FULL graph (not the
  * filtered subgraph), so the panel is complete even when filters hide neighbors. Clicking a
- * link re-selects that page in place — you browse without leaving the graph; "Open page"
+ * link re-selects that page in place - you browse without leaving the graph; "Open page"
  * is the explicit navigation.
  */
 function GraphExplorer({
@@ -1189,7 +1189,7 @@ function PageExplorer({
     return idf
   }, [graph])
 
-  // Related by shared tag, excluding pages already linked either way — the tag axis surfaces
+  // Related by shared tag, excluding pages already linked either way - the tag axis surfaces
   // neighbors the wikilinks don't. Structural tags (`#source`, …) carry no subject and are
   // dropped; candidates are ranked by summed IDF of the shared thematic tags so the closest
   // neighbors win, not the alphabetically-first ones. Capped so the panel stays a summary.
@@ -1232,7 +1232,7 @@ function PageExplorer({
   const repairRunning = repairId !== null && (repairRun === undefined || repairRun.status === 'running')
   useEffect(() => {
     if (repairRun?.status === 'done') {
-      // The run edited pages and committed — refresh everything derived from the vault.
+      // The run edited pages and committed - refresh everything derived from the vault.
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
@@ -1280,7 +1280,7 @@ function PageExplorer({
           <div className="gx-health-head">Graph health</div>
           {isolated && (
             <p>
-              Isolated: no knowledge page links here or is linked from here — the page is
+              Isolated: no knowledge page links here or is linked from here - the page is
               invisible to graph exploration.
             </p>
           )}
@@ -1290,7 +1290,7 @@ function PageExplorer({
               {' → '}
               <button className="gx-link inline" onClick={() => onSelectPage(e.to.path)}>{e.to.title}</button>
               {' is the only link between '}
-              <strong>{e.from.domain}</strong> and <strong>{e.to.domain}</strong> — possibly an
+              <strong>{e.from.domain}</strong> and <strong>{e.to.domain}</strong> - possibly an
               incidental aside rather than knowledge.
             </p>
           ))}
@@ -1300,7 +1300,7 @@ function PageExplorer({
                 className="btn"
                 disabled={startRepair.isPending}
                 onClick={() => startRepair.mutate(repairTasks())}
-                title="A bounded agent run: weaves an isolated page into the graph and/or reviews the flagged link. Edits only the pages involved — one revertable commit."
+                title="A bounded agent run: weaves an isolated page into the graph and/or reviews the flagged link. Edits only the pages involved - one revertable commit."
               >
                 {startRepair.isPending ? 'Starting…' : 'Repair (agent run)'}
               </button>
@@ -1309,7 +1309,7 @@ function PageExplorer({
               )}
             </div>
           )}
-          {repairRunning && <p className="dim">Repair is running — the agent edits only the pages involved…</p>}
+          {repairRunning && <p className="dim">Repair is running - the agent edits only the pages involved…</p>}
           {repairRun?.status === 'done' && (
             <p>
               Repair finished: {repairRun.result?.pages.length ?? 0} page
@@ -1372,7 +1372,7 @@ function GapExplorer({
       </div>
       <div className="gx-note">
         No page named <strong>“{gap.title}”</strong> exists yet, but {gap.refBy.length} page
-        {gap.refBy.length === 1 ? '' : 's'} already link to it — the vault telling you what to write next.
+        {gap.refBy.length === 1 ? '' : 's'} already link to it - the vault telling you what to write next.
       </div>
       <div className="gx-body">
         <LinkSection title="Referenced by" list={refPages} onSelect={onSelectPage} />
@@ -1411,7 +1411,7 @@ function GapList({
         </div>
       </div>
       <div className="gx-note">
-        Every dashed node is a page other pages link to but that doesn’t exist yet — ranked by how
+        Every dashed node is a page other pages link to but that doesn’t exist yet - ranked by how
         many content pages are waiting. A ready-made research backlog.
       </div>
       <div className="gx-body">
@@ -1472,8 +1472,8 @@ function LinkSection({
  * nine chips above the graph. Checkbox = visible.
  */
 /**
- * Tier-2 filter band (mockup 2026-07-21): the domain chips — legend + filter + count in one
- * control — in a horizontally scrolling strip with edge fades, plus the searchable
+ * Tier-2 filter band (mockup 2026-07-21): the domain chips - legend + filter + count in one
+ * control - in a horizontally scrolling strip with edge fades, plus the searchable
  * "All domains" panel. This is the part of the toolbar that grows as the vault gains
  * domains, isolated in its own row so it can never reflow the view controls above it.
  * Solo-select semantics unchanged: empty selection = everything; clicks accumulate.
@@ -1509,19 +1509,19 @@ function DomainBand({
    * Honest, state-aware tooltip for a toggle target (chip or panel row). The old static
    * "Show only this domain" was only true for the FIRST click; every further click adds to
    * the selection, and claiming "only" there mislabeled the accumulate semantics. (The graph
-   * search's domain hit is the one place that genuinely replaces — its own tooltip says so.)
+   * search's domain hit is the one place that genuinely replaces - its own tooltip says so.)
    */
   const toggleTitle = (d: string, active: boolean): string =>
     active
       ? selected.size === 1
-        ? 'Deselect — back to all domains'
+        ? 'Deselect - back to all domains'
         : `Remove ${label(d)} from the filter`
       : selected.size === 0
         ? 'Show only this domain'
         : `Add ${label(d)} to the current selection`
   const q = filter.trim().toLowerCase()
   // The band orders by size (biggest domains first); the panel is for FINDING a domain,
-  // so it orders alphabetically — the no-domain pseudo-bucket stays last either way.
+  // so it orders alphabetically - the no-domain pseudo-bucket stays last either way.
   const alphabetical = [...domains].sort(([a], [b]) =>
     a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b),
   )
@@ -1654,7 +1654,7 @@ function TypesDropdown({
       </button>
       {open && (
         <div className="dropdown-menu" role="menu">
-          {/* "All types" is the empty selection — the reset, mirroring the domain band's Clear.
+          {/* "All types" is the empty selection - the reset, mirroring the domain band's Clear.
               Checked when nothing is soloed, so the menu always shows one active state. */}
           <label className="dropdown-item">
             <input type="checkbox" checked={all} onChange={onClear} />
@@ -1663,7 +1663,7 @@ function TypesDropdown({
           <div className="dropdown-sep" role="separator" />
           {types.map(([t, count]) => (
             // Checked = this type is soloed (in the active filter), like a highlighted domain
-            // chip. With nothing soloed no box is checked and "All types" carries the state —
+            // chip. With nothing soloed no box is checked and "All types" carries the state -
             // a click then means "show me only this type", not "uncheck one of all".
             <label key={t} className="dropdown-item">
               <input type="checkbox" checked={selected.has(t)} onChange={() => onToggle(t)} />
@@ -1689,7 +1689,7 @@ const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
 
 /**
  * The color-lens picker: one dropdown that re-encodes the graph to answer a different
- * question. Replaces the old two-state "by domain / by type" toggle — same job, four more
+ * question. Replaces the old two-state "by domain / by type" toggle - same job, four more
  * axes. Domain is disabled when no page carries one.
  */
 function LensDropdown({
@@ -1752,7 +1752,7 @@ function LensDropdown({
 
 /**
  * A small canvas-corner legend (bottom-right). The metric lenses each get a one-line key; the
- * `type` lens gets a swatch per page-type color present. The `domain` lens has no legend here —
+ * `type` lens gets a swatch per page-type color present. The `domain` lens has no legend here -
  * the domain filter chips at the top ARE its legend. `types` is the [type, count] list of what
  * is currently visible, so the legend lists only colors actually on screen.
  */
@@ -1766,7 +1766,7 @@ function LensLegend({
   let body: React.ReactNode = null
   if (lens === 'type') {
     // Distinct color buckets present, in a stable order; everything without its own color
-    // (meta, references, comparisons, folds, …) collapses to one muted "Meta / other" row —
+    // (meta, references, comparisons, folds, …) collapses to one muted "Meta / other" row -
     // mirroring colorFor(), which paints exactly those buckets muted.
     const present = new Set(types.map(([t]) => t))
     const colored = Object.entries(TYPE_VARS).filter(([, v]) => v !== '--muted')
@@ -1931,12 +1931,12 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   }, [menuOpen])
   const [copiedPath, setCopiedPath] = useState(false)
 
-  // Escape leaves the page for the graph — the round-trip partner of the canvas
+  // Escape leaves the page for the graph - the round-trip partner of the canvas
   // double-click. It goes straight to /graph (not history.back): after a chain of wikilink
   // hops, one press means "out to the graph", not one step back per hop. The back BUTTON
   // does exactly the same thing, so the two gestures can't disagree (they used to: the
-  // button ran history.back and could leave the screen entirely). Inert while editing —
-  // Escape must never cost a draft — and while typing or a menu is open; gated on this
+  // button ran history.back and could leave the screen entirely). Inert while editing -
+  // Escape must never cost a draft - and while typing or a menu is open; gated on this
   // screen being visible (screens stay mounted, hidden via [hidden]).
   const rootRef = useRef<HTMLDivElement>(null)
   const escRef = useRef<(e: KeyboardEvent) => void>(() => {})
@@ -1959,7 +1959,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Title → path map for resolving clicked wikilinks — same first-wins, case-insensitive
+  // Title → path map for resolving clicked wikilinks - same first-wins, case-insensitive
   // rule as the server, so the viewer and the graph can never disagree.
   const byTitle = useMemo(() => {
     const m = new Map<string, string>()
@@ -2088,7 +2088,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                       .slice(0, 3)
                       .map((b) => b.title)
                       .join(', ')}
-                    {backlinks.length > 3 ? ', …' : ''}) — deleting leaves dangling links.
+                    {backlinks.length > 3 ? ', …' : ''}) - deleting leaves dangling links.
                   </div>
                 )}
                 <button
@@ -2096,7 +2096,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                   className="danger"
                   disabled={del.isPending}
                   onClick={requestDelete}
-                  title="Deleted as a git commit — recoverable"
+                  title="Deleted as a git commit - recoverable"
                 >
                   <Icon name="x" />{' '}
                   {del.isPending ? 'Deleting…' : confirmDelete ? 'Really delete?' : 'Delete page…'}
@@ -2126,7 +2126,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
 
       {editing ? (
         <div className="page-editor">
-          {/* Markdown left, live rendering right — wikilinks and frontmatter are visible
+          {/* Markdown left, live rendering right - wikilinks and frontmatter are visible
               while typing instead of only after saving. Stacks on small screens. */}
           <div className="editor-split">
             <textarea
@@ -2181,7 +2181,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
               {parsed.fields.map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>
-                  {/* Frontmatter carries wikilinks too (`related: [[index]]`) — make them
+                  {/* Frontmatter carries wikilinks too (`related: [[index]]`) - make them
                       navigable rather than showing the raw brackets. */}
                   <dd>{renderMetaValue(v, linkTo)}</dd>
                 </div>
@@ -2242,7 +2242,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   )
 }
 
-/** Live rendering of the editor draft — frontmatter as properties, wikilinks clickable. */
+/** Live rendering of the editor draft - frontmatter as properties, wikilinks clickable. */
 function EditorPreview({
   draft,
   linkTo,
@@ -2270,7 +2270,7 @@ function EditorPreview({
 
 /**
  * Banner shown after manual deletions: N backlinks now point at nothing. Primary action is
- * the bounded reference-cleanup agent run (maintenance kind `cleanup`) — one click instead
+ * the bounded reference-cleanup agent run (maintenance kind `cleanup`) - one click instead
  * of leaving the dangling references to be discovered weeks later by a lint. The banner
  * tracks the run inline (poll every 2 s) so the user never has to leave the tab.
  */
@@ -2292,7 +2292,7 @@ function StaleLinksBanner(): React.ReactElement | null {
   const settled = run !== undefined && run.status !== 'running'
   useEffect(() => {
     if (run?.status === 'done') {
-      // The run edited pages and committed — refresh everything derived from the vault.
+      // The run edited pages and committed - refresh everything derived from the vault.
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
@@ -2310,7 +2310,7 @@ function StaleLinksBanner(): React.ReactElement | null {
   if (runId !== null && !settled) {
     body = (
       <span>
-        Reference cleanup is running — removing dangling links to <strong>{pages}</strong>…
+        Reference cleanup is running - removing dangling links to <strong>{pages}</strong>…
       </span>
     )
   } else if (run?.status === 'done') {

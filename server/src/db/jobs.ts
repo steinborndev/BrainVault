@@ -100,6 +100,8 @@ export interface JobRow {
   notify_channel: string | null
   /** The one vault commit this job produced (v9) — the anchor for "revert this ingest". */
   commit_hash: string | null
+  /** For a `duplicate` row: the id of the job whose content it repeats (v11). */
+  duplicate_of: string | null
   /** Set once that commit has been reverted; the job's own status stays whatever it was. */
   reverted_at: string | null
 }
@@ -179,10 +181,10 @@ export class JobStore {
         .prepare(
           `INSERT INTO jobs
              (id, user_id, batch_id, source, type, original_name, url, sha256, status,
-              raw_path, attempts, created_at, finished_at, notify_channel)
+              raw_path, attempts, created_at, finished_at, notify_channel, duplicate_of)
            VALUES
              (@id, @user_id, @batch_id, @source, @type, @original_name, @url, @sha256, @status,
-              @raw_path, 0, @created_at, @finished_at, @notify_channel)`,
+              @raw_path, 0, @created_at, @finished_at, @notify_channel, @duplicate_of)`,
         )
         .run({
           id,
@@ -200,6 +202,8 @@ export class JobStore {
           // Duplicates are terminal on arrival, so they get a finish time immediately.
           finished_at: isDuplicate ? now : null,
           notify_channel: input.notifyChannel ?? null,
+          // Persisted, not just returned: the history must be able to answer "of what?".
+          duplicate_of: isDuplicate ? original!.id : null,
         })
 
       this.log(

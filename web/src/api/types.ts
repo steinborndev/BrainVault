@@ -40,10 +40,12 @@ export interface Job {
   created_at: string
   started_at: string | null
   finished_at: string | null
-  /** The vault commit this job produced — present once it committed; the revert anchor. */
+  /** The vault commit this job produced - present once it committed; the revert anchor. */
   commit_hash?: string | null
   /** Set once that commit has been reverted (the job's own status is unchanged). */
   reverted_at?: string | null
+  /** For a `duplicate` row: the id of the job whose content it repeats (schema v11). */
+  duplicate_of?: string | null
 }
 
 export interface RevertResponse {
@@ -54,7 +56,7 @@ export interface RevertResponse {
 }
 
 export interface JobLogLine {
-  /** `job_logs` rowid — present on seed fetches and job-log SSE lines; exact dedup key. */
+  /** `job_logs` rowid - present on seed fetches and job-log SSE lines; exact dedup key. */
   id?: number
   ts: string
   level: LogLevel
@@ -92,7 +94,7 @@ export interface GrowthPoint {
 /** Anthropic auth mode. In `oauth` (subscription) mode cost is an estimate, not money charged. */
 export type AuthMode = 'oauth' | 'api-key'
 
-/** Why the queue is paused — a spent budget reads differently from a usage limit. */
+/** Why the queue is paused - a spent budget reads differently from a usage limit. */
 export type PauseReason = 'rate-limit' | 'budget' | null
 
 /** Token/cost totals over a window (server/src/db/jobs.ts `usageSince`). */
@@ -100,7 +102,7 @@ export interface UsageTotals {
   tokensIn: number
   tokensOut: number
   costUsd: number
-  /** Agent runs in the window (done + failed) — the unit the budget uses in oauth mode. */
+  /** Agent runs in the window (done + failed) - the unit the budget uses in oauth mode. */
   ingests: number
 }
 
@@ -123,12 +125,12 @@ export interface Stats {
   commits: Commit[]
   growth: GrowthPoint[]
   hotCache: string | null
-  /** mtime of wiki/hot.md — the Wartung tab's "letzter Refresh". null if never written. */
+  /** mtime of wiki/hot.md - the Wartung tab's "letzter Refresh". null if never written. */
   hotCacheUpdatedAt: string | null
-  /** Newest lint report page in the vault — the Maintenance tab's persistent link. */
+  /** Newest lint report page in the vault - the Maintenance tab's persistent link. */
   lintReport: { path: string; date: string | null } | null
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
-  /** 14 days of per-day done/failed counts (sparse; UTC dates) — KPI sparklines + deltas. */
+  /** 14 days of per-day done/failed counts (sparse; UTC dates) - KPI sparklines + deltas. */
   kpisDaily: Array<{ date: string; done: number; failed: number }>
   usage: { today: UsageTotals; last7d: UsageTotals }
   budget: Budget
@@ -161,25 +163,25 @@ export interface GraphNode {
   title: string
   /** Top-level wiki bucket: concepts | entities | sources | meta | … | root. */
   type: string
-  /** Frontmatter `tags:` — the thematic axis; searchable and (via domain) filterable. */
+  /** Frontmatter `tags:` - the thematic axis; searchable and (via domain) filterable. */
   tags: string[]
   /** Frontmatter `domain:` meta-category, or null when the page carries none. */
   domain: string | null
   /**
    * Server-side classification: real knowledge vs. structural scaffolding (index hubs,
    * MOCs, the domain registry) vs. operational artifacts (lint/release reports, session
-   * logs). Absent on synthetic ghost nodes — treat missing as `knowledge`.
+   * logs). Absent on synthetic ghost nodes - treat missing as `knowledge`.
    */
   kind?: 'knowledge' | 'structural' | 'artifact'
   out: number
   in: number
-  /** File mtime (epoch ms) — the "recency" color lens. Absent on hand-built fixtures. */
+  /** File mtime (epoch ms) - the "recency" color lens. Absent on hand-built fixtures. */
   mtimeMs?: number
-  /** File size in bytes — the "stubs" lens threshold. */
+  /** File size in bytes - the "stubs" lens threshold. */
   size?: number
 }
 
-/** A missing page other pages already link to — the vault's own to-write list (SPEC.md §12.4). */
+/** A missing page other pages already link to - the vault's own to-write list (SPEC.md §12.4). */
 export interface GraphGap {
   title: string
   /** Indices into `nodes` of the pages that link to this missing target. */
@@ -191,7 +193,7 @@ export interface VaultGraph {
   /** Directed edges as [fromIndex, toIndex] into `nodes`. */
   edges: Array<[number, number]>
   unresolved: number
-  /** Distinct unresolved link targets — most knowledge-page referrers first. */
+  /** Distinct unresolved link targets - most knowledge-page referrers first. */
   gaps: GraphGap[]
   builtAt: string
 }
@@ -213,14 +215,14 @@ export interface ValidationFinding {
   message: string
 }
 
-/** Result of a user page edit (PUT /pages) — every edit is one git commit. */
+/** Result of a user page edit (PUT /pages) - every edit is one git commit. */
 export interface PageWriteResult {
   ok: boolean
   path: string
   mtime: string
   commit: string | null
   committed: boolean
-  /** Advisory checks over the edited page — the edit itself has already landed. */
+  /** Advisory checks over the edited page - the edit itself has already landed. */
   validation?: ValidationFinding[]
 }
 
@@ -251,7 +253,7 @@ export interface ChatMessage {
   content: string
   /** JSON string of Citation[] as stored, or null. Parse with parseCitations(). */
   citations: string | null
-  /** Usage of the run that produced this answer — assistant rows only (v6), else null. */
+  /** Usage of the run that produced this answer - assistant rows only (v6), else null. */
   tokens_in: number | null
   tokens_out: number | null
   cost_usd: number | null
@@ -297,7 +299,7 @@ export interface LintReport {
   totalFindings: number
 }
 
-/** `save` is the chat's "Session in Vault sichern" — same async run machinery. */
+/** `save` is the chat's "Session in Vault sichern" - same async run machinery. */
 /**
  * One research lens ("Achse A") from `GET /maintenance/research/profiles`. A closed set the
  * composer offers; the selected `key` rides along on `POST /maintenance/research`. `titleSuffix`
@@ -338,7 +340,7 @@ export type TagFixAction =
 
 /** Retrieval-index status (GET /maintenance/retrieve-index, SPEC §12.6). */
 /**
- * Per-kind last-settle record (GET /maintenance/state, SPEC §12.7 Stufe b) — restart-proof
+ * Per-kind last-settle record (GET /maintenance/state, SPEC §12.7 Stufe b) - restart-proof
  * "last run" facts for areas whose outcome no vault file captures (tag-fix, backfill, …).
  */
 export interface MaintenanceAreaState {
@@ -357,7 +359,7 @@ export interface MaintenanceStateResponse {
 export interface RetrieveIndexStatus {
   /** The vault ships the wiki-retrieve scripts at all (a v1.7+ claude-obsidian clone). */
   scriptsPresent: boolean
-  /** Fully built — the vault's own query/research skills use the index from here on. */
+  /** Fully built - the vault's own query/research skills use the index from here on. */
   provisioned: boolean
   chunkCount: number
   /** ISO mtime of the BM25 index, or null when never built. */
@@ -381,7 +383,7 @@ export interface DomainEntry {
 }
 
 export interface DomainsResponse {
-  /** False when the vault has no `wiki/meta/domains.md` — the backfill is then unavailable. */
+  /** False when the vault has no `wiki/meta/domains.md` - the backfill is then unavailable. */
   installed: boolean
   path: string
   domains: DomainEntry[]
@@ -393,14 +395,14 @@ export interface DomainCandidate {
   tags: string[]
   pages: Array<{ path: string; title: string }>
   pageCount: number
-  /** 0–1: share of the candidate's pages linked to another page in the same candidate. */
+  /** 0-1: share of the candidate's pages linked to another page in the same candidate. */
   cohesion: number
 }
 
 export interface CandidatesResponse {
   candidates: DomainCandidate[]
   unassignedCount: number
-  /** Pages with no `domain:` field at all — non-zero means a backfill is due. */
+  /** Pages with no `domain:` field at all - non-zero means a backfill is due. */
   undomainedCount: number
   threshold: number
   dismissed: Array<{ key: string; dismissedAt: string }>
@@ -476,7 +478,7 @@ export interface SettingsResponse {
   effective: EffectiveSettings
   baseline: EffectiveSettings
   overrides: Partial<EffectiveSettings>
-  /** Read-only status incl. the API-key SOURCE — never the credential itself (hard rule 3). */
+  /** Read-only status incl. the API-key SOURCE - never the credential itself (hard rule 3). */
   readOnly: Record<string, string>
   /** Keys that only take effect after a service restart. */
   restartRequiredKeys: string[]

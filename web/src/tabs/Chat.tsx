@@ -1,17 +1,17 @@
 /**
  * Research screen (SPEC.md §6.3, redesign 2026-08). Two lanes in one rail: conversations
  * (the read-only query runner, answers with citation chips) and research runs (the
- * web-enabled autoresearch, SPEC §6.4) — the run block used to render inside whatever
+ * web-enabled autoresearch, SPEC §6.4) - the run block used to render inside whatever
  * session thread happened to be open, implying a relationship that never existed. A run now
  * has its own view; starting one switches to it, and the last settled run stays reachable
  * after a reload via the restart-proof maintenance state.
  *
  * The composer keeps its two modes with the violet side-effect signaling, but the research
  * plan collapses to ONE line (lens · deterministic title · fetch cap · 1 commit) with the
- * lens picker in a popover — the old hint + chip row + 4-row plan stacked ~300px of chrome
+ * lens picker in a popover - the old hint + chip row + 4-row plan stacked ~300px of chrome
  * before typing.
  *
- * `/query` is still request/response — the ANSWER of record arrives with the HTTP reply —
+ * `/query` is still request/response - the ANSWER of record arrives with the HTTP reply -
  * but the text streams live meanwhile (chatStream). First questions stream too: the client
  * sends a request id and the server echoes it on the deltas, because the session id only
  * exists once the reply lands.
@@ -36,7 +36,7 @@ type ComposerMode = 'ask' | 'research'
 type View = 'thread' | 'run'
 
 /**
- * `researchPrefill` seeds the composer in Research mode from elsewhere in the app — the
+ * `researchPrefill` seeds the composer in Research mode from elsewhere in the app - the
  * graph's knowledge-gap button, Home's most-wanted list and the palette navigate here with
  * a CLEAN topic (the page name, so lens title suffixes stay intact). Consumed once.
  */
@@ -72,7 +72,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const ask = useMutation({
     mutationFn: (question: string) => api.query(question, activeId ?? undefined, requestIdRef.current || undefined),
     onSuccess: (res) => {
-      // The real message replaces the preview — clear every key it may have streamed under.
+      // The real message replaces the preview - clear every key it may have streamed under.
       chatStream.clear(res.sessionId)
       chatStream.clear(streamKey)
       if (requestIdRef.current !== '') chatStream.clear(requestIdRef.current)
@@ -83,11 +83,11 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     onError: (_e, question) => {
       chatStream.clear(streamKey)
       if (requestIdRef.current !== '') chatStream.clear(requestIdRef.current)
-      // Give the typed question back instead of forcing a retype — but never clobber
+      // Give the typed question back instead of forcing a retype - but never clobber
       // something the user already started writing while the query was in flight.
       setDraft((current) => (current.trim() === '' ? question : current))
       // The failed question and the server's error message land in the session as
-      // persisted rows too — refresh so the sidebar shows the session it created.
+      // persisted rows too - refresh so the sidebar shows the session it created.
       qc.invalidateQueries({ queryKey: ['sessions'] })
     },
   })
@@ -105,7 +105,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const [lastTopic, setLastTopic] = useState('')
   const [lastProfile, setLastProfile] = useState<string | null>(null)
   const research = useMaintenanceRun(() => api.research(topicRef.current, profileKeyRef.current))
-  // The last settled research run, restart-proof (maintenance_state) — the rail shows it
+  // The last settled research run, restart-proof (maintenance_state) - the rail shows it
   // even after a reload, when the client-side run state is gone.
   const maintState = useQuery({ queryKey: ['maintenance-state'], queryFn: api.maintenanceState })
   const lastResearchState = maintState.data?.areas.find((a) => a.kind === 'research')
@@ -115,7 +115,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
   }, [messages.length, ask.isPending])
-  // Follow the stream while the reader is pinned to the bottom — but never yank the view
+  // Follow the stream while the reader is pinned to the bottom - but never yank the view
   // back down when they scrolled up to re-read something.
   useEffect(() => {
     const el = threadRef.current
@@ -125,7 +125,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   }, [streamed])
 
   // The composer grows with its content (capped), and gets focus whenever the screen
-  // becomes visible — screens stay mounted, so plain autoFocus would only ever fire once
+  // becomes visible - screens stay mounted, so plain autoFocus would only ever fire once
   // at app start, usually while this screen is hidden.
   const composerRef = useRef<HTMLTextAreaElement>(null)
   useEffect(() => {
@@ -146,7 +146,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   }, [])
 
   // A gap's "Research" landed us here with a topic: arm Research mode, drop it into the
-  // composer for review (not auto-sent — the user confirms), then strip the query param so
+  // composer for review (not auto-sent - the user confirms), then strip the query param so
   // this fires exactly once.
   useEffect(() => {
     if (researchPrefill === '') return
@@ -187,7 +187,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const selectSession = (id: string | null): void => {
     setActiveId(id)
     setView('thread')
-    // The save outcome belongs to the previous session — don't caption the new thread with it.
+    // The save outcome belongs to the previous session - don't caption the new thread with it.
     ask.reset()
     save.reset()
   }
@@ -326,7 +326,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               </div>
             )}
 
-            {/* Save-to-vault lives at the END of the thread — next to the result it saves. */}
+            {/* Save-to-vault lives at the END of the thread - next to the result it saves. */}
             {canSave && (
               <div className="savebar">
                 <button className="btn" disabled={save.running} onClick={save.start}>
@@ -414,7 +414,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
 
 /**
  * The research run's own view (redesign 2026-08): live log while running, result with pages
- * and cost when settled — no longer squatting inside whichever conversation was open. After
+ * and cost when settled - no longer squatting inside whichever conversation was open. After
  * a reload only the restart-proof settle facts remain (kind, outcome, page count); the
  * topic and page list live with the run, which the server does not persist yet.
  */
@@ -510,7 +510,7 @@ function RunView({
 
 /**
  * The run plan as ONE line (redesign 2026-08): lens, the deterministic synthesis-page title
- * the service pins (topic + the lens's `titleSuffix`), the fetch cap and the single commit —
+ * the service pins (topic + the lens's `titleSuffix`), the fetch cap and the single commit -
  * always visible while typing. The lens picker (with blurbs and source preferences, the
  * consent detail) opens as a popover instead of permanently stacking above the input.
  */
@@ -599,7 +599,7 @@ function PlanLine({
 
 /**
  * One session as a sidebar row: title + meta (message count, last activity), with rename
- * (inline input — no `window.prompt`, blocked/ugly in installed PWAs) and a two-step delete.
+ * (inline input - no `window.prompt`, blocked/ugly in installed PWAs) and a two-step delete.
  */
 function SessionRow({
   session,

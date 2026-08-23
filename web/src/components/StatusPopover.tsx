@@ -1,7 +1,7 @@
 /**
  * The topbar's service-status popover. The old "Live" dot only reported the SSE connection;
- * this one makes the pill the home of the whole service state — watcher, queue (incl. pause
- * reason), daily budget and vault — reachable from every tab, so warnings like "queue paused
+ * this one makes the pill the home of the whole service state - watcher, queue (incl. pause
+ * reason), daily budget and vault - reachable from every tab, so warnings like "queue paused
  * (budget)" don't hide at the bottom of the Overview.
  */
 
@@ -30,9 +30,9 @@ export function StatusPopover({ connected }: { connected: boolean }): React.Reac
   const lastCommit = stats?.commits[0]
   const pausedLabel =
     queue?.pauseReason === 'budget'
-      ? 'paused — daily budget'
+      ? 'paused - daily budget'
       : queue?.pauseReason === 'rate-limit'
-        ? 'paused — usage limit'
+        ? 'paused - usage limit'
         : 'paused'
 
   return (

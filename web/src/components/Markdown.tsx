@@ -6,7 +6,7 @@
  *
  * Wikilinks render as plain emphasized text by default (the hot-cache/chat behaviour); the
  * vault viewer passes `renderWikilink` to turn them into in-app navigation. Still not a full
- * CommonMark implementation — by design.
+ * CommonMark implementation - by design.
  */
 
 import type { ReactNode } from 'react'
@@ -33,7 +33,7 @@ function inline(text: string, keyBase: string, ctx: InlineCtx): ReactNode[] {
     if (tok.startsWith('`')) {
       nodes.push(<code key={key}>{tok.slice(1, -1)}</code>)
     } else if (tok.startsWith('[[')) {
-      // [[Target]], [[Target|Alias]], [[Target#Heading]] — label shows the alias if present.
+      // [[Target]], [[Target|Alias]], [[Target#Heading]] - label shows the alias if present.
       const body = tok.slice(2, -2)
       const target = body.split('|')[0]!.split('#')[0]!.trim()
       const label = (body.split('|')[1] ?? body.split('#')[0])!.trim()

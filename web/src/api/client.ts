@@ -43,7 +43,7 @@ async function json<T>(res: Response): Promise<T> {
     try {
       const body = (await res.json()) as { error?: string; issues?: string[] }
       detail = body.error ? `: ${body.error}` : ''
-      // Validation endpoints (e.g. PUT /settings) return per-field issues — surfacing them
+      // Validation endpoints (e.g. PUT /settings) return per-field issues - surfacing them
       // turns "400 Bad Request" into something the user can actually act on.
       if (Array.isArray(body.issues) && body.issues.length > 0) detail += ` (${body.issues.join('; ')})`
     } catch {
@@ -171,7 +171,7 @@ export const api = {
   deletePage: (path: string): Promise<PageDeleteResult> =>
     fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).then(json<PageDeleteResult>),
 
-  /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
+  /** "Session in Vault sichern" - starts an async write-enabled run; poll it like a maintenance run. */
   saveSession: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/sessions/${id}/save`, { method: 'POST' }).then(json<MaintenanceRun>),
 
@@ -232,7 +232,7 @@ export const api = {
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
 
-  /** Per-kind last-settle state (SPEC §12.7 Stufe b) — feeds the status head's "last run" facts. */
+  /** Per-kind last-settle state (SPEC §12.7 Stufe b) - feeds the status head's "last run" facts. */
   maintenanceState: (): Promise<MaintenanceStateResponse> =>
     fetch(`${BASE}/maintenance/state`).then(json<MaintenanceStateResponse>),
 
@@ -240,7 +240,7 @@ export const api = {
   retrieveIndexStatus: (): Promise<RetrieveIndexStatus> =>
     fetch(`${BASE}/maintenance/retrieve-index`).then(json<RetrieveIndexStatus>),
 
-  /** Rebuild (or first-time provision) the retrieval index — deterministic, no credential. */
+  /** Rebuild (or first-time provision) the retrieval index - deterministic, no credential. */
   retrieveIndex: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/retrieve-index`, { method: 'POST' }).then(json<MaintenanceRun>),
 

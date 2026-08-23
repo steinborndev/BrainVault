@@ -1,13 +1,13 @@
 /**
- * Inbox (SPEC.md §6.2, redesign 2026-08) — intake on top (files, link/note, channels line),
+ * Inbox (SPEC.md §6.2, redesign 2026-08) - intake on top (files, link/note, channels line),
  * then the live sections:
- *  - Active: jobs being preprocessed/ingested — phase stepper + elapsed time, live agent log.
+ *  - Active: jobs being preprocessed/ingested - phase stepper + elapsed time, live agent log.
  *  - Queue: queued jobs, cancellable; files from one drop appear as a batch group.
- *  - History: compact table rows — depth (commit, hashes, exact times, full log, retry,
+ *  - History: compact table rows - depth (commit, hashes, exact times, full log, retry,
  *    revert) lives in the job drawer, so 78 jobs no longer render as an 18,000px scroll.
  *
  * Counts are honest: the filter chips use the all-time per-status totals from /stats
- * (`stats.jobs`), while the table shows the stored window (limit-capped) — the footer says
+ * (`stats.jobs`), while the table shows the stored window (limit-capped) - the footer says
  * both. Clearing deletes by status across the whole store and says exactly that.
  *
  * All sections come from one `['jobs']` query that the SSE `job` events invalidate live, so
@@ -42,7 +42,7 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
   const qc = useQueryClient()
   const [filter, setFilter] = useState<'all' | JobStatus>('all')
   const [search, setSearch] = useState('')
-  // `?filter=` from elsewhere (the Home failures tile) pre-applies a status filter — the
+  // `?filter=` from elsewhere (the Home failures tile) pre-applies a status filter - the
   // screen stays mounted, so this must react to navigation, not just the first mount.
   useEffect(() => {
     if (statusFilter === '') return
@@ -54,10 +54,10 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
   // The vault name for obsidian:// links comes from /stats; cheap and already cached.
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
-  // Until stats load, assume the subscription default — marking a real cost as an estimate is
+  // Until stats load, assume the subscription default - marking a real cost as an estimate is
   // a harmless caption, whereas showing an estimate as a real charge would be misleading.
   const authMode = stats.data?.authMode ?? 'oauth'
-  // All-time per-status totals — the DB truth the chips and the clear action speak about.
+  // All-time per-status totals - the DB truth the chips and the clear action speak about.
   const totals = stats.data?.jobs ?? {}
 
   const { data, isLoading, isError, error } = useQuery({
@@ -81,7 +81,7 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
     return byStatus.filter((j) => (j.original_name ?? j.url ?? j.id).toLowerCase().includes(q))
   }, [history, filter, search])
 
-  // The number the clear action actually deletes: the all-time DB count for the filter —
+  // The number the clear action actually deletes: the all-time DB count for the filter -
   // NOT the searched/visible slice (an old bug promised the filtered count but deleted more).
   const atRest: JobStatus[] = ['done', 'failed', 'deferred', 'duplicate', 'cancelled']
   const clearCount =
@@ -98,8 +98,8 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
     },
   })
 
-  // Two-step confirm on the button itself (no `window.confirm` — blocked/ugly in installed
-  // PWAs). First click arms it for 4 s — red fill, visible countdown — second click clears.
+  // Two-step confirm on the button itself (no `window.confirm` - blocked/ugly in installed
+  // PWAs). First click arms it for 4 s - red fill, visible countdown - second click clears.
   const [armedLeft, setArmedLeft] = useState<number | null>(null)
   const armTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const disarm = (): void => {
@@ -247,7 +247,7 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
           </span>
           {HISTORY_FILTERS.map((f) => {
             const count = chipCount(f.id)
-            // Zero-count filters are noise — hide them unless currently selected.
+            // Zero-count filters are noise - hide them unless currently selected.
             if (count === 0 && f.id !== 'all' && filter !== f.id) return null
             return (
               <button key={f.id} className={`chip${filter === f.id ? ' active' : ''}`} onClick={() => setFilter(f.id)}>
@@ -300,7 +300,7 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
       </Section>
 
       {drawerJob !== null && (
-        <JobDrawer jobId={drawerJob} vaultName={vaultName} authMode={authMode} onClose={() => setDrawerJob(null)} />
+        <JobDrawer jobId={drawerJob} vaultName={vaultName} authMode={authMode} onClose={() => setDrawerJob(null)} onOpenJob={setDrawerJob} />
       )}
     </div>
   )
@@ -348,7 +348,7 @@ function HistoryRow({
   )
 }
 
-/** Queued files from one drop as one group — visibly related, cancellable as a whole. */
+/** Queued files from one drop as one group - visibly related, cancellable as a whole. */
 function BatchGroup({
   jobs,
   vaultName,
@@ -360,10 +360,10 @@ function BatchGroup({
 }): React.ReactElement {
   const qc = useQueryClient()
   const cancelAll = useMutation({
-    // No batch endpoint — cancel each member; the queue treats them independently anyway.
+    // No batch endpoint - cancel each member; the queue treats them independently anyway.
     mutationFn: () => Promise.all(jobs.map((j) => api.cancel(j.id))),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
-    // One failed member must not abort silently — say so, and refresh what did change.
+    // One failed member must not abort silently - say so, and refresh what did change.
     onError: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
   const oldest = jobs[jobs.length - 1]!

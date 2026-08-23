@@ -105,7 +105,7 @@ export function Dropzone(): React.ReactElement {
       takeFiles(files)
       return
     }
-    // A dragged link/text (no files) — treat as a URL/text submission.
+    // A dragged link/text (no files) - treat as a URL/text submission.
     const dragged = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
     if (dragged.trim()) submit.mutate({ value: dragged.trim(), noteTitle: '' })
   }
@@ -129,7 +129,7 @@ export function Dropzone(): React.ReactElement {
           onDrop={onDrop}
           onClick={() => fileInput.current?.click()}
           onKeyDown={(e) => {
-            // role="button" promises keyboard activation — deliver it (Enter/Space open the picker).
+            // role="button" promises keyboard activation - deliver it (Enter/Space open the picker).
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
               fileInput.current?.click()

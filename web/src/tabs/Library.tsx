@@ -1,8 +1,8 @@
 /**
- * Library — the browse path the vault never had (redesign 2026-08). A filterable, sortable
+ * Library - the browse path the vault never had (redesign 2026-08). A filterable, sortable
  * table over every page, fed by the same `['graph']` query the canvas uses (no new
  * endpoint). The graph stays the spatial view; this is the retrieval view: find by type,
- * domain, recency — and surface health problems (orphans, stubs) as filters instead of
+ * domain, recency - and surface health problems (orphans, stubs) as filters instead of
  * leaving them to a lucky node click.
  */
 
@@ -55,7 +55,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
 
   const nodes = graph.data?.nodes
 
-  // System pages (index hubs, reports) are scaffolding — hidden unless asked for, same
+  // System pages (index hubs, reports) are scaffolding - hidden unless asked for, same
   // default the graph uses.
   const knowledge = useMemo(
     () => (nodes ?? []).filter((n) => showSystem || (n.kind ?? 'knowledge') === 'knowledge'),
@@ -259,7 +259,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                         {n.domain}
                       </>
                     ) : (
-                      <span className="dim">–</span>
+                      <span className="dim">-</span>
                     )}
                   </td>
                   <td className="num lt-links">
