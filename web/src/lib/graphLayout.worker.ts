@@ -24,7 +24,6 @@ import {
   forceSimulation,
   forceLink,
   forceManyBody,
-  forceCenter,
   forceCollide,
   forceX,
   forceY,
@@ -36,7 +35,9 @@ import {
   CROSS_GROUP_DISTANCE,
   CROSS_GROUP_STRENGTH,
   crossGroup,
-  forceGroupCentroid,
+  computeGroupSlots,
+  forceGroupSlot,
+  seedGroupPositions,
 } from './graphForces.ts'
 
 interface LayoutRequest {
@@ -62,6 +63,13 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
   // A new request supersedes whatever is still cooling.
   if (timer !== undefined) clearTimeout(timer)
 
+  // Level 1 of the two-level layout (graphForces.ts): pack one non-overlapping disc per
+  // domain, then seed unplaced nodes INSIDE their disc. The seeding is what stops domains
+  // from interleaving - a force layout is a local minimizer, so a domain that starts
+  // scattered across the canvas never fully gathers. ~17 discs, so this costs microseconds.
+  const slots = computeGroupSlots(groups, edges)
+  seedGroupPositions(groups, slots, seed)
+
   const simNodes: SimNode[] = nodes.map((n, i) => {
     const node: SimNode = { index: i, degree: n.degree }
     const x = seed[i * 2]
@@ -78,14 +86,14 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
   })
   const simLinks = edges.map(([source, target]) => ({ source, target }))
 
-  // Centering pull, stronger the fewer links a node has. Without this, orphan and
-  // near-orphan pages have nothing but repulsion acting on them and drift far outside
-  // the cluster - which then blows up the bounding box and makes fit-to-view useless.
-  // Grouped nodes get only a token global pull: their drift protection is the domain
-  // centroid force below, which keeps them with their domain instead of at the origin.
+  // Centering pull for UNGROUPED nodes only. Without it, orphan and near-orphan pages have
+  // nothing but repulsion acting on them and drift far outside the drawing - which blows up
+  // the bounding box and makes fit-to-view useless. Grouped nodes are held by their slot
+  // instead; pulling them toward the origin as well would fight it.
   const centerPull = (d: SimNode): number =>
-    (groups[d.index] ?? -1) >= 0 ? 0.02 : d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05
-  const groupPull = (d: SimNode): number => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.2 : 0.08)
+    (groups[d.index] ?? -1) >= 0 ? 0 : d.degree === 0 ? 0.5 : d.degree < 3 ? 0.15 : 0.05
+  // Weakly-linked nodes are held harder: they have no springs to keep them in their blob.
+  const groupPull = (d: SimNode): number => (d.degree === 0 ? 0.5 : d.degree < 3 ? 0.2 : 0.1)
 
   const sim = forceSimulation(simNodes)
     // Cross-domain links are longer and much weaker springs (see graphForces.ts) - the
@@ -98,11 +106,13 @@ self.onmessage = (ev: MessageEvent<LayoutRequest>) => {
     )
     // Barnes-Hut approximation (theta default 0.9) keeps this O(n log n) at scale.
     .force('charge', forceManyBody().strength(-120).distanceMax(600))
-    .force('center', forceCenter(0, 0))
     .force('collide', forceCollide<SimNode>().radius((d) => 6 + Math.sqrt(d.degree) * 2))
     .force('x', forceX<SimNode>(0).strength(centerPull))
     .force('y', forceY<SimNode>(0).strength(centerPull))
-    .force('group', forceGroupCentroid<SimNode>(groups, groupPull))
+    // Level 2: every page is pulled to its domain's assigned slot. No forceCenter here -
+    // slots are absolute positions, and re-centering the node mean each tick would drag the
+    // whole arrangement against them (the biggest domain would win and pull everything).
+    .force('group', forceGroupSlot<SimNode>(groups, slots, groupPull))
     .alpha(alpha)
     .stop()
 
