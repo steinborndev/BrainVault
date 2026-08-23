@@ -1,61 +1,77 @@
-/* BrainVault dashboard — one cohesive visual system, theme-aware (dark default + light),
-   responsive from phone to desktop. No UI-framework lock-in (SPEC.md §7): hand-rolled CSS. */
+/* BrainVault dashboard — one cohesive visual system, theme-aware (dark default + light).
+   No UI-framework lock-in (SPEC.md §7): hand-rolled CSS. Redesign 2026-08: night-blue
+   ground, gold brand accent (sparingly: brand mark, working-edge highlights), self-hosted
+   type (Bricolage Grotesque display / Instrument Sans UI / IBM Plex Mono data). Token
+   NAMES are stable — components style through them, never through raw hex. */
 
 :root {
-  --bg: #0f1420;
-  --bg-elev: #171d2b;
-  --bg-elev-2: #1f2637;
-  --border: #2a3346;
-  --border-strong: #3a465f;
-  --text: #e6eaf2;
-  --text-dim: #9aa6bd;
-  --text-faint: #6b7791;
-  --accent: #5b8def;
-  --accent-soft: #23324f;
+  --bg: #0c101b;
+  --bg-elev: #131928;
+  --bg-elev-2: #1a2233;
+  --border: #212c42;
+  --border-strong: #30405f;
+  --text: #e9edf7;
+  --text-dim: #9aa7c2;
+  --text-faint: #78859f;
+  /* The sidebar sits one step below the ground so the content plane reads as raised. */
+  --bg-side: #0a0d16;
+  --accent: #7fa7ff;
+  /* Text ON accent fills (primary buttons, active badges). The dark theme's accent is
+     light, so white-on-accent would wash out — the ground color is the readable ink. */
+  --accent-ink: #0c101b;
+  --accent-soft: #1b2947;
+  /* Brand gold: the mark, the Home "now" edge, design accents. Never a status color. */
+  --gold: #e2b45c;
+  --gold-bg: #332812;
   /* The research composer mode — visually distinct from Ask because it has side effects
      (web access + vault writes). Violet, validated against both surfaces. */
-  --research: #9085e9;
+  --research: #a78bfa;
   --radius: 12px;
   --radius-sm: 8px;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Bricolage Grotesque", "Instrument Sans", "Segoe UI", system-ui, sans-serif;
 
-  --ok: #3fb984;
-  --ok-bg: #133528;
-  --warn: #e0a43b;
-  --warn-bg: #3a2e12;
-  --err: #e5484d;
-  --err-bg: #3a1618;
-  --busy: #5b8def;
-  --busy-bg: #1a2540;
+  --ok: #45c98c;
+  --ok-bg: #12301f;
+  --warn: #e2a64d;
+  --warn-bg: #33270f;
+  --err: #ef5d66;
+  --err-bg: #391418;
+  --busy: #7fa7ff;
+  --busy-bg: #1b2947;
   --muted: #7c88a1;
   --muted-bg: #232a3a;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f4f6fb;
+    --bg: #f2f4f9;
+    --bg-side: #e9ecf3;
     --bg-elev: #ffffff;
-    --bg-elev-2: #eef1f7;
+    --bg-elev-2: #eceff6;
     --border: #dde2ec;
-    --border-strong: #c7cfdd;
-    --text: #1a2233;
-    --text-dim: #566178;
-    --text-faint: #8a94a8;
-    --accent: #3a6fd8;
-    --accent-soft: #e4ecfb;
-    --research: #4a3aa7;
-    --shadow: 0 2px 8px rgba(20, 30, 60, 0.08);
+    --border-strong: #c3cde0;
+    --text: #1a2333;
+    --text-dim: #55627e;
+    --text-faint: #75819b;
+    --accent: #3059c8;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2e9fb;
+    --gold: #a6791f;
+    --gold-bg: #f5ecd7;
+    --research: #6d4fd4;
+    --shadow: 0 2px 10px rgba(20, 30, 60, 0.08);
 
-    --ok: #1c8a5c;
-    --ok-bg: #dcf3e8;
-    --warn: #b47912;
-    --warn-bg: #faf0d7;
-    --err: #cf2b30;
-    --err-bg: #fbe0e1;
-    --busy: #3a6fd8;
-    --busy-bg: #e0e9fb;
+    --ok: #177a4c;
+    --ok-bg: #ddf1e6;
+    --warn: #996712;
+    --warn-bg: #f7ecd4;
+    --err: #c93540;
+    --err-bg: #fae2e4;
+    --busy: #3059c8;
+    --busy-bg: #e2e9fb;
     --muted: #6b7488;
     --muted-bg: #e7ebf2;
   }
@@ -76,9 +92,16 @@ body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Display face for the big landmarks; small UI headings stay on the body face. */
+h1,
+h2 {
+  font-family: var(--display);
+  letter-spacing: -0.01em;
 }
 
 a {
@@ -95,70 +118,228 @@ button {
   cursor: pointer;
 }
 
-/* ---- App shell ---- */
+/* ---- App shell: fixed sidebar + slim topbar + per-screen scroll (redesign 2026-08).
+   Three nav groups (Knowledge / Work / System) replace the five flat tabs; every screen
+   owns its scroll position, so switching areas never resets where you were. ---- */
 .app {
   display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.side {
+  width: 216px;
+  flex: 0 0 216px;
+  background: var(--bg-side);
+  border-right: 1px solid var(--border);
+  display: flex;
   flex-direction: column;
-  min-height: 100%;
+  padding: 14px 10px 12px;
+  overflow-y: auto;
 }
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+.side-brand {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
-  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--border);
+  gap: 9px;
+  padding: 2px 10px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
 }
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-.brand svg {
+.side-brand svg {
   width: 26px;
   height: 26px;
+  flex: none;
 }
-
-.tabs {
+.side-brand .name {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 15.5px;
+  letter-spacing: -0.01em;
+}
+.navgroup {
+  margin-top: 14px;
+}
+.navgroup.first {
+  margin-top: 4px;
+}
+.navgroup .glabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 0 10px 6px;
+}
+.navitem {
   display: flex;
-  gap: 4px;
-  margin-left: 8px;
-}
-.tab {
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
-  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: background 0.12s, color 0.12s;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
 }
-.tab:hover {
+.navitem svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.85;
+}
+.navitem:hover {
   background: var(--bg-elev-2);
   color: var(--text);
 }
-.tab.active {
-  background: var(--accent-soft);
+.navitem[aria-current='page'] {
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.navitem[aria-current='page'] svg {
   color: var(--accent);
+  opacity: 1;
+}
+.navitem .tab-badge {
+  margin-left: auto;
+}
+.navitem .tab-badge.due {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.side-foot {
+  margin-top: auto;
+  padding: 10px 10px 2px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.side-foot .row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-faint);
+  padding: 2px 0;
+}
+.side-foot .d {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.side-foot .d.ok { background: var(--ok); }
+.side-foot .d.warn { background: var(--warn); }
+.side-foot .d.acc { background: var(--accent); }
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  height: 52px;
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px 0 22px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.topbar .whereami {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.topbar .whereami .where {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+  color: var(--text);
+}
+.topbar .whereami .sub {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The global-search trigger: reads as an input, acts as a button (opens the palette). */
+.searchbtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+.searchbtn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+}
+.searchbtn svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.searchbtn kbd {
+  margin-left: auto;
+}
+
+.screens {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 22px 24px 48px;
+}
+.screen[hidden] {
+  display: none;
+}
+/* Full-bleed screens (graph, research columns) manage their own inner padding. */
+.screen.flush {
+  padding: 0;
+  overflow: hidden;
+}
+.lane {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.lane.wide {
+  max-width: 1620px;
 }
 
 .spacer {
   flex: 1;
 }
 
-/* Activity badge on the Ingestion tab — outstanding jobs, visible from every tab. */
+/* Activity badge (sidebar Inbox item) — outstanding jobs, visible from every screen. */
 .tab-badge {
   display: inline-flex;
   align-items: center;
@@ -167,7 +348,7 @@ button {
   font-weight: 700;
   line-height: 1;
   background: var(--busy);
-  color: #fff;
+  color: var(--accent-ink);
   border-radius: 999px;
   padding: 3px 7px;
 }
@@ -175,7 +356,7 @@ button {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--accent-ink);
   animation: badge-pulse 1.6s ease infinite;
 }
 @keyframes badge-pulse {
@@ -333,78 +514,15 @@ button {
   display: block;
 }
 
-.content {
-  flex: 1;
-  width: 100%;
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 24px 20px 96px;
-}
-
-/* ---- Bottom nav (mobile) ---- */
-.bottomnav {
-  display: none;
-}
-
-@media (max-width: 680px) {
-  .tabs {
-    display: none;
+/* The dashboard is desktop-only for now (project decision); below ~1000px the shell
+   simply lets the stage scroll horizontally rather than degrading into a mobile layout. */
+@media (max-width: 1000px) {
+  .app {
+    min-width: 1000px;
   }
-  .content {
-    padding: 16px 14px 88px;
-  }
-  .bottomnav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 30;
-    display: flex;
-    justify-content: space-around;
-    background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
-    backdrop-filter: blur(10px);
-    border-top: 1px solid var(--border);
-    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
-  }
-  .bottomnav button {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--text-faint);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 2px;
-    font-size: 11px;
-    border-radius: var(--radius-sm);
-  }
-  .bottomnav button.active {
-    color: var(--accent);
-  }
-  .bottomnav button svg {
-    width: 22px;
-    height: 22px;
-  }
-  .bottomnav .nav-icon {
-    position: relative;
-    display: inline-flex;
-  }
-  .bottomnav .nav-badge {
-    position: absolute;
-    top: -4px;
-    right: -10px;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1;
-    background: var(--busy);
-    color: #fff;
-    border-radius: 999px;
-    padding: 2px 5px;
-  }
-  .chat {
-    height: calc(100vh - 160px);
-    height: calc(100dvh - 160px);
+  html,
+  body {
+    overflow-x: auto;
   }
 }
 
@@ -674,7 +792,7 @@ button.spill-link:hover {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 .btn.primary:hover {
   filter: brightness(1.08);
@@ -1267,8 +1385,8 @@ details.hot-cache[open] .hc-summary::before {
   margin: 0 auto;
   width: 100%;
   min-height: 420px;
-  height: calc(100vh - 175px);
-  height: calc(100dvh - 175px);
+  height: calc(100vh - 110px);
+  height: calc(100dvh - 110px);
 }
 
 /* Session sidebar: a list with title + meta scales past the handful of sessions the old
@@ -1278,8 +1396,8 @@ details.hot-cache[open] .hc-summary::before {
   flex-direction: column;
   gap: 8px;
   min-height: 420px;
-  height: calc(100vh - 175px);
-  height: calc(100dvh - 175px);
+  height: calc(100vh - 110px);
+  height: calc(100dvh - 110px);
 }
 .sess-new {
   justify-content: center;
@@ -2754,7 +2872,7 @@ details.hot-cache[open] .hc-summary::before {
   display: grid;
   place-items: center;
   font-size: 10px;
-  color: #fff;
+  color: var(--accent-ink);
 }
 .p-row.active .chk {
   background: var(--accent);
@@ -3093,8 +3211,8 @@ details.hot-cache[open] .hc-summary::before {
   min-height: 420px;
   /* vh first, dvh second: a browser without dvh keeps the vh value instead of
      dropping the declaration and collapsing to min-height. */
-  height: calc(100vh - 230px);
-  height: calc(100dvh - 230px);
+  height: calc(100vh - 216px);
+  height: calc(100dvh - 216px);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
@@ -3653,11 +3771,8 @@ details.hot-cache[open] .hc-summary::before {
   }
 }
 
-/* The graph wants the whole width — the 1080px reading column is for text tabs.
-   Tabs stay mounted (hidden via [hidden]), so only a VISIBLE graph may widen the column. */
-.content:has(.tab-panel:not([hidden]) .vault-graph) {
-  max-width: 1600px;
-}
+/* The graph's width is handled by the shell now: the Graph screen renders in a .lane.wide
+   (1620px) while text screens keep the 1180px reading lane. */
 
 .graph-controls {
   position: absolute;
@@ -4036,4 +4151,265 @@ kbd {
   color: var(--text);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ---- Command palette (Ctrl+K, redesign 2026-08) ---- */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(2px);
+}
+.palette {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(600px, 92vw);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 70;
+}
+.pal-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.pal-input svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.pal-input input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+}
+.pal-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 8px;
+  overscroll-behavior: contain;
+}
+.pal-group {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 10px 10px 5px;
+}
+.pal-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+.pal-item svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--text-faint);
+}
+.pal-item.sel {
+  background: var(--bg-elev-2);
+}
+.pal-item .pal-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pal-item .pal-hint {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.pal-note {
+  color: var(--text-faint);
+  font-size: 13px;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+/* ---- Window-level drop overlay ---- */
+.dropveil {
+  position: fixed;
+  inset: 10px;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, var(--bg) 72%, transparent));
+  pointer-events: none;
+}
+.dropveil-msg {
+  text-align: center;
+  color: var(--text);
+}
+.dropveil-msg svg {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+.dropveil-msg .big {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 24px;
+  margin-top: 8px;
+}
+.dropveil-msg .small {
+  color: var(--text-dim);
+  margin-top: 5px;
+  font-size: 13.5px;
+}
+
+/* ---- Library (redesign 2026-08): the browse path ---- */
+.lib-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-bottom: 13px;
+}
+.lib-search input {
+  width: 200px;
+}
+/* Segments hold counts; rectangular (view control), matching the graph's shape language. */
+.lib-bar .seg {
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+}
+.lib-bar .seg button {
+  font-size: 12.5px;
+  padding: 6px 11px;
+}
+.lib-card {
+  overflow: hidden;
+}
+.lib-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.lib-table th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 11px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.lib-table th.num {
+  text-align: right;
+}
+.lib-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.lib-table tbody tr {
+  cursor: pointer;
+}
+.lib-table tbody tr:hover td {
+  background: color-mix(in srgb, var(--bg-elev-2) 55%, transparent);
+}
+.lib-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.lt-title strong {
+  font-weight: 600;
+}
+.lt-bucket {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  background: var(--bg-elev-2);
+  border-radius: 5px;
+  padding: 2px 6px;
+  margin-right: 4px;
+}
+.lt-flag {
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 7px;
+  margin-left: 7px;
+}
+.lt-flag.err { color: var(--err); background: var(--err-bg); }
+.lt-flag.warn { color: var(--warn); background: var(--warn-bg); }
+.lt-domain {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.lt-links {
+  text-align: right;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lt-when {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.lt-acts {
+  white-space: nowrap;
+  text-align: right;
+  width: 76px;
+}
+.lt-acts .btn.ghost {
+  padding: 3px 6px;
+  opacity: 0;
+}
+.lib-table tr:hover .lt-acts .btn.ghost,
+.lt-acts .btn.ghost:focus-visible {
+  opacity: 1;
+}
+.lib-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12.5px;
+}
+
+/* Settings screen: one readable column, not the old narrow maintenance side column. */
+.settings-lane {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+/* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
+.hist-search:focus-within,
+.graph-search:focus-within,
+.db-panel .p-search:focus-within {
+  border-color: var(--accent);
 }

@@ -45,7 +45,6 @@ function selectedActions(report: TagReport, selected: ReadonlySet<string>): TagF
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
-import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceRun, type MaintenanceRunState } from '../hooks/useMaintenanceRun.ts'
 import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
@@ -78,10 +77,9 @@ export function Maintenance(): React.ReactElement {
   const [runPlan, setRunPlan] = useState<RunPlanStep[] | null>(null)
   const statusData = useMaintenanceStatus()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  // Setup mode only disables the run button here — the credential entry lives in Settings
+  // now (its own screen), so this tab no longer has to force-open anything to reach it.
   const setupMode = health.data !== undefined && !health.data.credentialConfigured
-  useEffect(() => {
-    if (setupMode) setView('all')
-  }, [setupMode])
   const showCard = (anchor: string): boolean => view === 'all' || view === anchor
 
   if (view === 'run' && runPlan !== null) {
@@ -124,7 +122,7 @@ export function Maintenance(): React.ReactElement {
         </div>
       )}
       {view !== 'overview' && (
-      <div className={view === 'all' ? 'maint' : 'maint single'}>
+      <div className="maint single">
       <div className="mcol">
         {/* Lint */}
         {showCard('card-lint') && (
@@ -294,20 +292,6 @@ export function Maintenance(): React.ReactElement {
         {/* Tag hygiene (lint equivalent for tags + the bounded repair run) */}
         {showCard('card-tags') && <TagHygieneCard nodes={graph.data?.nodes} vaultName={vaultName} />}
       </div>
-
-      {view === 'all' && (
-      <div className="mcol">
-        <div className="card card-pad">
-          <div className="section-head">
-            <h3 className="section-title">
-              Settings
-              <Tip text="Values from the environment are the baseline; values set here override them persistently. Reset restores the environment value." />
-            </h3>
-          </div>
-          <SettingsEditor />
-        </div>
-      </div>
-      )}
       </div>
       )}
     </>

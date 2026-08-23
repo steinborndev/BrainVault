@@ -131,8 +131,8 @@ function MaintenanceSpill(): React.ReactElement | null {
   return (
     <button
       className={`spill spill-link${due > 0 ? ' warn' : ''}`}
-      onClick={() => navigate('/maintenance')}
-      title="Open the Maintenance tab"
+      onClick={() => navigate('/health')}
+      title="Open the Health screen"
     >
       <span className={`d ${due > 0 ? 'warn' : 'dim'}`} />
       Maintenance{' '}

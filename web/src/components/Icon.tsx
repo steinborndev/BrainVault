@@ -22,6 +22,14 @@ export type IconName =
   | 'upload'
   | 'edit'
   | 'palette'
+  | 'home'
+  | 'book'
+  | 'gear'
+  | 'health'
+  | 'flask'
+  | 'play'
+  | 'commit'
+  | 'chevron'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   grid: (
@@ -135,6 +143,45 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="7.5" r="1" />
     </>
   ),
+  home: (
+    <>
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M10 21v-6h4v6" />
+    </>
+  ),
+  // Two facing book halves — the library's paired shelves.
+  book: (
+    <>
+      <path d="M4 4h7v16H4z" />
+      <path d="M13 4h7v16h-7z" />
+      <path d="M6.5 8h2M6.5 11h2M15.5 8h2M15.5 11h2" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
+    </>
+  ),
+  // A pulse line — the vault's vitals, not a wrench.
+  health: <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />,
+  flask: (
+    <>
+      <path d="M10 3v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3" />
+      <path d="M8 3h8" />
+      <path d="M7.5 15h9" />
+    </>
+  ),
+  play: <path d="M8 5.5v13l10-6.5z" />,
+  // A commit on its line — one revertable point in history.
+  commit: (
+    <>
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M12 2.5v6M12 15.5v6" />
+    </>
+  ),
+  chevron: <path d="M7 10l5 5 5-5" />,
 }
 
 export function Icon({ name }: { name: IconName }): React.ReactElement {
@@ -143,16 +190,17 @@ export function Icon({ name }: { name: IconName }): React.ReactElement {
       // The mark: two facing brackets (the [[wikilink]] hemispheres) enclosing the knowledge
       // graph the service builds. Strokes are tuned for ~28px in the topbar; the small-size
       // cut with heavier strokes lives in public/favicon.svg.
+      // Redesign: the mark wears the brand gold; the graph inside inks in the ground color.
       <svg viewBox="0 0 64 64" width="1em" height="1em" aria-hidden="true">
-        <rect width="64" height="64" rx="14" fill="var(--accent)" />
-        <g fill="none" stroke="#fff" strokeWidth="3.8" strokeLinecap="round">
+        <rect width="64" height="64" rx="14" fill="var(--gold)" />
+        <g fill="none" stroke="var(--bg)" strokeWidth="3.8" strokeLinecap="round">
           <path d="M28 18A14 14 0 0 0 28 46" />
           <path d="M36 18A14 14 0 0 1 36 46" />
         </g>
-        <g fill="none" stroke="#fff" strokeWidth="2.8" strokeLinecap="round">
+        <g fill="none" stroke="var(--bg)" strokeWidth="2.8" strokeLinecap="round">
           <path d="M32 32.5 27.5 27M32 32.5 37 26.8M32 32.5 27 38M32 32.5 37 37.6" />
         </g>
-        <g fill="#fff">
+        <g fill="var(--bg)">
           <circle cx="32" cy="32.5" r="3.9" />
           <circle cx="27.5" cy="27" r="2.8" />
           <circle cx="37" cy="26.8" r="2.8" />

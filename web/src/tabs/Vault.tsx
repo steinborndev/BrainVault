@@ -678,7 +678,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setClusterStack([])
     setLocalDepth(0)
     closeExplorer() // selection + trail
-    if (focusPath !== null) navigate('/vault')
+    if (focusPath !== null) navigate('/graph')
   }
 
   // ---- keyboard layer. Window-level (the canvas isn't focusable), via the same stable-
@@ -711,7 +711,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       else if (selection !== null) closeExplorer()
       else if (clusterStack.length > 0) setClusterStack((prev) => prev.slice(0, -1)) // pop one level
       else if (showGaps) setShowGaps(false)
-      else if (focusPath !== null) navigate('/vault')
+      else if (focusPath !== null) navigate('/graph')
       return
     }
     if (typing) return
@@ -973,7 +973,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               Whole graph
             </button>
           </span>
-          <button className="btn ghost" onClick={() => navigate('/vault')} title="Clear focus">
+          <button className="btn ghost" onClick={() => navigate('/graph')} title="Clear focus">
             <Icon name="x" /> Clear
           </button>
         </div>
@@ -1314,7 +1314,7 @@ function PageExplorer({
         <button className="btn primary" onClick={() => navigate(pageRoute(node.path))}>
           Open page <Icon name="link" />
         </button>
-        <button className="btn" onClick={() => navigate(`/vault?focus=${encodeURIComponent(node.path)}`)}>
+        <button className="btn" onClick={() => navigate(`/graph?focus=${encodeURIComponent(node.path)}`)}>
           Focus neighborhood
         </button>
       </div>
@@ -1839,7 +1839,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       staleLinks.add(res.staleLinks, pageQ.data?.title ?? path)
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
-      navigate('/vault')
+      navigate('/graph')
     },
   })
 
@@ -1891,7 +1891,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       return
     }
     e.preventDefault()
-    navigate('/vault')
+    navigate('/graph')
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => escRef.current(e)
@@ -1967,7 +1967,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
         <span className="spacer" />
         <button
           className="btn"
-          onClick={() => navigate(`/vault?focus=${encodeURIComponent(path)}`)}
+          onClick={() => navigate(`/graph?focus=${encodeURIComponent(path)}`)}
           title="Focus this page in the graph"
         >
           <Icon name="graph" /> In graph

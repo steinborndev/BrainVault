@@ -128,27 +128,13 @@ export const TYPE_VARS: Record<string, string> = {
   questions: '--err',
 }
 
-/**
- * Deterministic color for a domain: string hash → hue, fixed saturation/lightness that read
- * on both themes. Domains are open-ended (the user coins new ones), so a fixed palette can't
- * work — and hashing keeps a domain's color stable across sessions with zero bookkeeping.
- * Exported so the filter chips can wear the same color as their nodes (the legend).
- */
-export function domainHue(domain: string): number {
-  let h = 0
-  for (let i = 0; i < domain.length; i++) h = (h * 31 + domain.charCodeAt(i)) >>> 0
-  return h % 360
-}
-
-export function domainColor(domain: string): string {
-  return `hsl(${domainHue(domain)} 62% 52%)`
-}
+// Domain colors + the stub threshold moved to lib/domains.ts (the library shares them and
+// must not pull this d3-carrying module into the main bundle). Re-exported for callers.
+import { domainColor, domainHue, STUB_BYTES } from '../lib/domains.ts'
+export { domainColor, domainHue, STUB_BYTES }
 
 /** The available color lenses. `domain`/`type` are categorical; the rest re-encode a metric. */
 export type Lens = 'domain' | 'type' | 'authority' | 'orphans' | 'stubs' | 'recency'
-
-/** A page under ~this many bytes is treated as a stub by the "stubs" lens (frontmatter + a line). */
-export const STUB_BYTES = 1024
 /** Full green in the "recency" lens for pages edited within this window; older fades to neutral. */
 const RECENCY_WINDOW_MS = 21 * 24 * 3600_000
 

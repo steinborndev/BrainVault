@@ -41,15 +41,13 @@ export function usePath(): string {
 /** Builds the route for one wiki page in the vault viewer. */
 export function pageRoute(pagePath: string): string {
   // Encode each segment, keep the slashes readable.
-  return `/vault/page/${pagePath.split('/').map(encodeURIComponent).join('/')}`
+  return `/page/${pagePath.split('/').map(encodeURIComponent).join('/')}`
 }
 
 /** Inverse of pageRoute: the vault-relative page path, or null if not a page route. */
 export function pageFromPath(path: string): string | null {
-  if (!path.startsWith('/vault/page/')) return null
-  return path
-    .slice('/vault/page/'.length)
-    .split('/')
-    .map(decodeURIComponent)
-    .join('/')
+  // `/vault/page/…` is the pre-redesign route — old bookmarks and PWA shortcuts carry it.
+  const prefix = path.startsWith('/page/') ? '/page/' : path.startsWith('/vault/page/') ? '/vault/page/' : null
+  if (prefix === null) return null
+  return path.slice(prefix.length).split('/').map(decodeURIComponent).join('/')
 }
