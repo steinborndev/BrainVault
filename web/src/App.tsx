@@ -44,9 +44,11 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
   },
   {
     label: 'Work',
+    // Inbox first: what arrived and is waiting outranks what you go looking for,
+    // and it is the item that carries a badge.
     items: [
-      { id: 'research', label: 'Research', icon: 'flask', route: '/research' },
       { id: 'inbox', label: 'Inbox', icon: 'inbox', route: '/inbox' },
+      { id: 'research', label: 'Research', icon: 'flask', route: '/research' },
     ],
   },
   {
@@ -252,7 +254,14 @@ export function App(): React.ReactElement {
               <Library vaultName={vaultName} />
             </div>
           </section>
-          <section className="screen" hidden={screen !== 'vault'} aria-label="Vault">
+          {/* The vault screen hosts two very different things. The graph is a workspace: it
+              fills the viewport and scrolls inside its own panels, so it takes `flush`. An
+              article is a document and scrolls normally, so it does not. */}
+          <section
+            className={`screen${screen === 'vault' && openPage === null ? ' flush' : ''}`}
+            hidden={screen !== 'vault'}
+            aria-label="Vault"
+          >
             <div className="lane wide">
               {vaultPath !== null && (
                 <Suspense fallback={<div className="empty">Loading vault view…</div>}>

@@ -118,10 +118,10 @@ export function Maintenance(): React.ReactElement {
       </div>
       {view !== 'overview' && view !== 'all' && (
         <div className="focus-bar">
-          <button className="linklike" onClick={() => setView('overview')}>
+          <button className="linkish" onClick={() => setView('overview')}>
             ← Back to what&apos;s due
           </button>
-          <button className="linklike" onClick={() => setView('all')}>
+          <button className="linkish" onClick={() => setView('all')}>
             All tools
           </button>
         </div>
@@ -409,7 +409,7 @@ function StatusHead({
       )}
 
       {!allHealthy && healthy.length > 0 && (
-        <button className="linklike ms-healthy-toggle" onClick={() => setShowHealthy((v) => !v)}>
+        <button className="linkish ms-healthy-toggle" onClick={() => setShowHealthy((v) => !v)}>
           {showHealthy ? 'hide' : 'show'} {healthy.length} healthy area{healthy.length === 1 ? '' : 's'}
         </button>
       )}

@@ -31,6 +31,9 @@
   /* Row controls (topbar pills, search trigger, inline buttons) all use this height, so a
      row can never end up with three slightly different box heights. */
   --control-h: 32px;
+  /* Width of the graph's standing view panel. One token so the panel, its collapsed
+     variants and the workspace grid can never disagree about it. */
+  --gpanel-w: 252px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -98,6 +101,13 @@
 
 * {
   box-sizing: border-box;
+}
+
+/* A class-level `display` beats the UA rule for [hidden], and nearly every control
+   here sets one - so `hidden={…}` in JSX would silently render anyway. Restate it
+   with the weight it needs, once, for the whole sheet. */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -356,6 +366,12 @@ button {
 }
 .lane.wide {
   max-width: 1620px;
+}
+/* Inside a flush screen the lane has to pass the height through, or the workspace grid
+   below it falls back to content height and pushes the canvas off-screen. */
+.screen.flush .lane {
+  height: 100%;
+  min-height: 0;
 }
 
 .spacer {
@@ -842,6 +858,71 @@ button.spill-link:hover {
 }
 
 /* ---- Intake card: dropzone + link/note in one compact card ---- */
+/* Collapsed intake (Home, while the queue is busy): one row that still takes a
+   drop. The full card is one click away and stays open until the queue drains. */
+.intake-collapsed {
+  padding: 0;
+  overflow: hidden;
+  border-color: var(--border-strong);
+}
+.intake-collapsed.over {
+  border-color: var(--gold);
+  background: var(--gold-bg);
+}
+.ic-open {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 13px 15px;
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  text-align: left;
+  font-size: 13.5px;
+  transition: background 0.12s, color 0.12s;
+}
+.ic-open:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.ic-open svg {
+  color: var(--gold);
+  flex: none;
+}
+.ic-cta {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+/* The way back to the collapsed row, offered only while there is a reason for it. */
+.intake-collapse {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.intake-collapse:hover {
+  color: var(--text);
+}
+.intake {
+  position: relative;
+}
 .intake {
   display: grid;
   grid-template-columns: 1fr 320px;
@@ -2566,370 +2647,421 @@ details.hot-cache[open] .hc-summary::before {
 .vault-graph {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* Fills the screen's height so the workspace grid below can hand the canvas a real
+     box - the panel and the canvas both scroll inside it, the page itself does not. */
+  height: 100%;
+  min-height: 0;
 }
-/* ═══ Vault toolbar, two tiers (mockup 2026-07-21): a stable VIEW bar for how the graph
-   is drawn, and the growing DOMAIN filter band for what is in it. Splitting by intent is
-   what keeps a filter change from ever reflowing the render controls. ═══ */
-.viewbar {
+/* ═══ Graph workspace (rework 2026-08-24): a standing VIEW PANEL beside the canvas,
+   replacing the two stacked toolbar tiers and the two dropdowns inside them.
+
+   The panel is a column, which is what makes it work: the domain list - the one control
+   that grows with the vault - takes the leftover height and scrolls on its own, while
+   everything above it stays in view. The old horizontal band had to either wrap (and
+   reflow the render controls) or hide its overflow behind a panel. ═══ */
+.graph-workspace {
+  display: grid;
+  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
+  /* An explicit row is required: with the implicit `auto` row the panel's content height
+     wins and the canvas gets pushed below the fold. */
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.graph-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.gpanel,
+.graph-main {
+  min-height: 0;
+}
+.gpanel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.gp-sec {
+  padding: 12px 14px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.gp-sec:last-child {
+  border-bottom: 0;
+}
+/* The domain section takes what is left and scrolls inside itself. */
+.gp-sec.grow {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 128px;
+}
+.gp-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 8px;
 }
-.vb-eyebrow {
-  font-size: 11px;
+.gp-head .spacer {
+  flex: 1;
+}
+.gp-eyebrow {
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-faint);
-  margin-right: 2px;
+  white-space: nowrap;
 }
-.vb-sep {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-}
-.vb-spacer {
-  flex: 1 1 40px;
-}
-.overlays {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.overlays .grp-label {
+.gp-state {
   font-size: 11px;
   color: var(--text-faint);
-  letter-spacing: 0.04em;
 }
-/* View-bar control: dropdown trigger or toggle. Rectangular (radius-sm), unlike the round
-   filter chips - the shape difference IS the filter-vs-view distinction. */
-.ctl {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  border-radius: var(--radius-sm);
-  padding: 6px 11px;
-  font-size: 12.5px;
-  font-weight: 500;
-  white-space: nowrap;
+.gp-note {
+  margin: -4px 0 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
 }
-.ctl:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.ctl.on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.ctl svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.ctl-val {
-  color: var(--text);
-  font-weight: 600;
-}
-.ctl.on .ctl-val {
-  color: var(--accent);
+.gp-none {
+  padding: 8px 4px;
+  font-size: 12px;
+  color: var(--text-faint);
 }
 
-/* Communities control: one bordered unit - a label plus two segmented toggles (Areas /
-   Bridges), the two views of the same clustering. Sized to sit flush with the .ctl buttons in
-   the overlays row: same border, radius, vertical padding (6px) and font (12.5px), so the box
-   height matches exactly and nothing rides higher. */
-.communities {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border-strong);
+/* ── The lens list: a radio group, not a dropdown. Every option shows what its colour
+   means, in the same grammar, so the three read as one scale of choices. ── */
+.lenslist {
+  display: grid;
+  gap: 2px;
+}
+.lensopt {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 9px;
+  align-items: start;
+  padding: 5px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-elev);
-  white-space: nowrap;
-}
-.communities.active {
-  border-color: var(--accent);
-}
-.communities .cm-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  font-size: 12.5px;
-  /* Match the .ctl buttons' line box. .ctl is a <button>, and form controls do NOT inherit
-     the body line-height - they render at the UA `line-height: normal` (~15px box at 12.5px).
-     The label is a <span>, so it must state `normal` explicitly or it would inherit the body
-     1.5 and stand ~4px taller than the neighbouring .ctl buttons (measured). */
-  line-height: normal;
-  font-weight: 500;
-  color: var(--text-dim);
-  background: var(--bg-elev-2);
-  border-right: 1px solid var(--border-strong);
-}
-.communities .cm-label svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.communities .cm-seg {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  border-right: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
-  padding: 6px 12px;
-  font-size: 12.5px;
-  line-height: normal;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
 }
-.communities .cm-seg:last-child {
-  border-right: none;
-}
-.communities .cm-seg:hover {
-  color: var(--text);
+.lensopt:hover:not(:disabled) {
   background: var(--bg-elev-2);
 }
-.communities .cm-seg.on {
+.lensopt[aria-checked='true'] {
   background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.lensopt:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.lensopt .radio {
+  width: 13px;
+  height: 13px;
+  margin-top: 3px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+}
+.lensopt[aria-checked='true'] .radio {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 42%, transparent 45%);
+}
+.lensopt .lname {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.lensopt .ldesc {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+/* ── Switch rows for the binary view options. ── */
+.gp-toggles {
+  display: grid;
+  gap: 2px;
+}
+.rowtoggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
+}
+.rowtoggle:hover {
+  background: var(--bg-elev-2);
+}
+.rowtoggle .sw {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s;
+}
+.rowtoggle .sw::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  transition: transform 0.15s;
+}
+.rowtoggle[aria-pressed='true'] .sw {
+  background: var(--accent);
+}
+.rowtoggle[aria-pressed='true'] .sw::after {
+  transform: translateX(12px);
+}
+.rowtoggle .rt-text {
+  min-width: 0;
+}
+.rowtoggle .tname {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.rowtoggle .tdesc {
+  display: block;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-faint);
+}
+.rowtoggle .tn {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ── Disclosure. The closed summary carries the state inside it, so folding something
+   away can never hide that it is switched on. ── */
+.fold {
+  margin-top: 7px;
+}
+.fold-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+.fold-summary:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.fold-summary .caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform-origin: 30% 50%;
+  transition: transform 0.15s;
+}
+.fold.open .fold-summary {
+  color: var(--text);
+}
+.fold.open .fold-summary .caret {
+  transform: rotate(90deg);
+}
+.fold-state {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.fold-state.lit {
   color: var(--accent);
 }
-
-/* View-bar dropdowns sit at the LEFT of the row now - anchor their menus left so they
-   can't extend past the viewport edge (the generic .dropdown-menu anchors right). */
-.viewbar .dropdown-menu {
-  left: 0;
-  right: auto;
+.fold-body {
+  padding-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fold-summary .caret,
+  .rowtoggle .sw,
+  .rowtoggle .sw::after {
+    transition: none;
+  }
 }
 
-/* ── The domain filter band ── */
-.domainband {
+/* ── Page-type chips and the domain list. ── */
+.typechips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip.dimmed,
+.domrow.dimmed {
+  opacity: 0.45;
+}
+.domlist {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  flex: 1;
+  min-height: 84px;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.domrow {
+  display: grid;
+  grid-template-columns: 9px 1fr auto;
+  gap: 9px;
+  align-items: center;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  text-align: left;
+}
+.domrow:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.domrow.active {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-weight: 500;
+}
+.domrow .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.domrow .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.domrow .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.gp-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  margin-bottom: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.gp-search svg {
+  color: var(--text-faint);
+  flex: none;
+}
+.gp-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* ── The one context line above the canvas: what is in scope, said in words. A shrinking
+   count alone cannot tell a domain filter from a type filter from a search. ── */
+.gtopline {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  flex: none;
+  height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
 }
-.db-head {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex-shrink: 0;
-  padding-right: 4px;
+.gtopline .spacer {
+  flex: 1;
 }
-.db-head .lab {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.db-head .sel {
-  font-size: 11px;
+.scopeline {
+  font-size: 12.5px;
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.db-divider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
+.scopeline strong {
+  color: var(--text);
+  font-weight: 600;
 }
-.db-scroll {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  overflow-x: auto;
-  /* No visible scrollbar: a space-taking one shifts the chips off the band's vertical
-     center by exactly its height, and how much that is depends on the browser's scrollbar
-     mode (classic vs overlay) - not compensatable in CSS. The edge fades signal overflow,
-     wheel/drag still scroll, and the "All domains" panel reaches everything regardless. */
-  scrollbar-width: none;
-  padding: 2px 4px;
-  flex: 1 1 auto;
-  min-width: 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+
+/* ── Fullscreen: the graph on its own. The panel and the context line step aside, and
+   the lens - the only control that belongs to the drawing itself - floats over it. ── */
+.vault-graph.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
 }
-.db-scroll::-webkit-scrollbar {
+.vault-graph.fullscreen .gpanel,
+.vault-graph.fullscreen .gtopline {
   display: none;
 }
-.db-scroll .chip {
-  flex: 0 0 auto;
+.vault-graph.fullscreen .graph-workspace {
+  grid-template-columns: minmax(0, 1fr);
 }
-/* With a selection active, the unselected chips recede instead of losing their accent. */
-.chip.dimmed {
-  opacity: 0.45;
-}
-.db-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-.db-clear {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
-}
-.db-clear:hover {
-  color: var(--text);
-  border-color: var(--err);
-}
-.db-more {
-  position: relative;
-}
-.db-more-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  border-radius: 999px;
-  padding: 4px 11px;
-  font-size: 12px;
-  font-weight: 500;
-}
-.db-more-btn:hover,
-.db-more-btn.on {
-  color: var(--text);
-  border-color: var(--accent);
-}
-/* The scalability story: every domain, searchable, in a two-column grid. */
-.db-panel {
+.fsbar {
   position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 40;
-  /* Wide enough that two columns of real domain names (knowledge-management,
-     materials-science) fit without ellipsizing; the ellipsis stays as fallback only. */
-  width: min(480px, 90vw);
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 12px;
-}
-.db-panel .p-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  margin-bottom: 10px;
-  color: var(--text-faint);
-}
-.db-panel .p-search input {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  outline: none;
-  font-size: 13px;
-  width: 100%;
-}
-.db-panel .p-grid {
-  display: grid;
-  /* minmax(0, 1fr): without the explicit 0 minimum, a long domain name's min-content
-     width wins over the fr split, pushes the columns past the panel and forces a
-     horizontal scrollbar - the names must ellipsize instead. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 4px;
-  max-height: 260px;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-.p-row {
+  top: 12px;
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  background: none;
-  text-align: left;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
 }
-.p-row:hover {
-  background: var(--bg-elev-2);
-}
-.p-row.active {
-  color: var(--text);
-  border-color: var(--border);
-  background: var(--bg-elev-2);
-}
-.p-row .nm {
-  flex: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.p-row .n {
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-}
-.p-row .chk {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  border: 1.5px solid var(--border-strong);
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  font-size: 10px;
-  color: var(--accent-ink);
-}
-.p-row.active .chk {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-.p-none {
-  grid-column: 1 / -1;
-  color: var(--text-faint);
-  font-size: 12px;
-  padding: 6px 8px;
-}
-.db-panel .p-foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.db-panel .p-foot .count {
-  color: var(--text-faint);
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-@media (max-width: 720px) {
-  .vb-eyebrow,
-  .overlays .grp-label,
-  .db-head,
-  .db-divider {
-    display: none;
+
+@media (max-width: 1100px) {
+  .graph-workspace {
+    grid-template-columns: 208px minmax(0, 1fr);
   }
 }
+
 
 /* Generic dropdown (e.g. the page-type filters above the graph). */
 .dropdown {
@@ -3231,13 +3363,12 @@ details.hot-cache[open] .hc-summary::before {
 }
 .graph-canvas-wrap {
   position: relative;
-  /* No `flex: 1` here: in a column flex container it sets flex-basis:0 and OVERRIDES the
-     height below, collapsing the canvas to min-height. */
-  min-height: 420px;
-  /* vh first, dvh second: a browser without dvh keeps the vh value instead of
-     dropping the declaration and collapsing to min-height. */
-  height: calc(100vh - 216px);
-  height: calc(100dvh - 216px);
+  /* Takes the height the stage has left, rather than computing it from a viewport
+     minus a constant. The constant was the toolbar tiers the view panel replaced; any
+     such number is wrong the moment the chrome above the canvas changes, and it was
+     wrong in fullscreen, where that chrome is not on screen at all. */
+  flex: 1 1 auto;
+  min-height: 320px;
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
@@ -3296,26 +3427,16 @@ details.hot-cache[open] .hc-summary::before {
   display: flex;
   align-items: stretch;
   gap: 10px;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
+  padding: 10px;
 }
 .graph-stage > .graph-canvas-wrap {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-/* A tappable text that reads as inline prose (the "N unresolved" stat) but acts as a button. */
-.linklike {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.linklike:hover {
-  color: color-mix(in srgb, var(--accent) 80%, var(--text));
-}
 
 /* Breadcrumb trail of visited pages, bottom-left of the canvas - its slot alone now that
    the tooltip follows the pointer; the zoom controls live up top. */
@@ -3805,8 +3926,7 @@ details.hot-cache[open] .hc-summary::before {
     position: static;
   }
   .graph-canvas-wrap {
-    height: calc(100vh - 290px);
-    height: calc(100dvh - 290px);
+    min-height: 260px;
   }
 }
 
@@ -4055,6 +4175,8 @@ details.hot-cache[open] .hc-summary::before {
 .cand-pages[open] > summary {
   margin-bottom: 6px;
 }
+/* A text that reads as prose but acts as a button. One primitive: `.linkish` used
+   to have a twin called `.linklike` that differed only in the underline style. */
 .linkish {
   background: none;
   border: none;
@@ -4062,7 +4184,10 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--accent);
   font: inherit;
   cursor: pointer;
-  text-decoration: underline;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.linkish:hover {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
 }
 
 /* ---- First-run credential setup (setup mode) ---- */
@@ -4120,7 +4245,7 @@ kbd {
   white-space: nowrap;
 }
 
-/* The shortcut legend inside the viewbar's ⓘ tip: keys right-aligned, meanings left. */
+/* The shortcut legend inside the context line's ⓘ tip: keys right-aligned, meanings left. */
 .shortcuts {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -4132,9 +4257,9 @@ kbd {
   white-space: nowrap;
 }
 
-/* The viewbar tip sits at the top of the content - drop its bubble DOWN and anchor it to
-   the right edge, or it would open upward into the header / off-screen. */
-.viewbar .tip-body {
+/* The context-line tip sits at the top of the canvas column - drop its bubble DOWN and
+   anchor it to the right edge, or it would open upward into the header / off-screen. */
+.gtopline .tip-body {
   top: calc(100% + 8px);
   bottom: auto;
   left: auto;
@@ -4805,6 +4930,98 @@ kbd {
 .fico.failed { background: var(--err-bg); color: var(--err); }
 .fico.maintenance { background: var(--ok-bg); color: var(--ok); }
 .fico.edit { background: var(--gold-bg); color: var(--gold); }
+.fico.busy { background: var(--busy-bg); color: var(--busy); }
+.fico.queued { background: var(--muted-bg); color: var(--muted); }
+
+/* An idle In-flight card should not hold a screenful of nothing: the head shrinks and
+   the empty line sits right under it. It stays on screen rather than disappearing -
+   it is the anchor the next job appears in, and a card that comes and goes would
+   shift everything below it on every drop. */
+.inflight .feed-head {
+  padding-bottom: 0;
+}
+.inflight .empty {
+  padding: 14px 16px 16px;
+  text-align: left;
+}
+
+/* In flight (Home): the Inbox's running + queued rows, folded in. Lighter than the
+   Inbox's JobCard on purpose - Home answers "is it moving?", the Inbox answers
+   "what exactly happened". */
+.flight-rows {
+  display: grid;
+}
+.frow {
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  gap: 11px;
+  align-items: center;
+  width: 100%;
+  padding: 11px 16px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  transition: background 0.12s;
+}
+.frow:first-child {
+  border-top: 0;
+}
+.frow:hover {
+  background: var(--bg-elev-2);
+}
+.fname {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The pipeline as three ticks: enough to see movement, not enough to need a legend. */
+.fsteps {
+  display: flex;
+  gap: 5px;
+}
+.fsteps .st {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+.fsteps .st.on {
+  background: var(--busy);
+}
+.fsteps .st.now {
+  background: var(--busy);
+  animation: flight-blink 1.4s ease-in-out infinite;
+}
+@keyframes flight-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fsteps .st.now {
+    animation: none;
+  }
+}
+
+/* One plain-language line of state above the tiles - it carries the health summary
+   the old NOW band spent a whole cell on. */
+.stateline {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  padding: 0 2px;
+}
+.stateline strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.ok-strong {
+  color: var(--ok);
+  font-weight: 500;
+}
 .fbody {
   flex: 1;
   min-width: 0;

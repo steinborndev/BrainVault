@@ -32,8 +32,26 @@ export type IconName =
   | 'chevron'
   | 'clock'
   | 'bolt'
+  | 'expand'
+  | 'shrink'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
+  expand: (
+    <>
+      <path d="M12 3.5h4.5V8" />
+      <path d="M8 16.5H3.5V12" />
+      <path d="M16.5 3.5 11.5 8.5" />
+      <path d="M3.5 16.5l5-5" />
+    </>
+  ),
+  shrink: (
+    <>
+      <path d="M16.5 8H12V3.5" />
+      <path d="M3.5 12H8v4.5" />
+      <path d="M11.5 8.5l5-5" />
+      <path d="M8.5 11.5l-5 5" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1.5" />

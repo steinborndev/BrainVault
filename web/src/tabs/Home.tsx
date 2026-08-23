@@ -1,19 +1,28 @@
 /**
- * Home (redesign 2026-08, replaces the Overview widget grid). Answers three questions in
- * order: is anything happening right now (the NOW band), how is the vault doing (stat tiles
- * that navigate), and what changed lately (ONE activity stream instead of the old
- * recently-changed / recent-commits / history triplication - an ingest, a research run, a
- * maintenance run and a manual edit are all the same event: something changed the vault,
- * each carrying its commit and its pages).
+ * Home (rework 2026-08-24). Reading order follows intent, not data shape:
  *
- * The old status strip is gone: the topbar's live pill owns service status, the sidebar
- * badges own attention. Everything refreshes live via the SSE-driven query invalidation.
+ *   1 ACT     the intake composer - the reason to open the app at all. It stands down
+ *             to one row while the queue is busy (Dropzone `compact`).
+ *   2 WATCH   what that started: the running and queued jobs, from every channel. This
+ *             is the Inbox folded in - the Inbox screen keeps the full record.
+ *   3 READ    one plain-language line of state, then four tiles that are doors.
+ *   4 BROWSE  ONE activity stream instead of the old recently-changed / recent-commits /
+ *             history triplication - an ingest, a research run, a maintenance run and a
+ *             manual edit are all the same event: something changed the vault, each
+ *             carrying its commit and its pages.
+ *
+ * The old NOW band is gone: its three cells said what section 2 now says properly (the
+ * running job), what the intake card already shows (channels), and what the state line
+ * carries (health). The status strip went earlier - the topbar's live pill owns service
+ * status, the sidebar badges own attention. Everything refreshes live via the SSE-driven
+ * query invalidation.
  */
 
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
-import type { AuthMode, Job, Stats } from '../api/types.ts'
+import type { AuthMode, Job, JobStatus, Stats } from '../api/types.ts'
+import { Dropzone } from '../components/Dropzone.tsx'
 import { GrowthChart } from '../components/GrowthChart.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink } from '../components/PageLink.tsx'
@@ -21,8 +30,8 @@ import { Sparkline } from '../components/Sparkline.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { JobDrawer } from '../components/JobDrawer.tsx'
 import { Icon, type IconName } from '../components/Icon.tsx'
-import { timeAgo, tokens, duration, parsePages } from '../lib/format.ts'
-import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
+import { timeAgo, duration, parsePages } from '../lib/format.ts'
+import { Cost } from '../components/Cost.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
@@ -87,11 +96,14 @@ export function Home(): React.ReactElement {
   }
 
   const activeJobs = (jobs.data?.jobs ?? []).filter((j) => j.status === 'preprocessing' || j.status === 'ingesting')
+  const queuedJobs = (jobs.data?.jobs ?? []).filter((j) => j.status === 'queued')
   const gaps = graph.data?.gaps ?? []
 
   return (
     <div>
-      <NowBand stats={data} activeJobs={activeJobs} maint={maint} onOpenJob={setDrawerJob} />
+      <Dropzone compact={activeJobs.length + queuedJobs.length > 0} />
+      <InFlight active={activeJobs} queued={queuedJobs} paused={data.queue.paused} onOpenJob={setDrawerJob} />
+      <StateLine stats={data} maint={maint} />
       <StatBand stats={data} gapCount={graph.data?.unresolved ?? null} />
 
       <div className="home-grid section">
@@ -150,87 +162,106 @@ export function Home(): React.ReactElement {
 }
 
 /**
- * The NOW band: is anything happening, is anything due, are the channels alive. Gold edge -
- * this is the working edge of the vault, the one place Home is allowed a brand moment.
+ * In flight: everything the service is working on right now, from every channel - this
+ * drop, the watch folder, the bot. Rows leave for the activity stream when they commit.
+ * Deliberately lighter than the Inbox's JobCard: no live log, no revert - Home answers
+ * "is it moving?", the Inbox answers "what exactly happened".
  */
-function NowBand({
-  stats,
-  activeJobs,
-  maint,
+function InFlight({
+  active,
+  queued,
+  paused,
   onOpenJob,
 }: {
-  stats: Stats
-  activeJobs: Job[]
-  maint: MaintenanceStatusData | null
+  active: Job[]
+  queued: Job[]
+  paused: boolean
   onOpenJob: (id: string) => void
 }): React.ReactElement {
-  const first = activeJobs[0]
+  const busy = active.length + queued.length > 0
+  return (
+    <div className="card section inflight">
+      <div className="feed-head">
+        <h3 className="section-title">In flight</h3>
+        {active.length > 0 && (
+          <span className="badge ingesting">
+            <span className="pulse-dot" aria-hidden />
+            {active.length} running
+          </span>
+        )}
+        {paused && <span className="badge deferred">queue paused</span>}
+        <span className="spacer" />
+        <button className="btn ghost" onClick={() => navigate('/inbox')}>
+          Full inbox <Icon name="chevron" />
+        </button>
+      </div>
+      {!busy ? (
+        <div className="empty">Nothing running. Drop something above and it starts here.</div>
+      ) : (
+        <div className="flight-rows">
+          {active.map((j) => (
+            <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
+          ))}
+          {queued.map((j) => (
+            <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The pipeline as five ticks - enough to see movement, not enough to need a legend. */
+const FLIGHT_PHASES: JobStatus[] = ['queued', 'preprocessing', 'ingesting']
+
+function FlightRow({ job, onOpen }: { job: Job; onOpen: () => void }): React.ReactElement {
+  const phase = FLIGHT_PHASES.indexOf(job.status)
+  const since = job.started_at ?? job.created_at
+  return (
+    <button className="frow" onClick={onOpen} title="Open the job">
+      <span className={`fico ${job.status === 'queued' ? 'queued' : 'busy'}`}>
+        <Icon name={job.status === 'queued' ? 'inbox' : 'bolt'} />
+      </span>
+      <span className="fbody">
+        <span className="fname">{job.original_name ?? job.url ?? job.id}</span>
+        <span className="fmeta">
+          <span>{job.status}</span>
+          <span>{timeAgo(since)}</span>
+          <span>{job.source}</span>
+        </span>
+      </span>
+      <span className="fsteps" aria-hidden>
+        {FLIGHT_PHASES.map((p, i) => (
+          <span key={p} className={`st${i < phase ? ' on' : i === phase ? ' now' : ''}`} />
+        ))}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * One plain-language line of state above the tiles. It carries the health summary the
+ * old NOW band had a whole cell for - a sentence says it in less space than a card, and
+ * it names the window the tiles are measured over, which the tiles themselves cannot.
+ */
+function StateLine({ stats, maint }: { stats: Stats; maint: MaintenanceStatusData | null }): React.ReactElement {
   const due = maint?.status.due ?? 0
   const rec = maint?.status.recommended ?? 0
-  const topItem = maint?.status.items.find((i) => i.severity !== 'healthy')
   const last = stats.commits[0]
-
   return (
-    <div className="card nowband section" role="region" aria-label="Happening now">
-      <div className="now-cell">
-        <div className="now-label">
-          {activeJobs.length > 0 && <span className="pulse-dot" aria-hidden />}
-          Now
-        </div>
-        {first !== undefined ? (
-          <>
-            <div className="now-main">
-              <button className="linkish now-job" onClick={() => onOpenJob(first.id)} title="Open the live job">
-                {first.original_name ?? first.url ?? first.id}
-              </button>
-              <span className={`badge ${first.status}`}>{first.status}</span>
-            </div>
-            <div className="now-sub">
-              running {duration(first.started_at ?? first.created_at, new Date().toISOString())}
-              {activeJobs.length > 1 ? ` · and ${activeJobs.length - 1} more` : ''}
-              {stats.queue.queued > 0 ? ` · ${stats.queue.queued} waiting` : ''}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="now-main dim-strong">Nothing running</div>
-            <div className="now-sub">
-              {stats.queue.paused
-                ? 'queue paused - see the inbox'
-                : stats.queue.queued > 0
-                  ? `${stats.queue.queued} waiting in the queue`
-                  : 'the watcher and the queue are idle'}
-            </div>
-          </>
-        )}
-      </div>
-      <div className="now-cell">
-        <div className="now-label">Health</div>
-        <div className="now-main">
-          {due + rec > 0 ? (
-            <button className="linkish" onClick={() => navigate('/health')}>
-              {due > 0 ? `${due} due` : ''}
-              {due > 0 && rec > 0 ? ' · ' : ''}
-              {rec > 0 ? `${rec} soon` : ''}
-            </button>
-          ) : maint === null ? (
-            <span className="dim-strong">Checking…</span>
-          ) : (
-            <span className="ok-strong">Everything healthy</span>
-          )}
-        </div>
-        <div className="now-sub">{topItem !== undefined ? topItem.title : 'nothing is due right now'}</div>
-      </div>
-      <div className="now-cell">
-        <div className="now-label">Channels</div>
-        <div className="now-main now-channels">
-          <span className={`d ${stats.watcher.active ? 'ok' : 'warn'}`} />
-          Watcher
-          <span className={`d ${stats.queue.paused ? 'warn' : 'ok'}`} />
-          Queue
-        </div>
-        <div className="now-sub">{last ? `last commit ${timeAgo(last.date)}` : 'no commits yet'}</div>
-      </div>
+    <div className="stateline section">
+      Vault health over the <strong>last 7 days</strong> - every number opens the screen it comes
+      from.
+      {last && <> Last commit {timeAgo(last.date)}.</>}{' '}
+      {due + rec > 0 ? (
+        <button className="linkish" onClick={() => navigate('/health')}>
+          {due > 0 ? `${due} check${due > 1 ? 's' : ''} due` : `${rec} recommended soon`}
+        </button>
+      ) : maint === null ? (
+        <span className="dim">Checking maintenance…</span>
+      ) : (
+        <span className="ok-strong">All checks healthy.</span>
+      )}
     </div>
   )
 }
@@ -295,22 +326,6 @@ function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }
         <div className="value">{gapCount ?? '…'}</div>
         <div className="sub">unresolved link targets</div>
         <div className="goto">See them in the graph</div>
-      </button>
-      <button className="stat card statlink" onClick={() => navigate('/settings')}>
-        <div className="label">
-          Cost · 7d
-          {isEstimate(stats.authMode) && (
-            <Tip text="API-price equivalent computed from token counts. On a subscription nothing is charged per run - treat this as an estimate of what the usage would cost via API." />
-          )}
-        </div>
-        <div className="value">
-          <Cost value={stats.usage.last7d.costUsd} authMode={stats.authMode} />
-        </div>
-        <div className="sub">
-          {tokens(stats.usage.last7d.tokensIn + stats.usage.last7d.tokensOut)} tokens
-          {isEstimate(stats.authMode) && <> · {ESTIMATE_LABEL}</>}
-        </div>
-        <div className="goto">Budget settings</div>
       </button>
     </div>
   )

@@ -418,6 +418,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   const [selection, setSelection] = useState<Selection>(viewMemory.selection)
   /** Breadcrumb of visited PAGES (not gaps) - every hop is a chip you can jump back to. */
   const [trail, setTrail] = useState<string[]>(viewMemory.trail)
+  /**
+   * Fullscreen: the graph on its own, with only the controls that belong to the drawing.
+   * Deliberately NOT persisted - it is a posture for one look, not a preference, and
+   * restoring a session into a chromeless screen is disorienting.
+   */
+  const [fullscreen, setFullscreen] = useState(false)
 
   // Write-through into the module-scope memory: every committed render snapshots the view
   // state, so the next mount (returning from an article) restores exactly this view.
@@ -675,6 +681,24 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setSelectedDomains(next)
   }
 
+  /**
+   * The tail of the scope sentence - what the current filters narrowed to, in words. A
+   * shrinking count alone cannot tell a domain filter from a type filter from a search.
+   */
+  const scopeTail = useMemo(() => {
+    const parts: string[] = []
+    if (selectedDomains.size === 1) {
+      const only = [...selectedDomains][0]!
+      parts.push(only === NO_DOMAIN ? 'pages with no domain' : `the ${only} domain`)
+    } else if (selectedDomains.size > 1) parts.push(`${selectedDomains.size} domains`)
+    if (selectedTypes.size > 0) parts.push([...selectedTypes].map((t) => TYPE_LABELS[t] ?? t).join(' + '))
+    if (query.trim() !== '') parts.push(`matching “${query.trim()}”`)
+    return parts.length === 0 ? ' - the whole vault' : ` - ${parts.join(', ')}`
+  }, [selectedDomains, selectedTypes, query])
+
+  /** What the "System pages" toggle would add - the number it shows has to be that. */
+  const systemCount = useMemo(() => graph.nodes.filter((n) => !isKnowledge(n)).length, [graph])
+
   const focusNode = focusIndexFull >= 0 ? graph.nodes[focusIndexFull] : undefined
 
   const health = useMemo(() => computeGraphHealth(graph), [graph])
@@ -686,6 +710,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * persistent preference (localStorage), not a filter the user is trying to escape.
    */
   const resetView = (): void => {
+    setFullscreen(false)
     setInput('')
     setSelectedTypes(new Set())
     setSelectedDomains(new Set())
@@ -712,7 +737,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   keyRef.current = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    if (rootRef.current === null || rootRef.current.offsetParent === null) return
+    // "Is this screen actually on screen?" - the shell keeps every screen mounted and
+    // hides it with [hidden], so a key must not act on a graph nobody can see. Measured
+    // by box size, NOT by offsetParent: a position:fixed element (which is exactly what
+    // fullscreen makes this) reports offsetParent === null, and that swallowed Escape in
+    // the one state where it is the only way out.
+    const root = rootRef.current
+    if (root === null || (root.offsetWidth === 0 && root.offsetHeight === 0)) return
     const el = e.target as HTMLElement
     const typing =
       el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable
@@ -724,6 +755,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       lastEscRef.current = now
       if (doublePress) {
         resetView() // second quick press: back to the full vault in one go
+        return
+      }
+      // Fullscreen is the outermost posture: leave it first, and only it - a press that
+      // also cleared a filter underneath would undo two things at once.
+      if (fullscreen) {
+        setFullscreen(false)
         return
       }
       if (input !== '') setInput('')
@@ -817,81 +854,58 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   )
 
   return (
-    <div className="vault-graph" ref={rootRef}>
+    <div className={`vault-graph${fullscreen ? ' fullscreen' : ''}`} ref={rootRef}>
       <StaleLinksBanner />
-      {/* ═══ Tier 1 - the VIEW bar: how the graph is drawn (color lens, type visibility,
-          overlays, stats). Deliberately stable: nothing in this row grows with the vault,
-          so a filter change can never reflow the render controls (mockup 2026-07-21). ═══ */}
-      <div className="viewbar">
-        <span className="vb-eyebrow">View</span>
-        <LensDropdown lens={lens} onSelect={setLens} hasDomains={hasDomains} />
-        <TypesDropdown types={types} selected={selectedTypes} onToggle={toggleType} onClear={() => setSelectedTypes(new Set())} />
-        <button
-          className={`ctl${showSystem ? ' on' : ''}`}
-          onClick={toggleSystem}
-          title="Show system pages: index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default - they organize or document the vault rather than hold knowledge."
-        >
-          <Icon name="wrench" /> System
-        </button>
-        <span className="vb-sep" aria-hidden />
-        <span className="overlays">
-          <span className="grp-label">Overlays</span>
-          {/* Communities: one grouped control for the two views of the SAME clustering -
-              Areas (tinted hulls) and Bridges (edge emphasis). Was two loose "Clusters" and
-              "Network" buttons whose shared basis and hull-vs-edge split weren't legible. The
-              two aspects stay independent (both can be on); state is unchanged underneath. */}
-          <span className={`communities${showClusters || showNetwork ? ' active' : ''}`}>
-            <span className="cm-label"><Icon name="cluster" /> Communities</span>
-            <button
-              className={`cm-seg${showClusters ? ' on' : ''}`}
-              onClick={() => setShowClusters((v) => !v)}
-              aria-pressed={showClusters}
-              title="Areas: outline each auto-detected community as a tinted, tag-labelled hull - which pages group together."
-            >
-              Areas
-            </button>
-            <button
-              className={`cm-seg${showNetwork ? ' on' : ''}`}
-              onClick={() => setShowNetwork((v) => !v)}
-              aria-pressed={showNetwork}
-              title="Bridges: brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead - how the groups connect."
-            >
-              Bridges
-            </button>
-          </span>
-          <button
-            className={`ctl${spotlight ? ' on' : ''}`}
-            onClick={() => setSpotlight((v) => !v)}
-            title="Spotlight: hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities as it subdivides); click a node to open its page. Esc backs out one level, double-Esc resets everything. Off by default."
-          >
-            <Icon name="spotlight" /> Spotlight
-          </button>
-          {graph.gaps.length > 0 && (
-            <button
-              className={`ctl${showGaps ? ' on' : ''}`}
-              onClick={() => {
-                const next = !showGaps
-                setShowGaps(next)
-                if (!next && selection?.kind === 'gap') closeExplorer()
-              }}
-              title="Show unresolved links as ghost nodes - the pages your vault still wants written"
-            >
-              <Icon name="gap" /> Gaps
-            </button>
-          )}
-        </span>
-        <span className="vb-spacer" />
-        <span className="vtool-stats">
-          {realCount} of {graph.nodes.length} pages · {realEdgeCount} links
-          {graph.unresolved > 0 && (
+      <div className="graph-workspace">
+        <GraphPanel
+          lens={lens}
+          onLens={setLens}
+          hasDomains={hasDomains}
+          types={types}
+          selectedTypes={selectedTypes}
+          onToggleType={toggleType}
+          domains={domains}
+          selectedDomains={selectedDomains}
+          onToggleDomain={toggleDomain}
+          onClearDomains={() => setSelectedDomains(new Set())}
+          showClusters={showClusters}
+          onClusters={() => setShowClusters((v) => !v)}
+          showNetwork={showNetwork}
+          onNetwork={() => setShowNetwork((v) => !v)}
+          spotlight={spotlight}
+          onSpotlight={() => setSpotlight((v) => !v)}
+          showSystem={showSystem}
+          onSystem={toggleSystem}
+          systemCount={systemCount}
+          showGaps={showGaps}
+          onGaps={() => {
+            const next = !showGaps
+            setShowGaps(next)
+            if (!next && selection?.kind === 'gap') closeExplorer()
+          }}
+          gapCount={graph.gaps.length}
+          onReset={resetView}
+        />
+        <div className="graph-main">
+      {/* One thin context line above the canvas: what is in scope, in a sentence, plus
+          the two things that act on the whole view. Everything that used to live in four
+          stacked rows is in the panel to the left now. */}
+      <div className="gtopline">
+        <span className="scopeline">
+          Showing{' '}
+          <strong>
+            {realCount} of {graph.nodes.length}
+          </strong>{' '}
+          pages and <strong>{realEdgeCount}</strong> links
+          {scopeTail}
+          {graph.unresolved > 0 && !showGaps && (
             <>
               {' · '}
               <button
-                className="linklike"
-                // Same landing as the Gaps overlay toggle: the gaps view with the explorer's
-                // ranked list (it shows whenever gaps are on and nothing is selected) - the
-                // two entry points used to diverge, this one additionally auto-selecting the
-                // first gap, which surprise-opened a specific page's panel.
+                className="linkish"
+                // Same landing as the Gaps toggle in the panel: the gaps view with the
+                // explorer's ranked list (it shows whenever gaps are on and nothing is
+                // selected). The two entry points used to diverge.
                 onClick={() => setShowGaps(true)}
                 title="Explore the unresolved links as knowledge gaps"
               >
@@ -900,13 +914,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             </>
           )}
         </span>
+        <span className="spacer" />
         <Tip
           text={
             <span className="shortcuts">
               <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
               <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
               <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
-              <span className="k"><kbd>Esc</kbd></span> <span>clear search · close panel · leave cluster · leave focus - and back out of a page</span>
+              <span className="k"><kbd>Esc</kbd></span> <span>leave fullscreen · clear search · close panel · leave cluster · leave focus - and back out of a page</span>
               <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters - show the whole vault</span>
               <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
               <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
@@ -914,21 +929,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             </span>
           }
         />
+        <button
+          className="btn"
+          onClick={() => setFullscreen(true)}
+          title="Show the graph on its own - Esc returns"
+        >
+          <Icon name="expand" /> Fullscreen
+        </button>
       </div>
-
-      {/* ═══ Tier 2 - the DOMAIN filter band: what is in the graph. The one zone that
-          grows with the vault, so it owns its own row: the chips (legend + filter + count
-          in one control) scroll horizontally, and the full set lives in the searchable
-          "All domains" panel. ═══ */}
-      {hasDomains && (
-        <DomainBand
-          domains={domains}
-          selected={selectedDomains}
-          onToggle={toggleDomain}
-          onClear={() => setSelectedDomains(new Set())}
-          onSelectAll={() => setSelectedDomains(new Set(domains.map(([d]) => d)))}
-        />
-      )}
 
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
@@ -951,7 +959,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                   <strong>{label}</strong>
                 ) : (
                   <button
-                    className="linklike"
+                    className="linkish"
                     onClick={() => setClusterStack((prev) => prev.slice(0, i + 1))}
                     title={`Back to this level (${cf.paths.size} pages)`}
                   >
@@ -1059,7 +1067,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               {query.trim() !== '' && realCount === 0 && (
                 <div className="graph-empty" role="status">
                   No pages match “{query.trim()}”.
-                  <button className="linklike" onClick={() => setInput('')}>
+                  <button className="linkish" onClick={() => setInput('')}>
                     Clear search
                   </button>
                 </div>
@@ -1094,6 +1102,31 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onSelectGap={selectGap}
           onClose={closeExplorer}
         />
+        {/* Fullscreen keeps only what belongs to the drawing: the lens, and the way out.
+            The rest of the panel is one Esc away. */}
+        {fullscreen && (
+          <div className="fsbar" role="group" aria-label="Graph controls">
+            <span className="seg">
+              {LENSES.map((l) => (
+                <button
+                  key={l.key}
+                  className={lens === l.key ? 'active' : ''}
+                  aria-pressed={lens === l.key}
+                  disabled={l.key === 'domain' && !hasDomains}
+                  onClick={() => setLens(l.key)}
+                  title={l.desc}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </span>
+            <button className="btn" onClick={() => setFullscreen(false)} title="Back to the full view (Esc)">
+              <Icon name="shrink" /> Exit
+            </button>
+          </div>
+        )}
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1467,288 +1500,365 @@ function LinkSection({
 }
 
 /**
- * The wiki-bucket visibility filters, tucked behind a dropdown: they are an occasional
- * refinement (hide meta noise, isolate sources), not something worth a permanent row of
- * nine chips above the graph. Checkbox = visible.
+ * The graph's VIEW PANEL - the structural half of the graph rework (2026-08-24).
+ *
+ * It replaces four stacked control rows above the canvas (the view bar, the domain band,
+ * and the two dropdowns inside them) with one standing column beside it. Three reasons:
+ *
+ *  1 The canvas gets its height back. Four rows of chrome, plus the cluster and focus bars
+ *    when they appear, pushed the drawing into the lower half of the screen.
+ *  2 Every parameter is visible at once. The colour lens - the control that decides which
+ *    question the graph answers - used to sit inside a dropdown, while the four overlay
+ *    toggles sat permanently open. That is the priority upside down.
+ *  3 A column grows downward, so the domain list (the one control that grows with the
+ *    vault) can take the leftover height and scroll on its own, instead of forcing the
+ *    whole toolbar to reflow.
+ *
+ * What still folds: the diagnostic lenses and the two include-toggles. Both say what is on
+ * inside them when collapsed - a fold that hides the state in force is worse than no fold.
  */
-/**
- * Tier-2 filter band (mockup 2026-07-21): the domain chips - legend + filter + count in one
- * control - in a horizontally scrolling strip with edge fades, plus the searchable
- * "All domains" panel. This is the part of the toolbar that grows as the vault gains
- * domains, isolated in its own row so it can never reflow the view controls above it.
- * Solo-select semantics unchanged: empty selection = everything; clicks accumulate.
- */
-function DomainBand({
-  domains,
-  selected,
-  onToggle,
-  onClear,
-  onSelectAll,
-}: {
-  domains: Array<[string, number]>
-  selected: ReadonlySet<string>
-  onToggle: (d: string) => void
-  onClear: () => void
-  onSelectAll: () => void
-}): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState('')
-  const moreRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
-  const dot = (d: string): string => (d === NO_DOMAIN ? 'var(--muted)' : domainColor(d))
-  /**
-   * Honest, state-aware tooltip for a toggle target (chip or panel row). The old static
-   * "Show only this domain" was only true for the FIRST click; every further click adds to
-   * the selection, and claiming "only" there mislabeled the accumulate semantics. (The graph
-   * search's domain hit is the one place that genuinely replaces - its own tooltip says so.)
-   */
-  const toggleTitle = (d: string, active: boolean): string =>
-    active
-      ? selected.size === 1
-        ? 'Deselect - back to all domains'
-        : `Remove ${label(d)} from the filter`
-      : selected.size === 0
-        ? 'Show only this domain'
-        : `Add ${label(d)} to the current selection`
-  const q = filter.trim().toLowerCase()
-  // The band orders by size (biggest domains first); the panel is for FINDING a domain,
-  // so it orders alphabetically - the no-domain pseudo-bucket stays last either way.
-  const alphabetical = [...domains].sort(([a], [b]) =>
-    a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b),
-  )
-  const panelRows = q === '' ? alphabetical : alphabetical.filter(([d]) => label(d).toLowerCase().includes(q))
-
-  return (
-    <div className="domainband">
-      <div className="db-head">
-        <span className="lab">Filter · Domain</span>
-        <span className="sel">{selected.size === 0 ? 'showing all' : `${selected.size} selected`}</span>
-      </div>
-      <span className="db-divider" aria-hidden />
-      <div className="db-scroll">
-        {domains.map(([d, count]) => {
-          const active = selected.has(d)
-          return (
-            <button
-              key={d || '∅'}
-              className={`chip${active ? ' active' : ''}${selected.size > 0 && !active ? ' dimmed' : ''}`}
-              onClick={() => onToggle(d)}
-              title={toggleTitle(d, active)}
-            >
-              <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
-              {label(d)} <span className="chip-n">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-      <div className="db-actions">
-        {selected.size > 0 && (
-          <button className="db-clear" onClick={onClear} title="Show all domains">
-            <Icon name="x" /> Clear
-          </button>
-        )}
-        <div className="db-more" ref={moreRef}>
-          <button
-            className={`db-more-btn${open ? ' on' : ''}`}
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-haspopup="true"
-          >
-            All domains ▾
-          </button>
-          {open && (
-            <div className="db-panel">
-              <div className="p-search">
-                <Icon name="search" />
-                <input
-                  type="search"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Filter domains…"
-                  aria-label="Filter the domain list"
-                />
-              </div>
-              <div className="p-grid">
-                {panelRows.map(([d, count]) => {
-                  const active = selected.has(d)
-                  return (
-                    <button
-                      key={d || '∅'}
-                      className={`p-row${active ? ' active' : ''}`}
-                      onClick={() => onToggle(d)}
-                      title={toggleTitle(d, active)}
-                    >
-                      <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
-                      <span className="nm">{label(d)}</span>
-                      <span className="n">{count}</span>
-                      <span className="chk" aria-hidden>
-                        {active ? '✓' : ''}
-                      </span>
-                    </button>
-                  )
-                })}
-                {panelRows.length === 0 && <span className="p-none">No domain matches “{filter.trim()}”.</span>}
-              </div>
-              <div className="p-foot">
-                <button className="linklike" onClick={onSelectAll}>
-                  Select all
-                </button>
-                <span className="count">
-                  {selected.size || domains.length} of {domains.length}
-                </span>
-                <button className="linklike" onClick={onClear}>
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function TypesDropdown({
-  types,
-  selected,
-  onToggle,
-  onClear,
-}: {
-  types: Array<[string, number]>
-  /** Solo-select set (same semantics as the domain filter): empty = every type shown. */
-  selected: ReadonlySet<string>
-  onToggle: (t: string) => void
-  onClear: () => void
-}): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const all = selected.size === 0
-  return (
-    <div className="dropdown" ref={ref}>
-      <button
-        className={`ctl${all ? '' : ' on'}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="true"
-      >
-        Types: <span className="ctl-val">{all ? 'all' : `${selected.size} of ${types.length}`}</span> ▾
-      </button>
-      {open && (
-        <div className="dropdown-menu" role="menu">
-          {/* "All types" is the empty selection - the reset, mirroring the domain band's Clear.
-              Checked when nothing is soloed, so the menu always shows one active state. */}
-          <label className="dropdown-item">
-            <input type="checkbox" checked={all} onChange={onClear} />
-            <em>All types</em>
-          </label>
-          <div className="dropdown-sep" role="separator" />
-          {types.map(([t, count]) => (
-            // Checked = this type is soloed (in the active filter), like a highlighted domain
-            // chip. With nothing soloed no box is checked and "All types" carries the state -
-            // a click then means "show me only this type", not "uncheck one of all".
-            <label key={t} className="dropdown-item">
-              <input type="checkbox" checked={selected.has(t)} onChange={() => onToggle(t)} />
-              {TYPE_LABELS[t] ?? t}
-              <span className="count">{count}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The color lenses offered in the dropdown, with the one-line description each shows. */
-const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
-  { key: 'domain', label: 'Domain', desc: 'hash color per meta-category' },
-  { key: 'type', label: 'Page type', desc: 'wiki bucket (concept, entity, …)' },
-  { key: 'authority', label: 'Authority', desc: 'brighter = more backlinks' },
-  { key: 'orphans', label: 'Orphans', desc: 'red = no backlinks' },
-  { key: 'stubs', label: 'Stubs', desc: 'amber = thin page (< 1 KB)' },
-  { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
-]
-
-/**
- * The color-lens picker: one dropdown that re-encodes the graph to answer a different
- * question. Replaces the old two-state "by domain / by type" toggle - same job, four more
- * axes. Domain is disabled when no page carries one.
- */
-function LensDropdown({
+function GraphPanel({
   lens,
-  onSelect,
+  onLens,
   hasDomains,
+  types,
+  selectedTypes,
+  onToggleType,
+  domains,
+  selectedDomains,
+  onToggleDomain,
+  onClearDomains,
+  showClusters,
+  onClusters,
+  showNetwork,
+  onNetwork,
+  spotlight,
+  onSpotlight,
+  showSystem,
+  onSystem,
+  systemCount,
+  showGaps,
+  onGaps,
+  gapCount,
+  onReset,
 }: {
   lens: Lens
-  onSelect: (l: Lens) => void
+  onLens: (l: Lens) => void
   hasDomains: boolean
+  types: Array<[string, number]>
+  selectedTypes: ReadonlySet<string>
+  onToggleType: (t: string) => void
+  domains: Array<[string, number]>
+  selectedDomains: ReadonlySet<string>
+  onToggleDomain: (d: string) => void
+  onClearDomains: () => void
+  showClusters: boolean
+  onClusters: () => void
+  showNetwork: boolean
+  onNetwork: () => void
+  spotlight: boolean
+  onSpotlight: () => void
+  showSystem: boolean
+  onSystem: () => void
+  systemCount: number
+  showGaps: boolean
+  onGaps: () => void
+  gapCount: number
+  onReset: () => void
 }): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-  const current = LENSES.find((l) => l.key === lens) ?? LENSES[0]!
+  const [domFilter, setDomFilter] = useState('')
+  const secondaryLens = SECONDARY_KEYS.has(lens)
+  const includeOn = (showSystem ? 1 : 0) + (showGaps ? 1 : 0)
+
+  const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
+  const q = domFilter.trim().toLowerCase()
+  // The list is for FINDING a domain, so it orders alphabetically (the old band ordered by
+  // size, which is right for a legend and wrong for a lookup). The no-domain bucket is last.
+  const domainRows = [...domains]
+    .sort(([a], [b]) => (a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b)))
+    .filter(([d]) => q === '' || label(d).toLowerCase().includes(q))
+
   return (
-    <div className="dropdown" ref={ref}>
-      <button
-        className={`ctl${lens !== 'domain' ? ' on' : ''}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="true"
-        title="Change how nodes are colored"
-      >
-        <Icon name="palette" /> Color: <span className="ctl-val">{current.label}</span> ▾
-      </button>
-      {open && (
-        <div className="dropdown-menu lens-menu" role="menu">
-          {LENSES.map((l) => {
-            const disabled = l.key === 'domain' && !hasDomains
+    <aside className="gpanel" aria-label="Graph view controls">
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">View</span>
+          <span className="spacer" />
+          <button className="btn ghost" onClick={onReset} title="Back to the whole vault, coloured by domain">
+            Reset
+          </button>
+        </div>
+        <p className="gp-note">The lens decides which question the graph answers.</p>
+        <div className="lenslist" role="radiogroup" aria-label="Colour by">
+          {LENSES.map((l) => (
+            <LensOption
+              key={l.key}
+              lens={l}
+              active={lens === l.key}
+              disabled={l.key === 'domain' && !hasDomains}
+              onSelect={() => onLens(l.key)}
+            />
+          ))}
+        </div>
+        <Fold
+          label="More lenses"
+          state={secondaryLens ? 'in use' : String(LENSES_SECONDARY.length)}
+          lit={secondaryLens}
+          openWhen={secondaryLens}
+        >
+          <div className="lenslist" role="radiogroup" aria-label="More colour lenses">
+            {LENSES_SECONDARY.map((l) => (
+              <LensOption key={l.key} lens={l} active={lens === l.key} disabled={false} onSelect={() => onLens(l.key)} />
+            ))}
+          </div>
+        </Fold>
+      </div>
+
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">Overlays</span>
+        </div>
+        <div className="gp-toggles">
+          <RowToggle
+            on={showClusters}
+            onToggle={onClusters}
+            name="Areas"
+            desc="tinted hull per community"
+            title="Outline each auto-detected community as a tinted, tag-labelled hull - which pages group together."
+          />
+          <RowToggle
+            on={showNetwork}
+            onToggle={onNetwork}
+            name="Bridges"
+            desc="brighten links between communities"
+            title="Brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead."
+          />
+          <RowToggle
+            on={spotlight}
+            onToggle={onSpotlight}
+            name="Spotlight"
+            desc="hover isolates one community"
+            title="Hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities); click a node to open its page. Esc backs out one level."
+          />
+        </div>
+        <Fold label="Include" state={includeOn === 0 ? 'none' : `${includeOn} on`} lit={includeOn > 0} openWhen={includeOn > 0}>
+          <div className="gp-toggles">
+            <RowToggle
+              on={showSystem}
+              onToggle={onSystem}
+              name="System pages"
+              desc="index hubs, MOCs, reports"
+              count={systemCount}
+              title="Index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default - they organize or document the vault rather than hold knowledge."
+            />
+            <RowToggle
+              on={showGaps}
+              onToggle={onGaps}
+              name="Gaps"
+              desc="unwritten link targets, as ghosts"
+              count={gapCount}
+              title="Show unresolved links as ghost nodes - the pages your vault still wants written."
+            />
+          </div>
+        </Fold>
+      </div>
+
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">Page types</span>
+          <span className="spacer" />
+          <span className="gp-state">{selectedTypes.size === 0 ? 'all' : `${selectedTypes.size} of ${types.length}`}</span>
+        </div>
+        <div className="typechips">
+          {types.map(([t, count]) => {
+            const active = selectedTypes.has(t)
             return (
               <button
-                key={l.key}
-                role="menuitemradio"
-                aria-checked={l.key === lens}
-                className={`lens-item${l.key === lens ? ' sel' : ''}`}
-                disabled={disabled}
-                onClick={() => {
-                  onSelect(l.key)
-                  setOpen(false)
-                }}
+                key={t}
+                className={`chip${active ? ' active' : ''}${selectedTypes.size > 0 && !active ? ' dimmed' : ''}`}
+                aria-pressed={active}
+                onClick={() => onToggleType(t)}
+                title={active ? `Remove ${TYPE_LABELS[t] ?? t}` : selectedTypes.size === 0 ? 'Show only this type' : `Add ${TYPE_LABELS[t] ?? t}`}
               >
-                <span className="lens-name">{l.label}</span>
-                <span className="lens-desc">{disabled ? 'no domains assigned yet' : l.desc}</span>
+                <span className="chip-dot" style={{ background: `var(${TYPE_VARS[t] ?? '--type-meta'})` }} aria-hidden />
+                {TYPE_LABELS[t] ?? t} <span className="chip-n">{count}</span>
               </button>
             )
           })}
         </div>
+      </div>
+
+      {hasDomains && (
+        <div className="gp-sec grow">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Domains</span>
+            <span className="spacer" />
+            {selectedDomains.size > 0 ? (
+              <button className="btn ghost" onClick={onClearDomains} title="Show all domains">
+                <Icon name="x" /> Clear
+              </button>
+            ) : (
+              <span className="gp-state">showing all</span>
+            )}
+          </div>
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={domFilter}
+              placeholder="Filter domains…"
+              onChange={(e) => setDomFilter(e.target.value)}
+              aria-label="Filter the domain list"
+            />
+          </div>
+          <div className="domlist">
+            {domainRows.map(([d, count]) => {
+              const active = selectedDomains.has(d)
+              return (
+                <button
+                  key={d || '∅'}
+                  className={`domrow${active ? ' active' : ''}${selectedDomains.size > 0 && !active ? ' dimmed' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => onToggleDomain(d)}
+                  title={
+                    active
+                      ? selectedDomains.size === 1
+                        ? 'Deselect - back to all domains'
+                        : `Remove ${label(d)} from the filter`
+                      : selectedDomains.size === 0
+                        ? 'Show only this domain'
+                        : `Add ${label(d)} to the current selection`
+                  }
+                >
+                  <span className="dot" style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }} aria-hidden />
+                  <span className="nm">{label(d)}</span>
+                  <span className="n">{count}</span>
+                </button>
+              )
+            })}
+            {domainRows.length === 0 && <div className="gp-none">No domain matches “{domFilter.trim()}”.</div>}
+          </div>
+        </div>
       )}
+    </aside>
+  )
+}
+
+/** One lens choice: the name, and one line saying what the colour means. */
+function LensOption({
+  lens,
+  active,
+  disabled,
+  onSelect,
+}: {
+  lens: { key: Lens; label: string; desc: string }
+  active: boolean
+  disabled: boolean
+  onSelect: () => void
+}): React.ReactElement {
+  return (
+    <button
+      className="lensopt"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onSelect}
+      title={disabled ? 'No page carries a domain yet' : lens.desc}
+    >
+      <span className="radio" aria-hidden />
+      <span>
+        <span className="lname">{lens.label}</span>
+        <span className="ldesc">{disabled ? 'no page carries a domain yet' : lens.desc}</span>
+      </span>
+    </button>
+  )
+}
+
+/** A binary view option as a switch row: name, one line of why, optional count. */
+function RowToggle({
+  on,
+  onToggle,
+  name,
+  desc,
+  count,
+  title,
+}: {
+  on: boolean
+  onToggle: () => void
+  name: string
+  desc: string
+  count?: number
+  title: string
+}): React.ReactElement {
+  return (
+    <button className="rowtoggle" aria-pressed={on} onClick={onToggle} title={title}>
+      <span className="sw" aria-hidden />
+      <span className="rt-text">
+        <span className="tname">{name}</span>
+        <span className="tdesc">{desc}</span>
+      </span>
+      {count !== undefined && <span className="tn">{count}</span>}
+    </button>
+  )
+}
+
+/**
+ * A disclosure for controls that are reached for rather than browsed. `state` is shown on
+ * the closed summary and `lit` colours it, so a collapsed fold can never hide the fact that
+ * something inside it is switched on. `openWhen` forces it open when that happens.
+ */
+function Fold({
+  label,
+  state,
+  lit,
+  openWhen,
+  children,
+}: {
+  label: string
+  state: string
+  lit: boolean
+  openWhen: boolean
+  children: React.ReactNode
+}): React.ReactElement {
+  const [open, setOpen] = useState(openWhen)
+  // Something inside became active (via reset, restore or a keyboard path) - show it.
+  useEffect(() => {
+    if (openWhen) setOpen(true)
+  }, [openWhen])
+  return (
+    <div className={`fold${open ? ' open' : ''}`}>
+      <button className="fold-summary" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="caret" aria-hidden />
+        {label}
+        <span className={`fold-state${lit ? ' lit' : ''}`}>{state}</span>
+      </button>
+      {open && <div className="fold-body">{children}</div>}
     </div>
   )
 }
+
+/**
+ * The colour lenses. Each description says the same thing in the same grammar: what the
+ * COLOUR means. Split by how they are used, not by what they measure:
+ *
+ *  - PRIMARY are the three axes you browse by, and they stand open in the panel. The lens
+ *    decides which question the graph answers, so it must never cost a click to find out
+ *    what it is set to.
+ *  - SECONDARY are diagnostics - reached for when something is wrong, not while browsing -
+ *    so they fold away. The fold says "in use" when one of them is active, because a
+ *    collapsed control that hides the state in force is worse than no control.
+ */
+const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
+  { key: 'domain', label: 'Domain', desc: 'one colour per field of knowledge' },
+  { key: 'authority', label: 'Authority', desc: 'brighter = more pages link here' },
+  { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
+]
+const LENSES_SECONDARY: Array<{ key: Lens; label: string; desc: string }> = [
+  { key: 'type', label: 'Page type', desc: 'a colour per wiki bucket' },
+  { key: 'orphans', label: 'Orphans', desc: 'red = nothing links here' },
+  { key: 'stubs', label: 'Stubs', desc: 'amber = thin page, under 1 KB' },
+]
+const SECONDARY_KEYS: ReadonlySet<Lens> = new Set(LENSES_SECONDARY.map((l) => l.key))
 
 /**
  * A small canvas-corner legend (bottom-right). The metric lenses each get a one-line key; the

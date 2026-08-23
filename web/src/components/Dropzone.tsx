@@ -29,13 +29,22 @@ function looksLikeUrl(value: string): boolean {
   return !value.includes('\n') && /^https?:\/\/\S+$/i.test(value.trim())
 }
 
-export function Dropzone(): React.ReactElement {
+export function Dropzone({ compact = false }: { compact?: boolean }): React.ReactElement {
   const qc = useQueryClient()
   const [over, setOver] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+
+  // `compact` = the queue is busy, so the intake surface stands down to one row and
+  // the screen's attention goes to the work in flight. Opening it by hand wins until
+  // the queue drains, so a deliberate click is never undone by a job finishing.
+  const [pinned, setPinned] = useState(false)
+  const collapsed = compact && !pinned
+  useEffect(() => {
+    if (!compact) setPinned(false)
+  }, [compact])
 
   // Success toasts dismiss themselves; errors stay until the next action replaces them.
   useEffect(() => {
@@ -114,11 +123,42 @@ export function Dropzone(): React.ReactElement {
   const maxMb = maxBytes !== undefined ? Math.round(maxBytes / 1024 / 1024) : undefined
   const isNote = text.trim() !== '' && !looksLikeUrl(text)
 
+  // Collapsed: one row. It still takes a drop (that is the point - the fast path must
+  // not need a click first), and one click brings the full card back.
+  if (collapsed) {
+    return (
+      <div className="section">
+        <div
+          className={`card intake-collapsed${over ? ' over' : ''}`}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setOver(true)
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={onDrop}
+        >
+          <button className="ic-open" onClick={() => setPinned(true)}>
+            <Icon name="upload" />
+            <span className="ic-text">{busy ? 'Uploading…' : 'Drop files, paste a link, or write a note'}</span>
+            <span className="spacer" />
+            <span className="ic-cta">Add to vault</span>
+          </button>
+        </div>
+        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
+      </div>
+    )
+  }
+
   // One compact card, two equal entry paths: files (drop/click) left, link/note right,
   // with the channels line underneath spanning both.
   return (
     <div className="section">
       <div className={`card intake${over ? ' over' : ''}`}>
+        {compact && (
+          <button className="intake-collapse" onClick={() => setPinned(false)} title="Collapse - the queue is busy anyway">
+            <Icon name="x" /> Collapse
+          </button>
+        )}
         <div
           className="dropzone"
           onDragOver={(e) => {
