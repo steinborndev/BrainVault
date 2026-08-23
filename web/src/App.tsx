@@ -13,7 +13,7 @@ import { Maintenance } from './tabs/Maintenance.tsx'
 import { Library } from './tabs/Library.tsx'
 import { Settings } from './tabs/Settings.tsx'
 import { Icon, type IconName } from './components/Icon.tsx'
-import { usePath, navigate } from './lib/router.ts'
+import { usePath, navigate, pageFromPath } from './lib/router.ts'
 
 // Code-split: the vault viewer pulls in d3-force + the canvas machinery, which the other
 // screens never need - keep the shell light.
@@ -148,9 +148,16 @@ export function App(): React.ReactElement {
     }
   }, [path])
 
+  // On a page route the vault screen is showing an article, not the canvas - the topbar
+  // must say so rather than claiming "Graph".
+  const openPage = pageFromPath(path.split('?')[0]!)
+  const screenTitle = screen === 'vault' && openPage !== null ? 'Page' : SCREEN_TITLES[screen]
+
   // The topbar context line: screen name plus a short state summary where one exists.
   const crumbSub =
-    screen === 'inbox' && outstanding > 0
+    openPage !== null && screen === 'vault'
+      ? openPage.replace(/^wiki\//, '').replace(/\.md$/, '')
+      : screen === 'inbox' && outstanding > 0
       ? `${outstanding} outstanding`
       : screen === 'health' && healthDue + healthRec > 0
         ? [healthDue > 0 ? `${healthDue} due` : '', healthRec > 0 ? `${healthRec} soon` : ''].filter(Boolean).join(' · ')
@@ -212,7 +219,7 @@ export function App(): React.ReactElement {
       <div className="main">
         <header className="topbar">
           <h1 className="whereami">
-            <span className="where">{SCREEN_TITLES[screen]}</span>
+            <span className="where">{screenTitle}</span>
             {crumbSub !== '' && <span className="sub">{crumbSub}</span>}
           </h1>
           <span className="spacer" />
