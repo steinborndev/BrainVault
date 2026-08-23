@@ -117,15 +117,20 @@ export interface GraphCanvasProps {
   overlay?: React.ReactNode
 }
 
-/** Bucket → CSS variable. Falls back to --muted for unknown buckets. Exported so the type
- *  legend renders swatches from the same mapping the canvas colors nodes with. */
+/**
+ * Bucket → CSS variable. A CATEGORICAL scale of its own (--type-*): reusing the status
+ * tokens painted every source amber and every question red, so a healthy graph read as a
+ * field of warnings — and the orphans lens (red) collided with the question color. Falls
+ * back to --muted for unknown buckets. Exported so the type legend renders swatches from
+ * the same mapping the canvas colors nodes with.
+ */
 export const TYPE_VARS: Record<string, string> = {
-  concepts: '--accent',
-  entities: '--ok',
-  sources: '--warn',
-  meta: '--muted',
-  root: '--busy',
-  questions: '--err',
+  concepts: '--type-concept',
+  entities: '--type-entity',
+  sources: '--type-source',
+  meta: '--type-meta',
+  root: '--type-root',
+  questions: '--type-question',
 }
 
 // Domain colors + the stub threshold moved to lib/domains.ts (the library shares them and

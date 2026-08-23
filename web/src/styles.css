@@ -43,6 +43,15 @@
   --busy-bg: #1b2947;
   --muted: #7c88a1;
   --muted-bg: #232a3a;
+
+  /* Categorical page-type scale for the graph's type lens — deliberately NOT the status
+     colors: a bucket is a category, never a health signal. */
+  --type-concept: #6fa1f5;
+  --type-entity: #d08bd6;
+  --type-source: #57bfa8;
+  --type-meta: #8c96ae;
+  --type-root: #b3a7e8;
+  --type-question: #d9b356;
 }
 
 @media (prefers-color-scheme: light) {
@@ -74,6 +83,13 @@
     --busy-bg: #e2e9fb;
     --muted: #6b7488;
     --muted-bg: #e7ebf2;
+
+    --type-concept: #2f62c9;
+    --type-entity: #a3459f;
+    --type-source: #10796a;
+    --type-meta: #5d6880;
+    --type-root: #6b53c4;
+    --type-question: #8a6410;
   }
 }
 
@@ -3262,10 +3278,20 @@ details.hot-cache[open] .hc-summary::before {
   white-space: nowrap;
 }
 
-/* Graph stage: the canvas plus the explorer panel that slides over its right edge. The
-   canvas-wrap keeps its own height; the stage just gives the overlay a positioning box. */
+/* Graph stage: canvas + explorer side by side. The panel used to be absolutely positioned
+   over the canvas's right edge, where it covered the search overlay (same z-index, later in
+   the DOM) — pressing `/` then focused an invisible field. It docks now: the canvas shrinks,
+   every canvas-corner control stays reachable. */
 .graph-stage {
   position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 0;
+}
+.graph-stage > .graph-canvas-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* A tappable text that reads as inline prose (the "N unresolved" stat) but acts as a button. */
@@ -3413,21 +3439,19 @@ details.hot-cache[open] .hc-summary::before {
   background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--ok));
 }
 
-/* Explorer side panel — overlays the right of the canvas when a node or gap is selected. */
+/* Explorer side panel — docked beside the canvas when a node or gap is selected. */
 .graph-explorer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  flex: 0 0 340px;
   width: 340px;
   max-width: 100%;
+  align-self: stretch;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
-  border-left: 1px solid var(--border);
-  border-radius: 0 12px 12px 0;
-  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.28);
-  z-index: 5;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
 }
 .gx-close {
   position: absolute;
@@ -3637,10 +3661,16 @@ details.hot-cache[open] .hc-summary::before {
   width: 26px;
   text-align: right;
 }
-@media (max-width: 720px) {
-  .graph-explorer {
-    width: 100%;
-    border-radius: 12px;
+@media (max-width: 1180px) {
+  /* Too narrow for two columns: the panel goes back to overlaying, but ABOVE the search
+     overlay's corner rather than under it. */
+  .graph-stage > .graph-explorer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    box-shadow: -12px 0 30px color-mix(in srgb, var(--bg) 70%, transparent);
   }
   .graph-trail {
     display: none;
@@ -5125,4 +5155,22 @@ kbd {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* Unsaved-editor badge in the page head — the draft guard's visible half. */
+.dirty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.dirty-badge svg {
+  width: 13px;
+  height: 13px;
 }

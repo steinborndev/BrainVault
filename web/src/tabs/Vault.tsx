@@ -344,8 +344,25 @@ function computeGraphHealth(graph: VaultGraph): GraphHealth {
   return { isolated, suspiciousByPage }
 }
 
+/** Search settle delay: long enough to swallow a burst of keystrokes, short enough to feel live. */
+const SEARCH_DEBOUNCE_MS = 220
+
+/** `value`, but only after it has stopped changing for `delay` ms. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return settled
+}
+
 function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
-  const [query, setQuery] = useState(viewMemory.query)
+  // `input` is what the field shows; `query` is what the graph reacts to. Without the delay
+  // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera — typing a
+  // six-letter word moved the view six times.
+  const [input, setInput] = useState(viewMemory.query)
+  const query = useDebounced(input, SEARCH_DEBOUNCE_MS)
   /**
    * Type filter, SOLO-select like the domains (was a hide-set): clicking "concepts" means
    * "show me concepts", so an empty set = every type visible and a non-empty set = only those
@@ -406,7 +423,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // state, so the next mount (returning from an article) restores exactly this view.
   useEffect(() => {
     Object.assign(viewMemory, {
-      query,
+      // The raw input, not the debounced value: a view round trip must restore what the
+      // field showed, including a query the user had not finished typing.
+      query: input,
       selectedTypes,
       selectedDomains,
       lens,
@@ -667,7 +686,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * persistent preference (localStorage), not a filter the user is trying to escape.
    */
   const resetView = (): void => {
-    setQuery('')
+    setInput('')
     setSelectedTypes(new Set())
     setSelectedDomains(new Set())
     setLens('domain')
@@ -707,7 +726,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         resetView() // second quick press: back to the full vault in one go
         return
       }
-      if (query !== '') setQuery('')
+      if (input !== '') setInput('')
       else if (selection !== null) closeExplorer()
       else if (clusterStack.length > 0) setClusterStack((prev) => prev.slice(0, -1)) // pop one level
       else if (showGaps) setShowGaps(false)
@@ -737,8 +756,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         ref={searchRef}
         type="search"
         placeholder="Search pages or tags…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
           // Enter on an unambiguous match opens the page.
           if (e.key === 'Enter' && matches.size === 1) {
@@ -749,13 +768,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           // field — so the next press reaches the window-level Escape ladder.
           if (e.key === 'Escape') {
             e.preventDefault()
-            if (query !== '') setQuery('')
+            if (input !== '') setInput('')
             else e.currentTarget.blur()
           }
         }}
         aria-label="Search the graph for a page or tag"
       />
-      {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
+      {input && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
       {query.trim() !== '' && (results.length > 0 || domainResults.length > 0) && (
         <ul className="graph-search-results">
           {domainResults.map(([d, count]) => (
@@ -768,7 +787,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                 // the moment they typed. The tooltip says so.
                 onClick={() => {
                   setSelectedDomains(new Set([d]))
-                  setQuery('')
+                  setInput('')
                 }}
                 title={`Show only the ${d} domain (replaces the current domain filter)`}
               >
@@ -783,7 +802,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             <li key={n.path}>
               <button
                 onClick={() => {
-                  setQuery('')
+                  setInput('')
                   navigate(pageRoute(n.path))
                 }}
               >
@@ -1040,7 +1059,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               {query.trim() !== '' && realCount === 0 && (
                 <div className="graph-empty" role="status">
                   No pages match “{query.trim()}”.
-                  <button className="linklike" onClick={() => setQuery('')}>
+                  <button className="linklike" onClick={() => setInput('')}>
                     Clear search
                   </button>
                 </div>
@@ -1850,6 +1869,43 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     save.reset()
     setEditing(true)
   }
+
+  /**
+   * Unsaved-draft guard. Every way out of the editor used to drop the draft silently: the
+   * back button, "In graph", the sidebar, browser back, Cancel. `dirty` drives a visible
+   * badge, an armed Cancel and a beforeunload prompt; `leaveEditor` is what every in-app
+   * exit path asks first.
+   */
+  const dirty = editing && draft !== (pageQ.data?.markdown ?? '')
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent): void => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
+  useEffect(() => {
+    if (!confirmLeave) return
+    const t = setTimeout(() => setConfirmLeave(false), 4000)
+    return () => clearTimeout(t)
+  }, [confirmLeave])
+  /** Returns true when the caller may proceed; otherwise it armed the confirm. */
+  const leaveEditor = (): boolean => {
+    if (!dirty) {
+      setEditing(false)
+      return true
+    }
+    if (!confirmLeave) {
+      setConfirmLeave(true)
+      return false
+    }
+    setConfirmLeave(false)
+    setEditing(false)
+    return true
+  }
   const requestDelete = (): void => {
     if (!confirmDelete) {
       setConfirmDelete(true)
@@ -1875,11 +1931,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   }, [menuOpen])
   const [copiedPath, setCopiedPath] = useState(false)
 
-  // Escape returns to the graph — the round-trip partner of the canvas double-click. It
-  // goes straight to /vault (not history.back): after a chain of wikilink hops, one press
-  // means "out to the graph", not one step back per hop. Deliberately inert while editing —
-  // Escape must never cost a draft — and while typing or a menu is open; gated on this tab
-  // being visible (tabs stay mounted, hidden via [hidden]).
+  // Escape leaves the page for the graph — the round-trip partner of the canvas
+  // double-click. It goes straight to /graph (not history.back): after a chain of wikilink
+  // hops, one press means "out to the graph", not one step back per hop. The back BUTTON
+  // does exactly the same thing, so the two gestures can't disagree (they used to: the
+  // button ran history.back and could leave the screen entirely). Inert while editing —
+  // Escape must never cost a draft — and while typing or a menu is open; gated on this
+  // screen being visible (screens stay mounted, hidden via [hidden]).
   const rootRef = useRef<HTMLDivElement>(null)
   const escRef = useRef<(e: KeyboardEvent) => void>(() => {})
   escRef.current = (e: KeyboardEvent): void => {
@@ -1958,18 +2016,34 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   return (
     <div className="vault-page" ref={rootRef}>
       <div className="page-head">
-        <button className="btn ghost" onClick={() => window.history.back()} title="Back — Esc returns to the graph">
+        <button
+          className="btn ghost"
+          onClick={() => {
+            if (editing && !leaveEditor()) return
+            navigate('/graph')
+          }}
+          title="Back to the graph (same as Esc)"
+        >
           <Icon name="back" />
         </button>
         <h1>{pageQ.data?.title ?? node?.title ?? path.split('/').pop()?.replace(/\.md$/, '')}</h1>
         {node && <span className="bucket">{TYPE_LABELS[node.type] ?? node.type}</span>}
-        <span className="key-hint" aria-hidden>
-          <kbd>Esc</kbd> graph
-        </span>
+        {dirty ? (
+          <span className="dirty-badge" role="status">
+            <Icon name="edit" /> Unsaved changes
+          </span>
+        ) : (
+          <span className="key-hint" aria-hidden>
+            <kbd>Esc</kbd> graph
+          </span>
+        )}
         <span className="spacer" />
         <button
           className="btn"
-          onClick={() => navigate(`/graph?focus=${encodeURIComponent(path)}`)}
+          onClick={() => {
+            if (editing && !leaveEditor()) return
+            navigate(`/graph?focus=${encodeURIComponent(path)}`)
+          }}
           title="Focus this page in the graph"
         >
           <Icon name="graph" /> In graph
@@ -2067,8 +2141,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
             <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save (commit)'}
             </button>
-            <button className="btn" onClick={() => setEditing(false)} disabled={save.isPending}>
-              Cancel
+            <button
+              className={`btn${confirmLeave ? ' armed' : ''}`}
+              onClick={() => leaveEditor()}
+              disabled={save.isPending}
+              title={dirty ? 'Discard the unsaved draft' : 'Close the editor'}
+            >
+              {confirmLeave ? 'Discard draft?' : 'Cancel'}
             </button>
             {saveConflict && (
               <span className="toast err">
