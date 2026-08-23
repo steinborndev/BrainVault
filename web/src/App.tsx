@@ -6,7 +6,7 @@ import { useMaintenanceStatus } from './hooks/useMaintenanceStatus.ts'
 import { StatusPopover } from './components/StatusPopover.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
-import { Overview } from './tabs/Overview.tsx'
+import { Home } from './tabs/Home.tsx'
 import { Ingestion } from './tabs/Ingestion.tsx'
 import { Chat } from './tabs/Chat.tsx'
 import { Maintenance } from './tabs/Maintenance.tsx'
@@ -237,7 +237,7 @@ export function App(): React.ReactElement {
         <div className="screens">
           <section className="screen" hidden={screen !== 'home'} aria-label="Home">
             <div className="lane">
-              <Overview onGoto={() => navigate('/inbox')} />
+              <Home />
             </div>
           </section>
           <section className="screen" hidden={screen !== 'library'} aria-label="Library">
@@ -261,7 +261,7 @@ export function App(): React.ReactElement {
           </section>
           <section className="screen" hidden={screen !== 'inbox'} aria-label="Inbox">
             <div className="lane">
-              <Ingestion />
+              <Ingestion statusFilter={screen === 'inbox' ? (new URLSearchParams(path.split('?')[1] ?? '').get('filter') ?? '') : ''} />
             </div>
           </section>
           <section className="screen" hidden={screen !== 'health'} aria-label="Health">

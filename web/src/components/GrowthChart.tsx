@@ -23,7 +23,9 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactE
   }
 
   const totals = points.map((p) => p.total)
-  const min = Math.min(...totals)
+  // Zero-based scale: a min-max window turned a 6-page week into a dramatic full-height
+  // climb. Cumulative page totals are honest from zero.
+  const min = 0
   const max = Math.max(...totals)
   const span = max - min || 1
   const stepX = (W - PAD * 2) / (points.length - 1)

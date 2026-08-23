@@ -4599,3 +4599,260 @@ kbd {
 .url-row {
   align-items: center;
 }
+
+/* ---- Home (redesign 2026-08): NOW band, stat doors, one activity stream ---- */
+.nowband {
+  border-left: 3px solid var(--gold);
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 15px 18px;
+}
+.now-cell {
+  flex: 1;
+  min-width: 0;
+}
+.now-cell + .now-cell {
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+  margin-left: 20px;
+}
+.now-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 7px;
+}
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  animation: badge-pulse 1.6s ease infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot { animation: none; }
+}
+.now-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  min-width: 0;
+}
+.now-main .dim-strong {
+  color: var(--text-dim);
+}
+.now-main .ok-strong {
+  color: var(--ok);
+}
+.now-job {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  text-align: left;
+}
+.now-sub {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.now-channels {
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.now-channels .d,
+.now-cell .d {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.now-channels .d.ok { background: var(--ok); }
+.now-channels .d.warn { background: var(--warn); }
+
+/* Stat tiles as buttons: same look, plus a reveal-on-hover destination line. */
+.statlink {
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.statlink:hover {
+  border-color: var(--accent);
+}
+.statlink .goto {
+  color: var(--accent);
+  font-size: 11.5px;
+  font-weight: 500;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.statlink:hover .goto,
+.statlink:focus-visible .goto {
+  opacity: 1;
+}
+
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .home-grid { grid-template-columns: 1fr; }
+}
+.home-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* The activity stream: ingests, maintenance and edits as one event type. */
+.feed-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 17px 9px;
+  flex-wrap: wrap;
+}
+.feed-head .section-title {
+  margin: 0;
+}
+.feed-item {
+  display: flex;
+  gap: 12px;
+  padding: 11px 17px;
+  border-top: 1px solid var(--border);
+}
+.feed-item.clickable {
+  cursor: pointer;
+}
+.feed-item.clickable:hover {
+  background: color-mix(in srgb, var(--bg-elev-2) 55%, transparent);
+}
+.fico {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: var(--radius-sm);
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+}
+.fico svg {
+  width: 15px;
+  height: 15px;
+}
+.fico.ingest { background: var(--busy-bg); color: var(--busy); }
+.fico.failed { background: var(--err-bg); color: var(--err); }
+.fico.maintenance { background: var(--ok-bg); color: var(--ok); }
+.fico.edit { background: var(--gold-bg); color: var(--gold); }
+.fbody {
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+.fline {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.fline .ft {
+  font-weight: 500;
+  font-size: 13.5px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fline .fwhen {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.fmeta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.fmeta .mono-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.fpages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+.feed-foot {
+  padding: 10px 17px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+/* Most wanted pages: the gap backlog with a research handoff. */
+.wanted {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.wrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.wrow .wn {
+  color: var(--gold);
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 11.5px;
+  width: 14px;
+  flex: none;
+}
+.wrow .wt {
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wrow .wc {
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.btn.research-btn {
+  background: var(--research);
+  border-color: var(--research);
+  color: #fff;
+  font-size: 12px;
+  padding: 4px 10px;
+}

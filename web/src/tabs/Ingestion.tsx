@@ -38,10 +38,17 @@ const HISTORY_FILTERS: Array<{ id: 'all' | JobStatus; label: string }> = [
 const WINDOW_STEP = 300
 const WINDOW_MAX = 500
 
-export function Ingestion(): React.ReactElement {
+export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): React.ReactElement {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<'all' | JobStatus>('all')
   const [search, setSearch] = useState('')
+  // `?filter=` from elsewhere (the Home failures tile) pre-applies a status filter — the
+  // screen stays mounted, so this must react to navigation, not just the first mount.
+  useEffect(() => {
+    if (statusFilter === '') return
+    const valid: Array<'all' | JobStatus> = ['all', 'done', 'failed', 'deferred', 'duplicate', 'cancelled']
+    if ((valid as string[]).includes(statusFilter)) setFilter(statusFilter as 'all' | JobStatus)
+  }, [statusFilter])
   const [limit, setLimit] = useState(WINDOW_STEP)
   const [drawerJob, setDrawerJob] = useState<string | null>(null)
   // The vault name for obsidian:// links comes from /stats; cheap and already cached.
