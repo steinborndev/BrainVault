@@ -156,3 +156,55 @@ Measured (707 visible nodes / 3950 edges, and the 732/7603 system-pages view):
 
 Overlapping domain pairs: 14 -> 0 and 43 -> 0. 12 new unit tests, including the
 disjointness guarantee itself.
+
+
+## Phase 9: panel rework (2026-08-24)
+
+Source of truth: the clickable mockup "BrainVault Redesign" (artifact, revised 2026-08-24)
+and the operator's review of it. Scope is structure and priority, not a new visual system -
+the tokens, the semantic colour pairs and the SSE data layer are untouched.
+
+- [x] Sidebar: Inbox above Research (what arrived outranks what you go looking for)
+- [x] System: `.linkish` and `.linklike` folded into one primitive; `[hidden]` restated
+      with `!important` so a `hidden` prop is not silently beaten by a class-level
+      `display` (it was, on every button and badge in the sheet)
+- [x] Home: the intake composer moves to the top and becomes the first thing on the screen.
+      It stands down to one row while the queue is busy (`Dropzone compact`), and a manual
+      expand wins until the queue drains
+- [x] Home: "In flight" section - running + queued jobs, from every channel. The Inbox
+      folded in; the Inbox screen keeps the full record and the depth (log, revert)
+- [x] Home: the NOW band is gone. Its three cells said what In flight now says properly,
+      what the intake card already shows (channels), and what the new state line carries
+      (health)
+- [x] Home: cost tile removed - a budget concern, not a daily signal, and the one tile
+      nobody acted on from here. Four tiles left, all doors
+- [x] Graph: the two toolbar tiers and their dropdowns replaced by a standing left panel.
+      Every parameter visible at once; the canvas keeps its full height
+- [x] Graph: colour lens as a radio list, three primary axes standing (domain, authority,
+      recency), the three diagnostics folded. Each description says what the COLOUR means,
+      in one line, in the same grammar
+- [x] Graph: Include (system pages, gaps) folded under Overlays. Both folds show what is
+      switched on inside them when collapsed, and open themselves when it is
+- [x] Graph: fullscreen - the canvas plus the lens and the way out. Esc leaves it first
+- [x] Graph: one context line replaces the stats corner, saying in words what is in scope
+      ("715 of 740 pages and 4013 links - the whole vault"). A shrinking count cannot tell
+      a domain filter from a type filter from a search
+
+Two defects found while verifying against the live service:
+
+**F1 - the canvas computed its own height from a constant.** `.graph-canvas-wrap` was
+`height: calc(100vh - 216px)`, where 216px was the height of the toolbar tiers the panel
+replaced. It under-sized the canvas by ~100px (782 -> 882 measured at 1680x1000) and in
+fullscreen subtracted chrome that is not on screen at all (782 -> 978). The height chain
+now flexes end to end (`.screen.flush` -> `.lane` -> `.vault-graph` -> `.graph-workspace`
+-> `.graph-main` -> `.graph-stage` -> `.graph-canvas-wrap`), so no constant is involved.
+
+**F2 - Escape was swallowed in fullscreen.** The graph's key handler guards on
+`rootRef.current.offsetParent === null` to mean "this screen is hidden". A
+`position: fixed` element reports `offsetParent === null`, which is exactly what fullscreen
+makes the graph - so the one state where Escape is the only way out was the one state where
+it did nothing. The guard now measures box size instead.
+
+Verified: 567 server + 88 web tests green, clean typecheck and build, 0 console errors
+across 10 screen loads (5 screens x 2 themes) against the live service, fullscreen entered
+and left by keyboard.
