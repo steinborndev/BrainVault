@@ -453,7 +453,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         const hull = convexHull(body)
         const cx = body.reduce((s, p) => s + p[0], 0) / body.length
         const cy = body.reduce((s, p) => s + p[1], 0) / body.length
-        const padded = expandHull(hull, cx, cy, 26 / t.k)
+        // Padding in WORLD units, not screen units: a hull whose shape changed with the zoom
+        // moved the label anchors with it, which is half of why labels jumped on zoom.
+        const padded = expandHull(hull, cx, cy, HULL_PAD)
         paddedHulls.set(cid, padded)
         ctx.beginPath()
         traceSmooth(ctx, padded)
@@ -466,22 +468,60 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         ctx.fill()
         ctx.stroke()
       }
-      // Second pass: measure widths (needs the canvas), place collision-free, then draw.
-      ctx.font = `600 ${12 / t.k}px system-ui, sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
+      // Second pass: measure widths (needs the canvas), place, then draw. Everything here is
+      // in WORLD units at a size derived from the graph's extent - never from the live zoom.
+      // Mixing the two was the bug behind labels jumping and drifting: the box grew as you
+      // zoomed out, nothing near the hull fit any more, and the label was flung across the
+      // graph (measured: median 411 world units from its centroid at k=0.35 against 108 at
+      // k=4; now identical at every zoom).
+      let sMinX = Infinity
+      let sMinY = Infinity
+      let sMaxX = -Infinity
+      let sMaxY = -Infinity
+      for (const poly of paddedHulls.values()) {
+        for (const [px, py] of poly) {
+          if (px < sMinX) sMinX = px
+          if (py < sMinY) sMinY = py
+          if (px > sMaxX) sMaxX = px
+          if (py > sMaxY) sMaxY = py
+        }
+      }
+      const span = Number.isFinite(sMinX) ? Math.hypot(sMaxX - sMinX, sMaxY - sMinY) : 0
+      const labelH = Math.min(LABEL_H_MAX, Math.max(LABEL_H_MIN, span * LABEL_H_OF_SPAN))
+      const fontWorld = labelH * 0.82
+      ctx.font = `600 ${fontWorld}px system-ui, sans-serif`
       const labelInputs: RegionLabelInput[] = []
       for (const [cid, pts] of members) {
         const label = clusterLabels?.get(cid)
         if (label === undefined || !paddedHulls.has(cid)) continue
         labelInputs.push({ key: cid, width: ctx.measureText(label).width, weight: pts.length })
       }
-      for (const p of placeRegionLabels(labelInputs, paddedHulls, 14 / t.k, 6 / t.k)) {
+      const placedLabels = placeRegionLabels(labelInputs, paddedHulls, labelH, labelH * 0.45)
+      // Keep the glyphs legible without ever moving them: clamp the on-screen size, then
+      // grow each reserved box by the same factor. Shrinking (zoomed in) always fits;
+      // growing (zoomed out) may not, and those labels are dropped rather than displaced.
+      const drawnWorld = Math.min(
+        Math.max(fontWorld, LABEL_MIN_SCREEN_PX / t.k),
+        Math.max(fontWorld, LABEL_MAX_SCREEN_PX / t.k),
+      )
+      const grow = Math.max(1, drawnWorld / fontWorld)
+      ctx.font = `600 ${Math.min(drawnWorld, LABEL_MAX_SCREEN_PX / t.k)}px system-ui, sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      for (const p of placedLabels) {
+        // Box grown around its own centre, so the anchor - and thus which cluster the label
+        // reads as belonging to - is identical at every zoom.
+        const bcx = (p.box[0] + p.box[2]) / 2
+        const bcy = (p.box[1] + p.box[3]) / 2
+        const hw = ((p.box[2] - p.box[0]) / 2) * grow
+        const hh = ((p.box[3] - p.box[1]) / 2) * grow
+        const drawnBox: Box = [bcx - hw, bcy - hh, bcx + hw, bcy + hh]
+        if (grow > 1 && regionLabelBoxes.some((b) => boxesOverlap(drawnBox, b))) continue
         const dom = clusterDomains?.get(p.key)
         const hue = dom !== undefined ? domainHue(dom) : clusterHue(p.key)
         ctx.fillStyle = `hsl(${hue} 55% 62%)`
-        ctx.fillText(clusterLabels!.get(p.key)!, p.x, p.y)
-        regionLabelBoxes.push(p.box)
+        ctx.fillText(clusterLabels!.get(p.key)!, bcx, bcy - hh)
+        regionLabelBoxes.push(drawnBox)
       }
     }
 
@@ -1444,6 +1484,36 @@ function convexHull(points: Pt[]): Pt[] {
 const HULL_OUTLIER_FACTOR = 2.5
 
 /**
+ * Hull padding and region-label metrics, all in WORLD units and deliberately independent of
+ * the zoom factor: the label anchors have to be the same wherever the camera is, or the same
+ * cluster gets a differently-placed label at every scale. Only the GLYPHS are drawn at a
+ * constant screen size (font / k at paint time).
+ */
+const HULL_PAD = 26
+/**
+ * Region labels are sized in WORLD units, as a fraction of the graph's own extent - like the
+ * region names on a map, which belong to the territory rather than to the viewport. That is
+ * what lets the placement be computed once and stay put at every zoom: geometry and glyphs
+ * finally speak the same unit, so a label can never outgrow the box that was reserved for it.
+ * Scaling with the extent (instead of a fixed number) keeps them readable at the fit zoom
+ * whatever size the vault has grown to.
+ */
+const LABEL_H_OF_SPAN = 0.011
+const LABEL_H_MIN = 12
+const LABEL_H_MAX = 60
+/** Cap on the ON-SCREEN size when zoomed in. Clamping DOWN only ever shrinks the drawn text
+ *  inside its reserved box, so it cannot reintroduce overlap. */
+const LABEL_MAX_SCREEN_PX = 20
+/**
+ * Floor on the on-screen size when zoomed OUT. Unlike the cap this makes the drawn text
+ * bigger than the box reserved for it, so it is paired with a draw-time declutter: a label
+ * whose enlarged box would cover one already drawn is HIDDEN, never moved. Positions stay
+ * fixed at every zoom; only how many labels are shown changes, the way a map drops minor
+ * place names as you zoom out.
+ */
+const LABEL_MIN_SCREEN_PX = 10
+
+/**
  * The subset of member points the tinted hull should enclose: the cluster BODY, with spatial
  * outliers trimmed. Distances are measured from the component-wise MEDIAN point (robust - one
  * flung-out member doesn't drag the center toward itself the way a mean would), and a member
@@ -1582,41 +1652,53 @@ export interface PlacedRegionLabel {
   readonly x: number
   readonly y: number
   readonly box: Box
-  /** No collision-free anchor was found; kept above the hull anyway (shown beats dropped). */
+  /** The spot overlaps a tint (its own or a neighbour's) - the least-bad option here. */
   readonly fallback: boolean
 }
 
+
+/** Angular resolution of the escape search. 16 directions ≈ every 22.5°, up first. */
+const LABEL_ANGLES = 16
+/** Radial tiers between "hugging the hull" and the travel cap. */
+const LABEL_TIERS = 6
 /**
- * Search directions for a label anchor, ordered by visual preference: straight up first, then
- * the upper diagonals, sides, and finally below. Diagonals are ~unit length (0.7 ≈ 1/√2).
+ * How far a label may stray beyond its own hull, as a fraction of that hull's radius. The
+ * search used to walk out in tiers of (span of ALL hulls)/40 with no cap at all, so a label
+ * that found no free spot nearby drifted across the whole graph and read as belonging to
+ * whatever cluster it landed near. A label that cannot be placed cleanly is far less
+ * confusing when it stays put and slightly overlaps than when it emigrates.
  */
-const LABEL_DIRECTIONS: ReadonlyArray<Pt> = [
-  [0, -1], // up
-  [0.7, -0.7], // up-right
-  [-0.7, -0.7], // up-left
-  [1, 0], // right
-  [-1, 0], // left
-  [0.7, 0.7], // down-right
-  [-0.7, 0.7], // down-left
-  [0, 1], // down
-]
+const LABEL_MAX_TRAVEL = 0.55
 
-/** Radial search resolution - how many distance tiers between "touching the hull" and the cap. */
-const LABEL_SEARCH_STEPS = 40
+/** Penalty weights: what we would rather sacrifice when nothing is perfectly free. */
+const PENALTY_FOREIGN_HULL = 3
+const PENALTY_OWN_HULL = 2
+/** Per unit of distance beyond the hull edge, relative to the hull radius - keeps labels near. */
+const PENALTY_DISTANCE = 4
 
 /**
- * Places region (cluster) labels so each sits OUTSIDE every tinted hull and clears the other
- * labels.
+ * Places region (cluster) labels next to their hulls, legibly and - above all - close enough
+ * that the association stays obvious.
  *
- * Deterministic ring search, largest cluster first (weight desc, then key): for each label, walk
- * outward from the cluster centroid in tiers, and within a tier try each direction (up first).
- * The first position whose box clears every OTHER hull and all already-placed labels wins - the
- * NEAREST escape, tie-broken toward "above". Walking outward (rather than only touching the own
- * hull) is what frees a small cluster embedded inside a larger one: its label steps past the
- * enclosing blob instead of staying buried in it. The search radius derives from the union of
- * all hulls, so cost and result are zoom-independent. If even the outermost tier is blocked, the
- * label falls back to just above its own hull and is marked `fallback`. Pure geometry: widths
- * are measured by the caller and passed in.
+ * Deterministic, largest cluster first (weight desc, then key). For each label the search
+ * walks a bounded ring around its OWN hull (`LABEL_MAX_TRAVEL` × hull radius, so the span
+ * scales with the cluster rather than with the viewport) and scores every candidate:
+ *
+ *  - overlapping an already-placed LABEL is disqualifying, never merely expensive: two
+ *    labels on top of each other are unreadable, and no amount of proximity buys that back.
+ *    A label with no such candidate is DROPPED (weight order means the biggest clusters keep
+ *    theirs), which is also what declutters the zoomed-out view.
+ *  - overlapping a foreign hull, or its own, is a penalty, not a veto. This is the trade the
+ *    old all-or-nothing test got wrong: it would rather fling a label 700 units away than let
+ *    it touch a tint.
+ *  - distance from the hull edge is itself a penalty, so the winner is the closest good spot.
+ *
+ * Zoom independence is a property of the CALLER: pass `labelH`, `margin` and the label widths
+ * in world units that do not change with the zoom factor, or the same cluster will be labelled
+ * differently at every scale (measured before this change: the median label sat 411 world
+ * units from its centroid at k=0.35 but 108 at k=4).
+ *
+ * Pure geometry: widths are measured by the caller and passed in.
  */
 export function placeRegionLabels(
   labels: readonly RegionLabelInput[],
@@ -1624,71 +1706,57 @@ export function placeRegionLabels(
   labelH: number,
   margin: number,
 ): PlacedRegionLabel[] {
-  // Zoom-independent search span from the bounds of every hull together.
-  let uMinX = Infinity
-  let uMinY = Infinity
-  let uMaxX = -Infinity
-  let uMaxY = -Infinity
-  for (const poly of hulls.values()) {
-    const [aX, aY, bX, bY] = polygonBounds(poly)
-    if (aX < uMinX) uMinX = aX
-    if (aY < uMinY) uMinY = aY
-    if (bX > uMaxX) uMaxX = bX
-    if (bY > uMaxY) uMaxY = bY
-  }
-  const span = Math.hypot(uMaxX - uMinX, uMaxY - uMinY) || 1
-  const step = span / LABEL_SEARCH_STEPS
-
-  const clears = (box: Box, ownKey: number, placedBoxes: Box[]): boolean => {
-    if (placedBoxes.some((p) => boxesOverlap(box, p))) return false
-    for (const [cid, poly] of hulls) {
-      if (cid === ownKey) continue // a label may sit just outside its OWN blob
-      if (boxIntersectsPolygon(box, poly)) return false
-    }
-    return true
-  }
-
   const order = [...labels].sort((a, b) => b.weight - a.weight || a.key - b.key)
   const placedBoxes: Box[] = []
   const out: PlacedRegionLabel[] = []
+
   for (const label of order) {
     const own = hulls.get(label.key)
     if (own === undefined || own.length < 3) continue
-    const minY = polygonBounds(own)[1]
-    // Anchor to the hull EDGE, not the bounding box: ray-cast from the vertex centroid so a
-    // round or diagonally-offset hull gets its label hugging the outline rather than floating
-    // off the bounding-box corner (which read as "far from the cluster").
     const [cx, cy] = vertexCentroid(own)
+    // The hull's own size sets the search span - not the bounds of every hull together,
+    // which made the step size depend on how far apart unrelated clusters happened to sit.
+    let radius = 0
+    for (const [px, py] of own) radius = Math.max(radius, Math.hypot(px - cx, py - cy))
+    const travel = Math.max(radius * LABEL_MAX_TRAVEL, labelH * 2)
     const halfW = label.width / 2
 
-    let chosen: { x: number; y: number; box: Box } | null = null
-    for (let tier = 0; tier <= LABEL_SEARCH_STEPS && chosen === null; tier++) {
-      for (const [dx, dy] of LABEL_DIRECTIONS) {
-        const len = Math.hypot(dx, dy) || 1
-        const ux = dx / len
-        const uy = dy / len
-        // Box CENTER: the hull edge in this direction, plus the margin, plus the half-box
-        // projected onto the direction, plus this tier's outward step.
+    let best: { x: number; y: number; box: Box; penalty: number } | null = null
+    for (let tier = 0; tier <= LABEL_TIERS; tier++) {
+      const out_ = (tier / LABEL_TIERS) * travel
+      for (let a = 0; a < LABEL_ANGLES; a++) {
+        // Start at "up" and alternate outward, so ties resolve toward the top of the hull.
+        const step = Math.ceil(a / 2) * (a % 2 === 1 ? 1 : -1)
+        const angle = -Math.PI / 2 + (step * 2 * Math.PI) / LABEL_ANGLES
+        const ux = Math.cos(angle)
+        const uy = Math.sin(angle)
         const edge = rayPolygonExit(cx, cy, ux, uy, own)
-        const dist = edge + margin + Math.abs(ux) * halfW + Math.abs(uy) * (labelH / 2) + tier * step
+        const dist = edge + margin + Math.abs(ux) * halfW + Math.abs(uy) * (labelH / 2) + out_
         const centerX = cx + ux * dist
         const top = cy + uy * dist - labelH / 2
         const box: Box = [centerX - halfW, top, centerX + halfW, top + labelH]
-        if (clears(box, label.key, placedBoxes)) {
-          chosen = { x: centerX, y: top, box }
-          break
+
+        // Hard constraint: never sit on another label.
+        if (placedBoxes.some((p) => boxesOverlap(box, p))) continue
+
+        let penalty = (out_ / Math.max(radius, 1)) * PENALTY_DISTANCE
+        for (const [cid, poly] of hulls) {
+          if (!boxIntersectsPolygon(box, poly)) continue
+          penalty += cid === label.key ? PENALTY_OWN_HULL : PENALTY_FOREIGN_HULL
+        }
+        if (best === null || penalty < best.penalty - 1e-9) {
+          best = { x: centerX, y: top, box, penalty }
+          if (penalty === 0) break // nothing can beat a clean spot at this distance
         }
       }
+      if (best !== null && best.penalty === 0) break
     }
-    if (chosen === null) {
-      const aboveTop = minY - margin - labelH
-      const box: Box = [cx - halfW, aboveTop, cx + halfW, aboveTop + labelH]
-      out.push({ key: label.key, x: cx, y: aboveTop, box, fallback: true })
-      placedBoxes.push(box)
-    } else {
-      out.push({ key: label.key, x: chosen.x, y: chosen.y, box: chosen.box, fallback: false })
-      placedBoxes.push(chosen.box)
-    }
+
+    // Every candidate collided with an already-placed label: drop this one rather than
+    // stack two unreadable labels. Weight order keeps the labels that matter most.
+    if (best === null) continue
+    out.push({ key: label.key, x: best.x, y: best.y, box: best.box, fallback: best.penalty > 0 })
+    placedBoxes.push(best.box)
   }
   return out
 }
