@@ -1337,7 +1337,9 @@ function GapExplorer({
     [graph, gap],
   )
   if (!gap) return <div className="gx-empty">This link is resolved now.</div>
-  const prefill = `Research and write a vault page about "${gap.title}". ${gap.refBy.length} existing pages already link to it.`
+  // A CLEAN topic (just the page name): the research pipeline pins its synthesis-page title
+  // to `Research: <topic><lens suffix>`, so instruction prose here would end up IN the title.
+  const prefill = gap.title
   return (
     <>
       <div className="gx-head">

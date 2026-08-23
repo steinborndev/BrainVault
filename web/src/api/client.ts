@@ -111,11 +111,16 @@ export const api = {
 
   // ---- Query / Chat ----
 
-  query: (question: string, sessionId?: string): Promise<QueryResponse> =>
+  query: (question: string, sessionId?: string, requestId?: string): Promise<QueryResponse> =>
     fetch(`${BASE}/query`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(sessionId ? { question, sessionId } : { question }),
+      body: JSON.stringify({
+        question,
+        ...(sessionId ? { sessionId } : {}),
+        // Streamed deltas echo this id, so a FIRST question (no session id yet) can render live.
+        ...(requestId ? { requestId } : {}),
+      }),
     }).then(json<QueryResponse>),
 
   sessions: (): Promise<{ sessions: Session[] }> => fetch(`${BASE}/sessions`).then(json<{ sessions: Session[] }>),

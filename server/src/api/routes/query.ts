@@ -42,8 +42,15 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
         error: 'no Anthropic credential configured — add it under Maintenance → Settings, then restart',
       })
     }
-    const body = (req.body ?? {}) as { question?: unknown; sessionId?: unknown }
+    const body = (req.body ?? {}) as { question?: unknown; sessionId?: unknown; requestId?: unknown }
     const question = typeof body.question === 'string' ? body.question.trim() : ''
+    // Optional client-generated id, echoed on the streamed deltas: on a FIRST question the
+    // session id is created server-side, so without this echo the client has no key to
+    // subscribe the live preview under (the answer only ever showed "thinking...").
+    const requestId =
+      typeof body.requestId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.requestId)
+        ? body.requestId
+        : undefined
     if (question === '') return reply.code(400).send({ error: 'provide a non-empty "question"' })
     if (activeQueries >= MAX_CONCURRENT_QUERIES) {
       return reply
@@ -74,7 +81,10 @@ export function registerQueryRoute(app: FastifyInstance, ctx: AppContext): void 
         flushTimer = null
       }
       if (pending === '') return
-      events.publish({ kind: 'chat', chat: { sessionId: session.id, delta: pending } })
+      events.publish({
+        kind: 'chat',
+        chat: { sessionId: session.id, ...(requestId !== undefined ? { requestId } : {}), delta: pending },
+      })
       pending = ''
     }
     const onDelta = (delta: string): void => {

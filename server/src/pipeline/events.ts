@@ -37,6 +37,8 @@ export interface LogEventPayload {
  */
 export interface ChatDeltaPayload {
   readonly sessionId: string
+  /** Echo of the client's request id: lets a FIRST question stream before the client knows the session id. */
+  readonly requestId?: string
   readonly delta: string
 }
 

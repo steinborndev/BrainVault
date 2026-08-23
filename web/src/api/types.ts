@@ -532,4 +532,4 @@ export type BusEvent =
   | { kind: 'stats' }
   | { kind: 'vault' }
   /** A coalesced chunk of the answer being written, for the chat's live preview. */
-  | { kind: 'chat'; chat: { sessionId: string; delta: string } }
+  | { kind: 'chat'; chat: { sessionId: string; requestId?: string; delta: string } }
