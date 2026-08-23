@@ -1,14 +1,12 @@
 /**
- * Maintenance tab (SPEC.md §6.4): Lint (structured report) and a hot-cache refresh, plus the
- * domain registry/governance and the settings editor. Autoresearch lives in the Query/Chat
- * composer now (it deserved the prominent spot, not a maintenance corner). Runs are
- * async/job-style (TASKS-M5 §0): the POST returns a run id at once, we poll its result via
- * `GET /maintenance/runs/:id`, and the live log streams over the `maintenance:<kind>` SSE
- * channel (rendered via JobLog with seeding off).
+ * Health screen (SPEC.md §6.4 + §12.7, redesign 2026-08): the status head is the primary
+ * surface, the guided run walks the open items, the tool cards are the per-area escape
+ * hatch. Settings lives on its own screen now. Runs are async/job-style (TASKS-M5 §0):
+ * the POST returns a run id at once, we poll `GET /maintenance/runs/:id`, and the live log
+ * streams over the `maintenance:<kind>` SSE channel (JobLog with seeding off).
  *
- * Layout: two columns on desktop — the agent-run tools left, settings right — instead of one
- * long single-column scroll. Every tool card shares the same anatomy: title + ⓘ tooltip,
- * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
+ * Every tool card shares the same anatomy: title + ⓘ tooltip, a "last run" meta line
+ * (persistent facts from the vault, not this session), action top-right.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -51,6 +49,8 @@ import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMa
 import { buildRunPlan, type MaintStatusItem, type RunPlanStep, type RunStepId } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
+import { RUN_TITLES } from '../lib/runLabels.ts'
+import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { pageRoute, navigate } from '../lib/router.ts'
 
 export function Maintenance(): React.ReactElement {
@@ -68,14 +68,14 @@ export function Maintenance(): React.ReactElement {
   const totalPages = stats.data?.pages.total ?? 0
   const lastReport = stats.data?.lintReport ?? null
 
-  // The status head is the tab's primary surface (SPEC §12.7). Below it there are four
-  // views: 'overview' (head only), one focused card (a status item was clicked — show
-  // exactly the tool that item is about), 'all' (the Expert-tools toggle / setup mode,
-  // which force-opens everything because the credential entry lives in Settings), or the
-  // guided run (Stufe c) replacing everything while it walks the plan.
+  // The status head is the screen's primary surface (SPEC §12.7). Below it there are four
+  // views: 'overview' (head + run history), one focused card (a status item was clicked —
+  // show exactly the tool that item is about), 'all' (every card), or the guided run
+  // (Stufe c) replacing everything while it walks the plan.
   const [view, setView] = useState<'overview' | 'all' | string>('overview')
   const [runPlan, setRunPlan] = useState<RunPlanStep[] | null>(null)
-  const statusData = useMaintenanceStatus()
+  const maintStatus = useMaintenanceStatus()
+  const statusData = maintStatus.data
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   // Setup mode only disables the run button here — the credential entry lives in Settings
   // now (its own screen), so this tab no longer has to force-open anything to reach it.
@@ -97,8 +97,11 @@ export function Maintenance(): React.ReactElement {
 
   return (
     <>
+      <div className={view === 'overview' ? 'health-grid' : ''}>
       <StatusHead
         data={statusData}
+        failed={maintStatus.failed}
+        onRetry={maintStatus.retry}
         allShown={view === 'all'}
         setupMode={setupMode}
         onToggleTools={() => setView(view === 'all' ? 'overview' : 'all')}
@@ -111,13 +114,15 @@ export function Maintenance(): React.ReactElement {
           }
         }}
       />
+      {view === 'overview' && <RunHistory data={statusData} />}
+      </div>
       {view !== 'overview' && view !== 'all' && (
         <div className="focus-bar">
           <button className="linklike" onClick={() => setView('overview')}>
             ← Back to what&apos;s due
           </button>
           <button className="linklike" onClick={() => setView('all')}>
-            Show all tools
+            All tools
           </button>
         </div>
       )}
@@ -168,6 +173,9 @@ export function Maintenance(): React.ReactElement {
               <>No lint report in the vault yet.</>
             )}
           </div>
+          {lastReport !== null && !lint.running && lint.result === undefined && (
+            <ReportPeek path={lastReport.path} />
+          )}
           {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
           {lint.error && <div className="toast err">{lint.error}</div>}
           {lintFix.running && <JobLog jobId="maintenance:lint-fix" seed={false} />}
@@ -307,6 +315,8 @@ export function Maintenance(): React.ReactElement {
  */
 function StatusHead({
   data,
+  failed,
+  onRetry,
   allShown,
   setupMode,
   onToggleTools,
@@ -314,6 +324,8 @@ function StatusHead({
   onStartRun,
 }: {
   data: MaintenanceStatusData | null
+  failed: boolean
+  onRetry: () => void
   allShown: boolean
   setupMode: boolean
   onToggleTools: () => void
@@ -323,12 +335,22 @@ function StatusHead({
   const [showHealthy, setShowHealthy] = useState(false)
 
   if (data === null) {
+    // A failed input query must offer a way out — not spin as "Checking…" forever.
     return (
       <div className="card card-pad maint-status">
         <div className="section-head">
           <h3 className="section-title">What&apos;s due</h3>
         </div>
-        <div className="tool-meta">Checking vault status…</div>
+        {failed ? (
+          <div className="tool-meta">
+            Could not derive the vault status.{' '}
+            <button className="btn" onClick={onRetry}>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="tool-meta">Checking vault status…</div>
+        )}
       </div>
     )
   }
@@ -337,13 +359,16 @@ function StatusHead({
   const open = status.items.filter((i) => i.severity !== 'healthy')
   const healthy = status.items.filter((i) => i.severity === 'healthy')
   const allHealthy = open.length === 0
+  // The button renders only when the plan builder would actually produce steps — an item
+  // set of registry/index-only work used to leave an enabled button that did nothing.
+  const planSize = buildRunPlan(status).length
 
   return (
     <div className="card card-pad maint-status">
       <div className="section-head">
         <h3 className="section-title">
           What&apos;s due
-          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'Expert tools' shows every card." />
+          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'All tools' shows every card." />
         </h3>
         <span className="right ms-actions">
           <span className="ms-counts">
@@ -352,9 +377,9 @@ function StatusHead({
             <span className="sev ok">{status.healthy} healthy</span>
           </span>
           <button className="btn" onClick={onToggleTools}>
-            {allShown ? 'Hide expert tools' : 'Expert tools'}
+            {allShown ? 'Hide all tools' : 'All tools'}
           </button>
-          {!allHealthy && (
+          {planSize > 0 && (
             <button
               className="btn primary"
               disabled={setupMode}
@@ -365,7 +390,7 @@ function StatusHead({
                   : 'Work through the open items in order - automatic steps run on their own, the run stops only where your judgement is needed'
               }
             >
-              Start maintenance run
+              Start guided run
             </button>
           )}
         </span>
@@ -434,6 +459,78 @@ function StatusItem({
       </span>
       <span className="ms-cost">{item.cost}</span>
     </button>
+  )
+}
+
+/**
+ * The persisted lint report, collapsed under the lint card (redesign 2026-08): "Fix safe
+ * findings" is bounded by exactly this report, so its evidence must be visible where the
+ * consent happens — not one navigation away. Loaded lazily on first expand.
+ */
+function ReportPeek({ path }: { path: string }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const page = useQuery({
+    queryKey: ['page-preview', path],
+    queryFn: () => api.page(path),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  return (
+    <details
+      className="report-peek"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary>Show the report this fix run is bounded by</summary>
+      {page.isLoading && <div className="empty">Loading report…</div>}
+      {page.isError && <div className="toast err">Could not load the report: {(page.error as Error).message}</div>}
+      {page.data !== undefined && (
+        <div className="report-body md-fallback">
+          <Markdown source={page.data.markdown} />
+          {page.data.truncated && <p className="tab-hint">Truncated - open the full page in the vault viewer.</p>}
+        </div>
+      )}
+    </details>
+  )
+}
+
+/**
+ * Run history (redesign 2026-08): the restart-proof last settle per run kind, with outcome
+ * and page count — receipts for what maintenance actually did. One row per kind (the runner
+ * keeps no deeper history yet; a persistent run log is a server extension).
+ */
+function RunHistory({ data }: { data: MaintenanceStatusData | null }): React.ReactElement {
+  const runs = [...(data?.lastRuns.values() ?? [])].sort(
+    (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt),
+  )
+  return (
+    <div className="card card-pad run-history">
+      <div className="section-head">
+        <h3 className="section-title">
+          Last runs
+          <Tip text="The most recent settle per run kind, restart-proof (SPEC 12.7 Stufe b). Vault facts (report date, cache age) stay the primary source; this covers the areas no vault file captures." />
+        </h3>
+      </div>
+      {runs.length === 0 ? (
+        <div className="empty">No maintenance runs recorded yet.</div>
+      ) : (
+        <div className="run-rows">
+          {runs.map((r) => (
+            <div key={r.kind} className="run-row">
+              <span className={`sev ${r.ok ? 'ok' : 'due'}`}>{r.ok ? 'ok' : 'failed'}</span>
+              <span className="rr-main">
+                <span className="rr-title">{RUN_TITLES[r.kind] ?? r.kind}</span>
+                {r.error !== null && <span className="rr-err">{r.error}</span>}
+              </span>
+              <span className="rr-meta">
+                {r.pages > 0 ? `${r.pages} page${r.pages > 1 ? 's' : ''} · ` : ''}
+                {timeAgo(r.finishedAt)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1132,11 +1229,19 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
 }
 
 function RunResult({ result, vaultName, label }: { result: MaintenanceResult; vaultName: string; label: string }): React.ReactElement {
+  // The run's cost was collected all along (result.usage) but never rendered — receipts.
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const authMode = stats.data?.authMode ?? 'oauth'
   if (!result.ok) return <div className="toast err">{result.error ?? 'Failed'}</div>
   return (
     <div className="toast ok">
       {label}
-      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> — no changes.</>}
+      {result.usage.costUsd > 0 && (
+        <span className="run-cost">
+          {' '}· <Cost value={result.usage.costUsd} authMode={authMode} />
+        </span>
+      )}
+      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> - no changes.</>}
     </div>
   )
 }
@@ -1164,6 +1269,11 @@ function GuidedRun({
 }): React.ReactElement {
   const qc = useQueryClient()
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const authMode = stats.data?.authMode ?? 'oauth'
+  // Receipts: what a step cost, appended to its outcome note (the estimate footnote sits
+  // under the summary once, so the per-step suffix stays a bare number).
+  const costSuffix = (usd: number): string => (usd > 0 ? ` · $${usd.toFixed(2)}${isEstimate(authMode) ? '*' : ''}` : '')
   const [idx, setIdx] = useState(0)
   const [outcomes, setOutcomes] = useState<Record<string, StepOutcome>>({})
   /** Domains created in the decision step — what makes the follow-up backfill run vs. skip. */
@@ -1210,7 +1320,8 @@ function GuidedRun({
     if (step === undefined || step.kind !== 'auto' || step.id === 'lint') return
     const r = autoRuns[step.id]
     if (r?.result?.ok === true) {
-      finish(step.id, 'done', r.result.pages.length > 0 ? `${r.result.pages.length} page(s) committed` : 'No changes needed.')
+      const base = r.result.pages.length > 0 ? `${r.result.pages.length} page(s) committed` : 'No changes needed.'
+      finish(step.id, 'done', base + costSuffix(r.result.usage.costUsd))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backfill1.result, backfill2.result, hot.result])
@@ -1228,7 +1339,8 @@ function GuidedRun({
   useEffect(() => {
     if (step?.id !== 'lint') return
     if (lintFix.result?.ok === true) {
-      finish('lint', 'done', `Report written · ${lintFix.result.pages.length} page(s) auto-fixed.`)
+      const usd = (lint.result?.usage.costUsd ?? 0) + lintFix.result.usage.costUsd
+      finish('lint', 'done', `Report written · ${lintFix.result.pages.length} page(s) auto-fixed.` + costSuffix(usd))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lintFix.result, step])
@@ -1291,7 +1403,10 @@ function GuidedRun({
           <h3 className="section-title" style={{ marginBottom: 4 }}>
             What happened
           </h3>
-          <p className="tab-hint">Every step was its own git commit - revertable independently.</p>
+          <p className="tab-hint">
+            Every step was its own git commit - revertable independently.
+            {isEstimate(authMode) && <> Costs marked * are {ESTIMATE_LABEL}.</>}
+          </p>
           <div className="wiz-summary">
             {plan.map((s) => {
               const o = outcomes[s.id]

@@ -22,7 +22,15 @@ export interface MaintenanceStatusData {
   readonly lastRuns: ReadonlyMap<string, MaintenanceAreaState>
 }
 
-export function useMaintenanceStatus(): MaintenanceStatusData | null {
+export interface MaintenanceStatusResult {
+  /** Null while loading — or while failed (check `failed` to tell the two apart). */
+  readonly data: MaintenanceStatusData | null
+  /** True when any input query errored: the head must offer a retry, not spin forever. */
+  readonly failed: boolean
+  readonly retry: () => void
+}
+
+export function useMaintenanceStatus(): MaintenanceStatusResult {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
@@ -35,7 +43,14 @@ export function useMaintenanceStatus(): MaintenanceStatusData | null {
     [graph.data],
   )
 
-  return useMemo(() => {
+  const failed = stats.isError || graph.isError || domains.isError || candidates.isError
+  const retry = (): void => {
+    for (const q of [stats, graph, domains, candidates, index, state]) {
+      if (q.isError) void q.refetch()
+    }
+  }
+
+  const data = useMemo(() => {
     if (
       stats.data === undefined ||
       domains.data === undefined ||
@@ -58,4 +73,6 @@ export function useMaintenanceStatus(): MaintenanceStatusData | null {
     const lastRuns = new Map((state.data?.areas ?? []).map((a) => [a.kind, a]))
     return { status, lastRuns }
   }, [stats.data, domains.data, candidates.data, report, index.data, state.data])
+
+  return { data, failed, retry }
 }

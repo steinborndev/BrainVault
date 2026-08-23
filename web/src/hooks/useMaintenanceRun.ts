@@ -47,11 +47,17 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
 
   const settled = poll.data !== undefined && poll.data.status !== 'running'
   useEffect(() => {
-    // A settled run may have committed pages / refreshed the hot cache — refresh stats, and
-    // the per-kind settle state that feeds the status head (SPEC §12.7 Stufe b).
+    // A settled run may have committed pages / refreshed the hot cache — refresh stats and
+    // the per-kind settle state that feeds the status head (SPEC §12.7 Stufe b). The graph
+    // and domain queries refresh too: the guided run's later steps derive their decision
+    // data from them, and the dependency ordering the wizard exists for only holds when a
+    // backfill's result is visible to the domain/tag steps that follow it.
     if (settled) {
       qc.invalidateQueries({ queryKey: ['stats'] })
       qc.invalidateQueries({ queryKey: ['maintenance-state'] })
+      qc.invalidateQueries({ queryKey: ['graph'] })
+      qc.invalidateQueries({ queryKey: ['domains'] })
+      qc.invalidateQueries({ queryKey: ['domain-candidates'] })
     }
   }, [settled, qc])
 

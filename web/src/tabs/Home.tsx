@@ -24,8 +24,9 @@ import { Icon, type IconName } from '../components/Icon.tsx'
 import { timeAgo, tokens, duration, parsePages } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
-import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
+import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
+import { RUN_TITLES } from '../lib/runLabels.ts'
 
 const DIR_LABELS: Record<string, string> = {
   concepts: 'Concepts',
@@ -68,7 +69,7 @@ export function Home(): React.ReactElement {
   const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const jobs = useQuery({ queryKey: ['jobs', 300], queryFn: () => api.jobs({ limit: 300 }) })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
-  const maint = useMaintenanceStatus()
+  const maint = useMaintenanceStatus().data
   const [drawerJob, setDrawerJob] = useState<string | null>(null)
 
   if (isLoading) return <LoadingSkeleton />
@@ -160,7 +161,7 @@ function NowBand({
 }: {
   stats: Stats
   activeJobs: Job[]
-  maint: ReturnType<typeof useMaintenanceStatus>
+  maint: MaintenanceStatusData | null
   onOpenJob: (id: string) => void
 }): React.ReactElement {
   const first = activeJobs[0]
@@ -331,21 +332,6 @@ interface FeedEvent {
   onOpen?: () => void
 }
 
-/** Friendly names for the maintenance run kinds that can appear in the feed. */
-const RUN_TITLES: Record<string, string> = {
-  lint: 'Lint report written',
-  'lint-fix': 'Safe lint fixes applied',
-  'hot-cache': 'Hot cache refreshed',
-  'tag-fix': 'Tag repairs applied',
-  'domain-backfill': 'Domain backfill',
-  'domain-review': 'Domain candidates reviewed',
-  research: 'Research run',
-  save: 'Conversation saved to the vault',
-  cleanup: 'Reference cleanup',
-  repair: 'Graph repair',
-  'retrieve-index': 'Retrieval index rebuilt',
-}
-
 /**
  * One stream of change. Sources: finished jobs (with their commit + pages), the per-kind
  * maintenance state, and commits neither of those explains (manual edits, deletes, saves).
@@ -365,7 +351,7 @@ function ActivityFeed({
   vaultName: string
   onOpenJob: (id: string) => void
 }): React.ReactElement {
-  const maint = useMaintenanceStatus()
+  const maint = useMaintenanceStatus().data
   const [filter, setFilter] = useState<'all' | FeedKind>('all')
 
   const events = useMemo(() => {

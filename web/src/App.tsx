@@ -109,8 +109,8 @@ export function App(): React.ReactElement {
 
   // Health badge: due/recommended from the deterministic status model (shared queries).
   const maint = useMaintenanceStatus()
-  const healthDue = maint?.status.due ?? 0
-  const healthRec = maint?.status.recommended ?? 0
+  const healthDue = maint.data?.status.due ?? 0
+  const healthRec = maint.data?.status.recommended ?? 0
 
   // First-run setup mode: the server runs without a credential and every agent feature is
   // off — surface that on every screen, with the path to fix it (Settings).
@@ -153,7 +153,7 @@ export function App(): React.ReactElement {
     screen === 'inbox' && outstanding > 0
       ? `${outstanding} outstanding`
       : screen === 'health' && healthDue + healthRec > 0
-        ? `${healthDue} due · ${healthRec} soon`
+        ? [healthDue > 0 ? `${healthDue} due` : '', healthRec > 0 ? `${healthRec} soon` : ''].filter(Boolean).join(' · ')
         : screen === 'library' && stats.data !== undefined
           ? `${stats.data.pages.total} pages`
           : ''
