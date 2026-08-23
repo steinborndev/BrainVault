@@ -230,11 +230,11 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
         </div>
       </div>
 
-      <div className="card lib-card">
+      <div className="card dtable-card">
         {shown.length === 0 ? (
           <div className="empty">Nothing matches the current filters.</div>
         ) : (
-          <table className="lib-table">
+          <table className="dtable">
             <thead>
               <tr>
                 <th>Page</th>
@@ -291,7 +291,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </tbody>
           </table>
         )}
-        <div className="lib-foot">
+        <div className="dtable-foot">
           <span>
             Showing {shown.length} of {filtered.length} pages
             {filtered.length !== knowledge.length ? ` (${knowledge.length} total)` : ''}

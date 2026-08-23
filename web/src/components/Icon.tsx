@@ -30,6 +30,7 @@ export type IconName =
   | 'play'
   | 'commit'
   | 'chevron'
+  | 'clock'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   grid: (
@@ -182,6 +183,12 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     </>
   ),
   chevron: <path d="M7 10l5 5 5-5" />,
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5.5l3.5 2" />
+    </>
+  ),
 }
 
 export function Icon({ name }: { name: IconName }): React.ReactElement {

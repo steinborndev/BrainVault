@@ -169,6 +169,8 @@ export function JobCard({
       )}
 
       {job.error && variant !== 'active' && <div className="job-error">{job.error}</div>}
+      {cancel.error != null && <div className="job-error">Cancel failed: {(cancel.error as Error).message}</div>}
+      {retry.error != null && <div className="job-error">Retry failed: {(retry.error as Error).message}</div>}
       {revert.error && <div className="job-error">{(revert.error as Error).message}</div>}
       {armedRevert && !revert.isPending && (
         <div className="tab-hint">
