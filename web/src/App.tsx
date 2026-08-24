@@ -287,13 +287,17 @@ export function App(): React.ReactElement {
               )}
             </div>
           </section>
-          <section className="screen" hidden={screen !== 'research'} aria-label="Research">
-            <div className="lane">
+          {/* Research is two columns that each scroll internally - the composer must stay
+              docked at the bottom rather than riding away with the thread. */}
+          <section className="screen flush" hidden={screen !== 'research'} aria-label="Research">
+            <div className="lane wide">
               <Chat researchPrefill={screen === 'research' ? (new URLSearchParams(path.split('?')[1] ?? '').get('prefill') ?? '') : ''} />
             </div>
           </section>
-          <section className="screen" hidden={screen !== 'inbox'} aria-label="Inbox">
-            <div className="lane">
+          {/* The inbox is a workspace like the library: panel plus one table that scrolls
+              inside itself, filling the viewport rather than growing past it. */}
+          <section className="screen flush" hidden={screen !== 'inbox'} aria-label="Inbox">
+            <div className="lane wide">
               <Ingestion statusFilter={screen === 'inbox' ? (new URLSearchParams(path.split('?')[1] ?? '').get('filter') ?? '') : ''} />
             </div>
           </section>
