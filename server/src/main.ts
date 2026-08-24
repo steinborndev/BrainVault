@@ -24,6 +24,7 @@ import { startRetrieveIndexScheduler, isRetrieveProvisioned, type RetrieveIndexS
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
+import { ensureVaultExcludes } from './pipeline/vault-excludes.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
 import { startVaultWatcher, type VaultWatcher } from './pipeline/vault-watcher.js'
 import { startTelegramBot, type TelegramBot } from './telegram/bot.js'
@@ -46,6 +47,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   assertBindAllowed(config.server)
 
   const pin = refreshTransportPin(config.vaultRoot)
+  // Before anything can write: derived artifacts and agent scratch stay out of vault history.
+  // Startup, not first-index-build, because an agent run can leave scratch long before one.
+  ensureVaultExcludes(config.vaultRoot)
 
   const db = openDb(defaultDbPath())
   // The live-update bus is shared: the store publishes job/log events, the queue publishes
