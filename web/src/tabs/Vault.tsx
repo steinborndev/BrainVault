@@ -871,36 +871,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     <div className={`vault-graph${fullscreen ? ' fullscreen' : ''}`} ref={rootRef}>
       <StaleLinksBanner />
       <div className="graph-workspace">
-        <GraphPanel
-          lens={lens}
-          onLens={setLens}
-          hasDomains={hasDomains}
-          types={types}
-          selectedTypes={selectedTypes}
-          onToggleType={toggleType}
-          domains={domains}
-          selectedDomains={selectedDomains}
-          onToggleDomain={toggleDomain}
-          onClearDomains={() => setSelectedDomains(new Set())}
-          showClusters={showClusters}
-          onClusters={() => setShowClusters((v) => !v)}
-          showNetwork={showNetwork}
-          onNetwork={() => setShowNetwork((v) => !v)}
-          spotlight={spotlight}
-          onSpotlight={() => setSpotlight((v) => !v)}
-          showSystem={showSystem}
-          onSystem={toggleSystem}
-          systemCount={systemCount}
-          showGaps={showGaps}
-          onGaps={() => {
-            const next = !showGaps
-            setShowGaps(next)
-            if (!next && selection?.kind === 'gap') closeExplorer()
-          }}
-          gapCount={graph.gaps.length}
-          onReset={resetView}
-        />
-        <div className="graph-main">
+        {(clusterFocus !== null || focusNode) && (
+          <div className="ws-bar graph-bars">
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
           the "· domain" suffix make the cluster ≠ domain distinction visible - one domain
@@ -969,6 +941,38 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         </div>
       )}
 
+          </div>
+        )}
+        <GraphPanel
+          lens={lens}
+          onLens={setLens}
+          hasDomains={hasDomains}
+          types={types}
+          selectedTypes={selectedTypes}
+          onToggleType={toggleType}
+          domains={domains}
+          selectedDomains={selectedDomains}
+          onToggleDomain={toggleDomain}
+          onClearDomains={() => setSelectedDomains(new Set())}
+          showClusters={showClusters}
+          onClusters={() => setShowClusters((v) => !v)}
+          showNetwork={showNetwork}
+          onNetwork={() => setShowNetwork((v) => !v)}
+          spotlight={spotlight}
+          onSpotlight={() => setSpotlight((v) => !v)}
+          showSystem={showSystem}
+          onSystem={toggleSystem}
+          systemCount={systemCount}
+          showGaps={showGaps}
+          onGaps={() => {
+            const next = !showGaps
+            setShowGaps(next)
+            if (!next && selection?.kind === 'gap') closeExplorer()
+          }}
+          gapCount={graph.gaps.length}
+          onReset={resetView}
+        />
+        <div className="graph-main">
       <div className="graph-stage">
         <GraphCanvas
           nodes={nodes}

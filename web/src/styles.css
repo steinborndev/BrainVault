@@ -573,6 +573,47 @@ button {
   }
 }
 
+/* ══ Workspace shell - shared by Graph, Library and Inbox ═════════════════════════════
+   All three are the same shape: an optional full-width bar, then a standing filter panel
+   beside one big box. The rule that matters is that the WORKSPACE owns the padding, so the
+   panel and the box start and end on the same two lines. A column that pads itself (the
+   graph canvas did) or a bar that sits inside one column (the library's did) breaks that,
+   which is exactly how the two edges drifted apart. ══ */
+/* Row 1 explicitly, not by auto-placement: the bar spans both columns, so if a column
+   child is placed first the bar gets pushed into a row of its own BELOW it and the grid
+   silently collapses to one column. Stating the row makes DOM order irrelevant. */
+.ws-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+/* Only reserve the bar's row when a bar is actually rendered - an always-on `auto` row
+   would leave a gap's worth of dead space on the screens that have no bar right now. */
+.library,
+.inbox,
+.graph-workspace {
+  grid-template-rows: minmax(0, 1fr);
+}
+.library:has(> .ws-bar),
+.inbox:has(> .ws-bar),
+.graph-workspace:has(> .ws-bar) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* With a bar present the two columns belong to row 2; without one the single row is row 1
+   and these are ignored, because a grid-row beyond the template just creates it. */
+.library:has(> .ws-bar) > .gpanel,
+.library:has(> .ws-bar) > .lib-main,
+.inbox:has(> .ws-bar) > .gpanel,
+.inbox:has(> .ws-bar) > .inbox-main,
+.graph-workspace:has(> .ws-bar) > .gpanel,
+.graph-workspace:has(> .ws-bar) > .graph-main {
+  grid-row: 2;
+}
+
 /* ---- Cards & layout ---- */
 .card {
   background: var(--bg-elev);
@@ -2695,6 +2736,11 @@ details.hot-cache[open] .hc-summary::before {
   grid-template-rows: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+  /* The WORKSPACE owns the inset, not the columns (2026-08-25). While the canvas padded
+     itself and the panel ran edge to edge, the two could never start or end on the same
+     line - which is the whole complaint. One padding, two columns, four aligned edges. */
+  gap: 12px;
+  padding: 12px 14px;
 }
 .graph-main {
   display: flex;
@@ -2709,9 +2755,19 @@ details.hot-cache[open] .hc-summary::before {
 .gpanel {
   display: flex;
   flex-direction: column;
+  /* Scrolls, never clips: the domain list inside takes the leftover height and scrolls on
+     its own, but on a short window the fixed sections above it can still outgrow the panel
+     and must stay reachable. */
   overflow-y: auto;
-  border-right: 1px solid var(--border);
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--bg-elev);
+}
+/* The panel scrolls as a whole only when its own sections overflow; the domain list
+   inside it (`.gp-sec.grow`) takes the leftover height and scrolls on its own. */
+.gpanel > .gp-sec:last-child {
+  border-bottom: 0;
 }
 .gp-sec {
   padding: 12px 14px 13px;
@@ -3506,7 +3562,8 @@ details.hot-cache[open] .hc-summary::before {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: 10px;
+  /* No padding: the workspace already inset this column, and a second inset here is
+     exactly what put the canvas 10px inside the panel's top and bottom edges. */
 }
 .graph-stage > .graph-canvas-wrap {
   flex: 1 1 auto;
@@ -4572,70 +4629,72 @@ kbd {
 /* ---- Library: the graph's panel, over the page table (rework 2026-08-24) ----
    Same two scope filters in the same place, so what you learn in one screen works in
    the other. The row above the table keeps only what is about the table. */
-.library {
+/* ── Library and Inbox: the workspace shape, one box each ─────────────────────────────
+   The toolbar moved OUT of the right column into the shared `.ws-bar` row (2026-08-25).
+   Inside the column it pushed the table down by its own height while the panel started at
+   the top, so the two columns could not line up however the padding was tuned. ── */
+.library,
+.inbox {
   display: grid;
   grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+  gap: 12px;
+  padding: 12px 14px;
 }
 .library > .gpanel,
-.lib-main {
+.inbox > .gpanel,
+.lib-main,
+.inbox-main {
   min-height: 0;
 }
-.lib-main {
+/* The big box: same card as the panel beside it, and it scrolls INSIDE itself so both
+   columns end on the workspace's bottom line. */
+.lib-main,
+.inbox-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 12px;
-  padding: 14px 16px 16px;
-}
-.lib-main > .dtable-card {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
   overflow: hidden;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
 }
-.lib-main > .dtable-card > table {
+.lib-main > table,
+.inbox-main .tscroll {
   display: block;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
+.inbox-main .tscroll > table {
+  width: 100%;
+}
 /* The header has to stay put while the body scrolls under it. */
-.lib-main > .dtable-card thead th {
+.lib-main thead th,
+.inbox-main thead th {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--bg-elev);
+}
+.lib-main > .empty,
+.inbox-main > .empty {
+  flex: 1;
+  display: grid;
+  place-content: center;
 }
 .typechips {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
 }
-.lib-bar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex-wrap: wrap;
-  margin-bottom: 13px;
-}
 .lib-search input {
   width: 200px;
 }
-/* Segments hold counts; rectangular (view control), matching the graph's shape language. */
-.lib-bar .seg {
-  border-radius: var(--radius-sm);
-  background: var(--bg-elev);
-}
-.lib-bar .seg button {
-  font-size: 12.5px;
-  padding: 6px 11px;
-}
-.dtable-card {
-  overflow: hidden;
+.ws-bar .hist-search input {
+  width: 210px;
 }
 .dtable {
   width: 100%;

@@ -156,6 +156,40 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
 
   return (
     <div className="library">
+      {/* The toolbar spans BOTH columns (2026-08-25). It used to live inside the right
+          column, which pushed the table down by its own height while the filter panel
+          started at the top - so the two never lined up. Above the workspace it belongs to
+          the whole screen, which is what it always described. */}
+      <div className="ws-bar">
+        <div className="hist-search lib-search">
+          <Icon name="search" />
+          <input
+            type="search"
+            placeholder="Filter by title, tag or domain…"
+            aria-label="Filter pages by title, tag or domain"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setLimit(PAGE_SIZE)
+            }}
+          />
+        </div>
+        <span className="scopeline">
+          Showing <strong>{shown.length} of {nodes?.length ?? 0}</strong> pages
+          {type !== null || domain !== null || subset !== 'all' || query.trim() !== ''
+            ? ` - ${[
+                subset !== 'all' ? SUBSETS.find((x) => x.key === subset)!.label.toLowerCase() : '',
+                type !== null ? bucketLabel(type).toLowerCase() : '',
+                domain !== null ? `in ${domain === 'none' ? 'no domain' : domain}` : '',
+                query.trim() !== '' ? `matching “${query.trim()}”` : '',
+              ]
+                .filter(Boolean)
+                .join(', ')}`
+            : ' - the whole vault'}
+          , {sortHint}.
+        </span>
+      </div>
+
       {/* The same standing panel as the graph, carrying the same two scope filters in
           the same order - page types, then domains - so a filter learned in one screen
           behaves the same in the other. What is left above the table belongs to the
@@ -283,38 +317,6 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       </aside>
 
       <div className="lib-main">
-        <div className="lib-bar">
-          <span className="scopeline">
-            Showing <strong>{shown.length} of {nodes?.length ?? 0}</strong> pages
-            {type !== null || domain !== null || subset !== 'all' || query.trim() !== ''
-              ? ` - ${[
-                  subset !== 'all' ? SUBSETS.find((x) => x.key === subset)!.label.toLowerCase() : '',
-                  type !== null ? bucketLabel(type).toLowerCase() : '',
-                  domain !== null ? `in ${domain === 'none' ? 'no domain' : domain}` : '',
-                  query.trim() !== '' ? `matching “${query.trim()}”` : '',
-                ]
-                  .filter(Boolean)
-                  .join(', ')}`
-              : ' - the whole vault'}
-            , {sortHint}.
-          </span>
-          <span className="spacer" />
-          <div className="hist-search lib-search">
-            <Icon name="search" />
-            <input
-              type="search"
-              placeholder="Filter by title, tag or domain…"
-              aria-label="Filter pages by title, tag or domain"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setLimit(PAGE_SIZE)
-              }}
-            />
-          </div>
-        </div>
-
-      <div className="card dtable-card">
         {shown.length === 0 ? (
           <div className="empty">Nothing matches the current filters.</div>
         ) : (
@@ -387,7 +389,6 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </button>
           )}
         </div>
-      </div>
       </div>
     </div>
   )
