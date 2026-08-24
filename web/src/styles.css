@@ -4443,6 +4443,19 @@ details.hot-cache[open] summary {
 .credential-kind input[type='radio'] { display: none; }
 .credential-kind-title { font-weight: 600; font-size: 13px; }
 
+.unversioned-list {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.unversioned-list code {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
 /* ══ Research run progress (components/RunProgress.tsx) ═══════════════════════════════
    Three layers: what it is doing now, the plan, the counted numbers. One bar, on the one
    phase with a real denominator. ══ */

@@ -20,6 +20,7 @@ const healthy = (over: Partial<MaintStatusInput> = {}): MaintStatusInput => ({
   lastLintRun: null,
   hotCacheUpdatedAt: '2026-07-23T12:00:00.000Z',
   index: { scriptsPresent: true, provisioned: true },
+  unversioned: { untracked: 0, modified: 0 },
   now: NOW,
   ...over,
 })
@@ -32,9 +33,9 @@ describe('deriveMaintenanceStatus', () => {
     const s = deriveMaintenanceStatus(healthy())
     expect(s.due).toBe(0)
     expect(s.recommended).toBe(0)
-    expect(s.healthy).toBe(6)
+    expect(s.healthy).toBe(7)
     expect(s.items.map((i) => i.id).sort()).toEqual(
-      ['backfill', 'domains', 'hot-cache', 'index', 'lint', 'tags'].sort(),
+      ['backfill', 'domains', 'hot-cache', 'index', 'lint', 'tags', 'unversioned'].sort(),
     )
   })
 
@@ -67,6 +68,27 @@ describe('deriveMaintenanceStatus', () => {
     expect(byId(s, 'tags')?.title).toContain('6 tag repairs')
   })
 
+  it('pages outside git are DUE and name both kinds', () => {
+    // The failure this encodes: pages an agent wrote with Bash never entered a commit, and
+    // nothing in the dashboard ever said so - the sweep that would catch them is skipped
+    // whenever more than one run is writing, which with batch drops is the normal case.
+    const s = deriveMaintenanceStatus(healthy({ unversioned: { untracked: 24, modified: 1 } }))
+    const item = byId(s, 'unversioned')
+    expect(item?.severity).toBe('due')
+    expect(item?.title).toContain('25 pages')
+    expect(item?.why).toContain('24 pages never committed')
+    expect(item?.why).toContain('1 page changed')
+  })
+
+  it('pages outside git: none is an explicit healthy state, not a missing item', () => {
+    expect(byId(deriveMaintenanceStatus(healthy()), 'unversioned')?.severity).toBe('healthy')
+  })
+
+  it('pages outside git: the item is omitted while the count is still loading', () => {
+    const s = deriveMaintenanceStatus(healthy({ unversioned: null }))
+    expect(byId(s, 'unversioned')).toBeUndefined()
+  })
+
   it('lint: a run that wrote no report is DUE, not a stale-report recommendation', () => {
     // The failure this encodes: the run record says a lint finished hours ago, the newest
     // report in the vault is a month old. Reporting "last report is 31 days old" contradicts
@@ -95,10 +117,24 @@ describe('deriveMaintenanceStatus', () => {
     expect(byId(s, 'lint')?.why).toContain('in the last 24 hours')
   })
 
-  it('lint: a recent run that FAILED is due even when an old report exists', () => {
+  it('lint: a covering report is healthy even when the run that should have written it failed', () => {
+    // The artifact is what the area is about. Once a report covering the run exists - from a
+    // later render, a retry, a manual run - safe fixes have something current to be bounded
+    // by, and saying "wrote no report" next to a report dated today is the original bug
+    // pointing the other way. The failed run stays visible in the run history on its own.
     const s = deriveMaintenanceStatus(
       healthy({
         lintReport: { date: '2026-07-23' },
+        lastLintRun: { finishedAt: '2026-07-23T20:43:41.000Z', ok: false },
+      }),
+    )
+    expect(byId(s, 'lint')?.severity).toBe('healthy')
+  })
+
+  it('lint: a failed run with only a STALE report is still due', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({
+        lintReport: { date: '2026-06-23' },
         lastLintRun: { finishedAt: '2026-07-23T20:43:41.000Z', ok: false },
       }),
     )

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { dirtyPaths, newWikiPaths, commitVault } from '../src/pipeline/git.js'
+import { dirtyPaths, newWikiPaths, commitVault, unversionedWikiPages } from '../src/pipeline/git.js'
 
 // Runs against a REAL git repo: the bug this guards (finding F4) was about how git reports
 // paths — quoting, renames — which a mocked git could not reproduce.
@@ -57,6 +57,66 @@ describe('dirtyPaths', () => {
 
   it('is empty on a clean repo', async () => {
     expect((await dirtyPaths(repo)).size).toBe(0)
+  })
+})
+
+describe('unversionedWikiPages', () => {
+  // This is the reporting half of the F4 trade-off. The sweep in `newWikiPaths` is skipped
+  // whenever a run cannot prove it was the sole writer, on the stated grounds that "losing a
+  // page from a commit is visible and fixable" - nothing ever made it visible, so pages sat
+  // outside git for a month. These tests pin what "visible" means.
+
+  it('reports a page that was never committed', async () => {
+    write('wiki/concepts/Bash Written.md')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual(['wiki/concepts/Bash Written.md'])
+    expect(u.modified).toEqual([])
+  })
+
+  it('reports a committed page whose working copy has drifted', async () => {
+    write('wiki/concepts/Existing.md', 'changed')
+    const u = await unversionedWikiPages(repo)
+    expect(u.modified).toEqual(['wiki/concepts/Existing.md'])
+    expect(u.untracked).toEqual([])
+  })
+
+  it('is silent on a clean vault - the healthy state has to be reachable', async () => {
+    expect(await unversionedWikiPages(repo)).toEqual({ untracked: [], modified: [] })
+  })
+
+  it('ignores everything that is not a wiki page', async () => {
+    // .raw payloads, index scratch and plugin files are dirty constantly by design; counting
+    // them would bury the one number that means content is at risk.
+    write('.raw/01ABC/manifest.json')
+    write('.vault-meta/lint-scan.json')
+    write('wiki/concepts/Note.txt')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual([])
+    expect(u.modified).toEqual([])
+  })
+
+  it('handles page names with spaces and punctuation without unquoting artifacts', async () => {
+    // Vault titles routinely carry spaces, commas and parentheses; porcelain quotes those
+    // unless -z is used, and a quoted path would silently never match the wiki/ prefix.
+    write('wiki/concepts/Log P and Log D (HPLC, Shake-Flask).md')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual(['wiki/concepts/Log P and Log D (HPLC, Shake-Flask).md'])
+  })
+
+  it('counts a page deleted-but-not-committed as neither - it is not content at risk', async () => {
+    fs.rmSync(path.join(repo, 'wiki/concepts/Existing.md'))
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual([])
+    expect(u.modified).toEqual([])
+  })
+
+  it('degrades to empty outside a git repo rather than throwing', async () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-'))
+    try {
+      expect(await unversionedWikiPages(bare)).toEqual({ untracked: [], modified: [] })
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true })
+    }
   })
 })
 

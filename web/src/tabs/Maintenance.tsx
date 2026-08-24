@@ -239,6 +239,9 @@ export function Maintenance(): React.ReactElement {
         {/* Retrieval index (SPEC §12.6 stage 1) */}
         {showCard('card-index') && <RetrievalIndexCard />}
 
+        {/* Pages outside the vault's git history (finding F4's blind spot). */}
+        {showCard('card-unversioned') && <UnversionedCard />}
+
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
         {showCard('card-domains') && (
         <div className="card card-pad" id="card-domains">
@@ -812,6 +815,71 @@ function TagHygieneCard({
  * surfaces the state and a manual rebuild. A pre-v1.7 vault ships no scripts → the card explains
  * that instead of offering a build that would 409.
  */
+/**
+ * Pages that exist on disk but not in the vault's git history.
+ *
+ * Read-only by design, for now: committing them needs a decision about WHAT they are, and
+ * the service cannot make it. An agent run creates pages with Bash often enough that the
+ * commit pathspec misses them, and the sweep that would catch them is skipped whenever more
+ * than one run writes at once - so this card is the "visible" half that the trade-off in
+ * `newWikiPaths` already assumed existed. The commit action is deliberately a separate step.
+ */
+function UnversionedCard(): React.ReactElement {
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const u = stats.data?.unversioned
+  const total = (u?.untracked ?? 0) + (u?.modified ?? 0)
+
+  return (
+    <div className="card card-pad" id="card-unversioned">
+      <div className="section-head">
+        <h3 className="section-title">
+          Pages outside git
+          <Tip
+            text={
+              <>
+                Every page the service writes is meant to land in one git commit - that is what makes a
+                run revertable. A page an agent creates with <code>Bash</code> is invisible to the commit
+                pathspec, and the fallback sweep only runs when a single run is writing, so with several
+                jobs in flight pages can stay outside history. They still render and link normally, which
+                is exactly why this needs saying out loud.
+              </>
+            }
+          />
+        </h3>
+      </div>
+      {u === undefined ? (
+        <div className="tool-meta">Checking the vault against git…</div>
+      ) : total === 0 ? (
+        <div className="tool-meta">
+          <Icon name="check" /> Every page under <code>wiki/</code> is committed.
+        </div>
+      ) : (
+        <>
+          <div className="tool-meta">
+            {u.untracked > 0 && <>{u.untracked} never committed</>}
+            {u.untracked > 0 && u.modified > 0 && <> · </>}
+            {u.modified > 0 && <>{u.modified} changed since its last commit</>}
+          </div>
+          <ul className="unversioned-list">
+            {u.examples.map((p) => (
+              <li key={p}>
+                <code>{p}</code>
+              </li>
+            ))}
+            {total > u.examples.length && <li className="dim">and {total - u.examples.length} more</li>}
+          </ul>
+          <p className="tab-hint">
+            Nothing is lost right now - the pages are on disk and the vault works. They have no history
+            though, so they cannot be reverted and a restore from git would drop them. Review them, then
+            commit them in the vault: <code>git add wiki &amp;&amp; git commit</code>. A one-click action
+            for this is not built yet, on purpose: the service cannot tell which run each page belongs to.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function RetrievalIndexCard(): React.ReactElement {
   const qc = useQueryClient()
   const status = useQuery({ queryKey: ['retrieve-index-status'], queryFn: api.retrieveIndexStatus })

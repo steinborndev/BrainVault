@@ -85,6 +85,63 @@ export async function dirtyPaths(vaultRoot: string): Promise<Set<string>> {
   return paths
 }
 
+export interface UnversionedPages {
+  /** Wiki pages git has never seen: on disk, absent from history entirely. */
+  readonly untracked: string[]
+  /** Wiki pages whose working copy differs from the last commit. */
+  readonly modified: string[]
+}
+
+/**
+ * Wiki pages that exist on disk but not in git as committed content.
+ *
+ * This is the missing half of finding F4. The commit pathspec is built from a run's
+ * `Write`/`Edit` tool calls, so a page the agent creates with **Bash** is invisible to it -
+ * and the sweep that would catch those (`newWikiPaths`) is deliberately skipped whenever the
+ * run cannot prove it was the sole vault writer, because misattributing a page to the wrong
+ * job is worse than missing it. That trade-off is sound, and it rests on one assumption:
+ *
+ *     "Losing a page from a commit is visible and fixable."
+ *
+ * Nothing made it visible. With concurrency above 1 - and a batch drop routinely puts eight
+ * jobs in flight at once - "not the sole writer" is the normal case, not the exception, so
+ * pages accumulate outside git silently. They still render, still resolve links, still get
+ * indexed; they simply have no history, cannot be reverted, and disappear without trace if
+ * the vault is ever restored from git. This function is what turns that into a fact the
+ * dashboard can state.
+ *
+ * Deliberately NOT included: deletions. A page deleted but not yet committed is a divergence
+ * too, but it is not content at risk, and mixing the two would blur what the number means.
+ *
+ * Costs one `git status` (~8ms on a 750-page vault). Returns empty when git is unavailable,
+ * for the same reason `dirtyPaths` does: this is a report, never a gate.
+ */
+export async function unversionedWikiPages(vaultRoot: string): Promise<UnversionedPages> {
+  let raw: string
+  try {
+    raw = await git(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+  } catch {
+    return { untracked: [], modified: [] }
+  }
+  const untracked: string[] = []
+  const modified: string[] = []
+  const fields = raw.split('\0')
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i]
+    if (entry === undefined || entry.length < 4) continue
+    const status = entry.slice(0, 2)
+    const file = entry.slice(3)
+    // A rename/copy entry carries its origin in the next field; consume it so it is not
+    // misread as a status entry of its own.
+    if (status.startsWith('R') || status.startsWith('C')) i++
+    if (!file.startsWith('wiki/') || !file.endsWith('.md')) continue
+    if (status === '??') untracked.push(file)
+    else if (status.includes('D')) continue
+    else modified.push(file)
+  }
+  return { untracked: untracked.sort(), modified: modified.sort() }
+}
+
 /**
  * Wiki paths that became dirty during a run — `after` minus `before`, scoped to `wiki/`.
  *

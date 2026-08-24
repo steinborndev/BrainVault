@@ -129,6 +129,8 @@ export interface Stats {
   hotCacheUpdatedAt: string | null
   /** Newest lint report page in the vault - the Maintenance tab's persistent link. */
   lintReport: { path: string; date: string | null } | null
+  /** Wiki pages on disk with no committed copy - finding F4's blind spot, made visible. */
+  unversioned?: { untracked: number; modified: number; examples: string[] }
   kpis7d: { ingests: number; failures: number; deferred: number; duplicates: number }
   /** 14 days of per-day done/failed counts (sparse; UTC dates) - KPI sparklines + deltas. */
   kpisDaily: Array<{ date: string; done: number; failed: number }>

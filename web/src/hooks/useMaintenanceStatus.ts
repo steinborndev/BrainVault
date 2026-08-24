@@ -72,6 +72,7 @@ export function useMaintenanceStatus(): MaintenanceStatusResult {
       lastLintRun: lintRun !== undefined ? { finishedAt: lintRun.finishedAt, ok: lintRun.ok } : null,
       hotCacheUpdatedAt: stats.data.hotCacheUpdatedAt,
       index: index.data ?? null,
+      unversioned: stats.data.unversioned ?? null,
       now: new Date(),
     })
     const lastRuns = new Map((state.data?.areas ?? []).map((a) => [a.kind, a]))

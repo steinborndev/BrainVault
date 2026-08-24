@@ -15,7 +15,7 @@
 export type MaintSeverity = 'due' | 'recommended' | 'healthy'
 
 /** Stable area ids; `anchor` is the DOM id of the expert card the item jumps to. */
-export type MaintAreaId = 'backfill' | 'domains' | 'tags' | 'lint' | 'hot-cache' | 'index'
+export type MaintAreaId = 'backfill' | 'domains' | 'tags' | 'lint' | 'hot-cache' | 'index' | 'unversioned'
 
 export interface MaintStatusItem {
   readonly id: MaintAreaId
@@ -49,6 +49,11 @@ export interface MaintStatusInput {
   readonly hotCacheUpdatedAt: string | null
   /** Retrieval-index card facts; null while still loading (item omitted then). */
   readonly index: { scriptsPresent: boolean; provisioned: boolean } | null
+  /**
+   * Wiki pages on disk with no committed copy. Null while still loading (item omitted).
+   * See `unversionedWikiPages` server-side for why these accumulate silently.
+   */
+  readonly unversioned: { untracked: number; modified: number } | null
   readonly now: Date
 }
 
@@ -105,7 +110,12 @@ function lintItem(input: MaintStatusInput): MaintStatusItem {
     // "in the last 24 hours" rather than "today": a run at 22:40 read the next morning is
     // not today, and every other age here is day-granular anyway.
     const ago = runAge === 0 ? 'in the last 24 hours' : `${plural(runAge, 'day')} ago`
-    if (input.lastLintRun.ok && reportCoversRun(input)) {
+    // The ARTIFACT decides, not the run's exit status. A covering report means safe fixes
+    // have something current to be bounded by, however it got there - a later render, a
+    // manual run, a retry. Keeping the area due because one run failed while a fresh report
+    // sits in the vault would be the same lie in the other direction, and the failed run is
+    // already visible on its own in the run history.
+    if (reportCoversRun(input)) {
       return {
         id: 'lint',
         severity: 'healthy',
@@ -269,6 +279,40 @@ export function deriveMaintenanceStatus(input: MaintStatusInput): MaintStatus {
         why: `Last refresh ${plural(age, 'day')} ago.`,
         cost: 'nothing to do',
         anchor: 'card-hot-cache',
+      })
+    }
+  }
+
+  if (input.unversioned !== null) {
+    const { untracked, modified } = input.unversioned
+    const total = untracked + modified
+    if (total > 0) {
+      // `due`, not `recommended`: this is not an ageing artifact, it is content outside the
+      // guarantee the whole git-backed design exists to provide. It also cannot fix itself -
+      // every further run leaves these pages exactly where they are.
+      const parts = [
+        untracked > 0 ? `${plural(untracked, 'page')} never committed` : '',
+        modified > 0 ? `${plural(modified, 'page')} changed since its last commit` : '',
+      ].filter(Boolean)
+      items.push({
+        id: 'unversioned',
+        severity: 'due',
+        title: `${plural(total, 'page')} outside the vault's history`,
+        why:
+          `${parts.join(', ')}. They render and resolve links normally, so nothing looks wrong - ` +
+          'but they have no history, cannot be reverted, and would not survive restoring the ' +
+          'vault from git.',
+        cost: 'one commit, after a look at what they are',
+        anchor: 'card-unversioned',
+      })
+    } else {
+      items.push({
+        id: 'unversioned',
+        severity: 'healthy',
+        title: 'Every page is in git',
+        why: 'Nothing under wiki/ is missing from the vault history.',
+        cost: 'nothing to do',
+        anchor: 'card-unversioned',
       })
     }
   }

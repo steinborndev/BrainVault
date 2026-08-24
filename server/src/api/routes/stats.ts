@@ -23,6 +23,7 @@ import {
   type Commit,
   type GrowthPoint,
 } from '../../pipeline/vault-stats.js'
+import { unversionedWikiPages } from '../../pipeline/git.js'
 import { budgetStatus, budgetUnit, startOfToday } from '../../pipeline/budget.js'
 
 const CACHE_TTL_MS = 5_000
@@ -36,6 +37,15 @@ interface VaultDerived {
   readonly hotCache: string | null
   readonly hotCacheUpdatedAt: string | null
   readonly lintReport: { path: string; date: string | null } | null
+  readonly unversioned: UnversionedSummary
+}
+
+/** Wiki pages on disk that git has no committed copy of (finding F4's blind spot). */
+interface UnversionedSummary {
+  readonly untracked: number
+  readonly modified: number
+  /** A few page paths, so the dashboard can name what it is talking about. */
+  readonly examples: string[]
 }
 
 export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void {
@@ -53,9 +63,11 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
     if (cache && now - cache.at < CACHE_TTL_MS) return cache.data
     const pages = pageCounts(config.vaultRoot)
     // git can fail (no commits, not a repo) — never let it sink the whole Overview.
-    const [commits, growthPoints] = await Promise.all([
+    const [commits, growthPoints, unversionedPages] = await Promise.all([
       recentCommits(config.vaultRoot, 8).catch(() => [] as Commit[]),
       growth(config.vaultRoot, GROWTH_DAYS, pages.total).catch(() => [] as GrowthPoint[]),
+      // One `git status` (~8ms on a 750-page vault), and it rides this cache like the rest.
+      unversionedWikiPages(config.vaultRoot).catch(() => ({ untracked: [], modified: [] })),
     ])
     const data: VaultDerived = {
       pages,
@@ -65,6 +77,11 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       hotCache: readHotCache(config.vaultRoot),
       hotCacheUpdatedAt: hotCacheUpdatedAt(config.vaultRoot),
       lintReport: latestLintReport(config.vaultRoot),
+      unversioned: {
+        untracked: unversionedPages.untracked.length,
+        modified: unversionedPages.modified.length,
+        examples: [...unversionedPages.untracked, ...unversionedPages.modified].slice(0, 5),
+      },
     }
     cache = { at: now, data }
     return data
@@ -104,6 +121,8 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
       hotCacheUpdatedAt: derived.hotCacheUpdatedAt,
       /** Newest lint report page in the vault — the Maintenance tab's persistent link. */
       lintReport: derived.lintReport,
+      /** Wiki pages on disk with no committed copy - F4's blind spot, made visible. */
+      unversioned: derived.unversioned,
       kpis7d: {
         ingests: finishedSince['done'] ?? 0,
         failures: finishedSince['failed'] ?? 0,
