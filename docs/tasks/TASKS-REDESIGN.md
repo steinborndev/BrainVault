@@ -358,3 +358,76 @@ points raised against the shipped redesign.
 
 Verified: 571 server + 105 web tests green (4 + 17 new), clean typecheck and build, live
 service restarted and all six screens checked against the running instance.
+
+
+## Phase 7: two vault-integrity findings (2026-08-25)
+
+Both surfaced by the lint check from Phase 6 firing on a real run. Neither was a UI problem.
+
+### Finding 1 - pages accumulate outside the vault's git history
+
+**Evidence.** 752 wiki pages on disk, 727 in git. 24 pages plus one modified page had sat
+outside history for a month. All 24 shared one mtime to the millisecond, falling between two
+maintenance commits - a bulk write, not page-by-page agent writes. The one modified page's
+diff carried changes from BOTH surrounding runs, and neither commit picked it up.
+
+**Root cause.** Finding F4's documented half. The commit pathspec comes from a run's
+Write/Edit tool calls, so pages an agent creates with Bash are invisible to it. The sweep
+that catches those (`newWikiPaths`) is deliberately skipped whenever a run cannot prove it
+was the sole writer, because misattribution is worse than omission. That trade-off is sound
+and rests on one line in the code:
+
+>   "Losing a page from a commit is visible and fixable"
+
+Nothing made it visible. And "not the sole writer" is the NORMAL case, not the exception:
+concurrency is 3, and the batch that produced these pages started EIGHT ingests within 500ms
+of each other.
+
+- [x] `unversionedWikiPages()` compares disk against git (one `git status`, ~8ms on 750
+      pages), exposed on `/stats` and derived into a `due` status item + a Health card.
+      Read-only: committing them needs a decision about what they are, which the service
+      cannot make - the action is deliberately a separate step (A2, not built).
+- [ ] OPEN: reconcile-on-idle. When the queue drains to zero writers there is no attribution
+      ambiguity left, so anything still outside git could be swept into one commit then.
+      That closes the gap without touching the sweep's invariant.
+- [ ] OPEN: the 27 pages currently outside history still need committing (a vault-history
+      decision, left to the user).
+
+### Finding 2 - the lint run did the work and produced no report
+
+**Evidence.** The run committed `.vault-meta/lint_scan.py` (254 lines) and
+`.vault-meta/lint_scan_out.json` (472 KB) - a complete, correct scan of 755 pages - and no
+report. The last lint that worked (a month earlier, ~500 pages) wrote a 104-line report and
+nothing else.
+
+**Root cause.** Scale changed the strategy. Past ~750 pages the agent reaches for a scanner
+instead of reading page by page, which is the better engineering call - and then it is
+holding 472 KB it cannot read back into context to render the report from. The prompt did
+not forbid the scanner: "use only the read-based checks (Read/Grep/Glob)" was attached to
+the semantic-tiling sentence and read as scoped to it.
+
+- [x] The prompt now steers the scripting path instead of leaving it ambiguous: script the
+      scan if you like, but the SCRIPT emits the finished report. That removes the read-back
+      rather than asking the agent to be careful about it. Intermediate output has a pinned
+      home at `.vault-meta/lint-scan.json`.
+- [x] `startLintReport()` renders from a scan a previous run left behind - the cheap half of
+      a lint without repeating the expensive half. Refuses when nothing is newer than the
+      current report, same shape as `startLintFix` refusing without one. Used to recover this
+      run's findings without re-scanning.
+- [x] Agent scratch stays out of vault history: `.vault-meta/*.py` and the lint-scan paths
+      join the retrieval artifacts in `.git/info/exclude`, applied at STARTUP rather than at
+      first index build (an agent can leave scratch long before one). The mechanism moved to
+      `pipeline/vault-excludes.ts`. Note the limit - excludes only affect untracked files.
+- [ ] OPEN: `lint_scan.py` and `lint_scan_out.json` are already committed and stay until
+      someone removes them deliberately (a vault-history decision).
+- [ ] OPEN: maintenance run logs stream but are never persisted, and the in-memory registry
+      dies with the service - so this diagnosis had to be reconstructed from vault reflog and
+      file mtimes. A separate table, not a `job_logs` piggyback: that table's `job_id` has a
+      `REFERENCES jobs(id)` the FK-off setting currently masks.
+
+### Corrected while verifying
+
+The lint verdict keyed on the run's exit status AND its artifact, so after the report was
+recovered the card read "Lint ran, but wrote no report - the newest one there is 0 days old".
+The artifact alone decides now: a covering report is healthy however it got there, and the
+failed run stays visible on its own in the run history.
