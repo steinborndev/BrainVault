@@ -452,10 +452,19 @@ export interface MaintenanceRun {
   /** SSE channel carrying the live log, e.g. `maintenance:lint`. */
   channel: string
   status: MaintenanceRunStatus
+  /** What the run is about, when the kind alone does not say it (a research topic). */
+  label?: string
+  /** Research runs: the lens key the run was started under. */
+  profileKey?: string
   startedAt: string
   finishedAt?: string
   result?: MaintenanceResult
   error?: string
+}
+
+/** `GET /maintenance/runs` - the tracked run history, newest first. */
+export interface MaintenanceRunsResponse {
+  runs: MaintenanceRun[]
 }
 
 // ---- Settings (server/src/db/settings.ts, SPEC.md §6.4/§6.5) ----

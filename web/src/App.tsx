@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from './api/client.ts'
 import { useEvents } from './hooks/useEvents.ts'
 import { useMaintenanceStatus } from './hooks/useMaintenanceStatus.ts'
+import { useActiveRuns } from './hooks/useActiveRuns.ts'
 import { StatusPopover } from './components/StatusPopover.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
@@ -109,6 +110,12 @@ export function App(): React.ReactElement {
   const running = (stats.data?.queue.active ?? 0) > 0
   const vaultName = stats.data?.vaultName ?? 'vault'
 
+  // Agent runs in flight, server-side truth. Ingests are only half the work the service
+  // does; a research run was previously invisible from every screen but the one that
+  // started it, and vanished from that one on reload.
+  const runs = useActiveRuns()
+  const researchRunning = runs.countOf('research')
+
   // Health badge: due/recommended from the deterministic status model (shared queries).
   const maint = useMaintenanceStatus()
   const healthDue = maint.data?.status.due ?? 0
@@ -161,6 +168,8 @@ export function App(): React.ReactElement {
       ? openPage.replace(/^wiki\//, '').replace(/\.md$/, '')
       : screen === 'inbox' && outstanding > 0
       ? `${outstanding} outstanding`
+      : screen === 'research' && researchRunning > 0
+      ? `${researchRunning} run${researchRunning > 1 ? 's' : ''} active`
       : screen === 'health' && healthDue + healthRec > 0
         ? [healthDue > 0 ? `${healthDue} due` : '', healthRec > 0 ? `${healthRec} soon` : ''].filter(Boolean).join(' · ')
         : screen === 'library' && stats.data !== undefined
@@ -190,6 +199,15 @@ export function App(): React.ReactElement {
                   <span className="tab-badge" aria-label={`${outstanding} jobs outstanding`}>
                     {running && <span className="pulse" aria-hidden />}
                     {outstanding}
+                  </span>
+                )}
+                {item.id === 'research' && researchRunning > 0 && (
+                  <span
+                    className="tab-badge research"
+                    aria-label={`${researchRunning} research run${researchRunning > 1 ? 's' : ''} active`}
+                  >
+                    <span className="pulse" aria-hidden />
+                    {researchRunning}
                   </span>
                 )}
                 {item.id === 'health' && healthDue + healthRec > 0 && (

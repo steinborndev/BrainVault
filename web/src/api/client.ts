@@ -15,6 +15,7 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  MaintenanceRunsResponse,
   MaintenanceStateResponse,
   RevertResponse,
   RetrieveIndexStatus,
@@ -231,6 +232,15 @@ export const api = {
 
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
+
+  /**
+   * Every tracked maintenance run, newest first. This is what makes an agent run visible
+   * from OUTSIDE the screen that started it: the run state used to live only in the
+   * starting component's hook, so a research run was invisible on Home and gone after a
+   * reload. Home's in-flight list and the sidebar badge read this.
+   */
+  maintenanceRuns: (): Promise<MaintenanceRunsResponse> =>
+    fetch(`${BASE}/maintenance/runs`).then(json<MaintenanceRunsResponse>),
 
   /** Per-kind last-settle state (SPEC §12.7 Stufe b) - feeds the status head's "last run" facts. */
   maintenanceState: (): Promise<MaintenanceStateResponse> =>

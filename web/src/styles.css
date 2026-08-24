@@ -391,11 +391,17 @@ button {
   border-radius: 999px;
   padding: 3px 7px;
 }
+/* Research runs get the lens colour, so the badge says WHICH kind of work is running
+   rather than just that something is. */
+.tab-badge.research {
+  background: var(--research);
+  color: #16102b;
+}
 .tab-badge .pulse {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--accent-ink);
+  background: currentColor;
   animation: badge-pulse 1.6s ease infinite;
 }
 @keyframes badge-pulse {
