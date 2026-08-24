@@ -3084,20 +3084,10 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 12.5px;
 }
 
-/* ── The one context line above the canvas: what is in scope, said in words. A shrinking
-   count alone cannot tell a domain filter from a type filter from a search. ── */
-.gtopline {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  height: 44px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border);
-}
-.gtopline .spacer {
-  flex: 1;
-}
+/* ── What is in scope, said in words. A shrinking count alone cannot tell a domain filter
+   from a type filter from a search. Lives in the canvas bar since the density pass; the
+   `.gtopline` wrapper it used to sit in is gone, and so are its rules - a stale selector
+   here is not harmless, it took the shortcut popover off-screen with it. ── */
 .scopeline {
   font-size: 12.5px;
   color: var(--text-dim);
@@ -3118,8 +3108,7 @@ details.hot-cache[open] .hc-summary::before {
   z-index: 60;
   background: var(--bg);
 }
-.vault-graph.fullscreen .gpanel,
-.vault-graph.fullscreen .gtopline {
+.vault-graph.fullscreen .gpanel {
   display: none;
 }
 .vault-graph.fullscreen .graph-workspace {
@@ -4345,27 +4334,58 @@ kbd {
   white-space: nowrap;
 }
 
-/* The shortcut legend inside the context line's ⓘ tip: keys right-aligned, meanings left. */
+/* ── Shortcuts popover (components/Shortcuts.tsx) ──────────────────────────────────────
+   It hangs off the canvas bar, which sits at the TOP of a box with `overflow: hidden`, so
+   it must open DOWNWARD and anchor to the right edge. That used to be a `.gtopline`
+   override on a generic tooltip; the wrapper was deleted, the rule silently stopped
+   matching, and the panel rendered up into the clipped region where nothing is visible.
+   It is structural, so it now belongs to the component's own class. ── */
+.shortcut-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.shortcut-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 372px;
+  display: block;
+  padding: 11px 13px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  text-align: left;
+  white-space: normal;
+}
+.shortcut-pop .sp-head {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
 .shortcuts {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 6px 10px;
+  gap: 6px 11px;
   align-items: baseline;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+/* Each row is one element spanning both tracks - `display: contents` puts its two children
+   back into the parent grid, so keys and meanings still line up in columns. */
+.shortcuts .sc-row {
+  display: contents;
 }
 .shortcuts .k {
   justify-self: end;
+  display: flex;
+  gap: 3px;
   white-space: nowrap;
-}
-
-/* The context-line tip sits at the top of the canvas column - drop its bubble DOWN and
-   anchor it to the right edge, or it would open upward into the header / off-screen. */
-.gtopline .tip-body {
-  top: calc(100% + 8px);
-  bottom: auto;
-  left: auto;
-  right: 0;
-  transform: none;
-  width: 300px;
 }
 /* The "double-click to open" line in the canvas hover tooltip. */
 .graph-tooltip .tt-hint {

@@ -18,7 +18,7 @@ import type { GraphNode, VaultGraph, ValidationFinding, RepairTask } from '../ap
 import { GraphCanvas, domainColor, TYPE_VARS, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
-import { Tip } from '../components/Tip.tsx'
+import { Shortcuts } from '../components/Shortcuts.tsx'
 import { linkifyText } from '../lib/linkify.tsx'
 import { navigate, pageRoute, pageFromPath, originPath } from '../lib/router.ts'
 import { detectClusters } from '../lib/communities.ts'
@@ -100,6 +100,20 @@ const TYPE_LABELS: Record<string, string> = {
   comparisons: 'Comparisons',
   folds: 'Folds',
 }
+
+/** The graph's key bindings, in the order someone learning the view meets them. */
+const GRAPH_SHORTCUTS = [
+  { keys: ['2x click'], what: 'open a page from the graph' },
+  { keys: ['click'], what: 'with Spotlight on: a cluster area drills in, a node opens it' },
+  { keys: ['Enter'], what: 'open the selected page' },
+  { keys: ['Esc'], what: 'leave fullscreen, clear search, close panel, leave cluster or focus' },
+  { keys: ['Esc', 'Esc'], what: 'reset all filters - show the whole vault' },
+  { keys: ['/'], what: 'search the graph' },
+  { keys: ['f'], what: 'fit the view' },
+  { keys: ['Ctrl', 'wheel'], what: 'zoom in and out' },
+  { keys: ['+', '-'], what: 'zoom' },
+  { keys: ['drag'], what: 'pan the canvas' },
+]
 
 export function Vault({ path }: { path: string }): React.ReactElement {
   const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph, staleTime: 30_000 })
@@ -1001,22 +1015,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               </span>
               <span className="spacer" />
               {searchOverlay}
-              <Tip
-                text={
-                  <span className="shortcuts">
-                    <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
-                    <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
-                    <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
-                    <span className="k"><kbd>Esc</kbd></span> <span>leave fullscreen · clear search · close panel · leave cluster · leave focus</span>
-                    <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters - show the whole vault</span>
-                    <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
-                    <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
-                    <span className="k"><kbd>Ctrl</kbd> <kbd>wheel</kbd></span> <span>zoom in and out</span>
-                    <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>
-                    <span className="k"><kbd>drag</kbd></span> <span>pan the canvas</span>
-                  </span>
-                }
-              />
+              <Shortcuts rows={GRAPH_SHORTCUTS} />
               <button
                 className="btn ghost"
                 onClick={() => setFullscreen((v) => !v)}

@@ -31,6 +31,7 @@ export type IconName =
   | 'commit'
   | 'chevron'
   | 'clock'
+  | 'keyboard'
   | 'bolt'
   | 'expand'
   | 'shrink'
@@ -202,6 +203,12 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     </>
   ),
   chevron: <path d="M7 10l5 5 5-5" />,
+  keyboard: (
+    <>
+      <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+      <path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="12" cy="12" r="8.5" />
