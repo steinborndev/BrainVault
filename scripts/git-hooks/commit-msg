@@ -15,6 +15,11 @@
 # Scope: the check only knows about the vault at VAULT_ROOT (env, else ~/vault). No vault
 # present (fresh clone, CI, setup mode) -> the hook passes silently, blocking nothing.
 #
+# Not scanned: comment lines, and git attribution trailers (the `<Word>-by:` form). A
+# trailer names who wrote the commit, which is public information about the commit itself,
+# not a claim about what the vault holds - and a co-author's email domain kept matching an
+# entity page that happens to share the name.
+#
 # Escape hatch: set ALLOW_VAULT_NAMES=1 for the rare legitimate case (then double-check it
 # really is not a leak). Install with scripts/install-git-hooks.sh.
 set -euo pipefail
@@ -31,9 +36,19 @@ import os, re, sys
 
 msg_file, vault_root = sys.argv[1], sys.argv[2]
 
-# The commit message minus comment lines (git strips these anyway) — matching against them
-# would false-positive on the hook's own explanatory text if it were ever pasted in.
-msg = "".join(l for l in open(msg_file, encoding="utf-8", errors="replace") if not l.startswith("#"))
+# Git attribution trailers: `Co-authored-by:`, `Signed-off-by:`, `Reviewed-by:` and friends.
+# Deliberately narrow — only the `<Word>-by:` form, so ordinary prose can never claim the
+# exemption by accident. The point is not that trailers are trusted: a trailer names a PERSON
+# who worked on the commit, which is public information about the commit, whereas the leak
+# this hook exists to stop is a message describing the vault's private SUBJECT MATTER.
+TRAILER_RE = re.compile(r"^[A-Za-z][A-Za-z-]*-by:", re.IGNORECASE)
+
+def scanned(line: str) -> bool:
+    # Comment lines go too (git strips them anyway) — matching against them would
+    # false-positive on the hook's own explanatory text if it were ever pasted in.
+    return not line.startswith("#") and TRAILER_RE.match(line) is None
+
+msg = "".join(l for l in open(msg_file, encoding="utf-8", errors="replace") if scanned(l))
 msg_low = msg.lower()
 
 # Short/common tokens that are entity names in the vault but also ordinary words: matching
