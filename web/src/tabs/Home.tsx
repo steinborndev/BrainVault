@@ -1,5 +1,5 @@
 /**
- * Home (rework 2026-08-24). Reading order follows intent, not data shape:
+ * Home (rework 2026-08-25). Reading order follows intent, not data shape:
  *
  *   1 ACT     the intake composer - the reason to open the app at all. It stands down
  *             to one row while the queue is busy (Dropzone `compact`).
@@ -16,15 +16,27 @@
  * carries (health). The status strip went earlier - the topbar's live pill owns service
  * status, the sidebar badges own attention. Everything refreshes live via the SSE-driven
  * query invalidation.
+ *
+ * HEIGHT (2026-08-25). The screen is now bounded, not merely short: sections 1-3 are a
+ * fixed head and section 4 is one filling row whose two columns scroll INSIDE themselves.
+ * That is what makes "fits without scrolling" true at every window height instead of at
+ * the one it happened to be tuned for. The trims that bought the budget: the intake band
+ * lost its stacked hero, the tiles went from three lines to one, in flight collapses to a
+ * single line while idle, and the hot cache - a maintenance artifact that had a whole
+ * collapsible panel here - is now four words in the state line, with the block itself on
+ * Health next to the refresh button that owns it.
+ *
+ * IN FLIGHT (2026-08-25) covers every agent writer, not just the ingest queue: a research,
+ * lint or hot-cache run is an agent writing to the vault exactly like an ingest is, and
+ * used to be visible only inside the screen that started it.
  */
 
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
-import type { AuthMode, Job, JobStatus, Stats } from '../api/types.ts'
+import type { AuthMode, Job, JobStatus, MaintenanceRun, Stats } from '../api/types.ts'
 import { Dropzone } from '../components/Dropzone.tsx'
 import { GrowthChart } from '../components/GrowthChart.tsx'
-import { Markdown } from '../components/Markdown.tsx'
 import { PageLink } from '../components/PageLink.tsx'
 import { Sparkline } from '../components/Sparkline.tsx'
 import { Tip } from '../components/Tip.tsx'
@@ -32,10 +44,12 @@ import { JobDrawer } from '../components/JobDrawer.tsx'
 import { Icon, type IconName } from '../components/Icon.tsx'
 import { timeAgo, duration, parsePages } from '../lib/format.ts'
 import { Cost } from '../components/Cost.tsx'
-import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { useActiveRuns } from '../hooks/useActiveRuns.ts'
 import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
+import { HOT_CACHE_STALE_DAYS } from '../lib/maintenanceStatus.ts'
+import { useRunProgressLine } from '../components/RunProgress.tsx'
 import { navigate, pageRoute } from '../lib/router.ts'
-import { RUN_TITLES } from '../lib/runLabels.ts'
+import { RUN_RUNNING_TITLES, runTitle } from '../lib/runLabels.ts'
 
 const DIR_LABELS: Record<string, string> = {
   concepts: 'Concepts',
@@ -79,6 +93,9 @@ export function Home(): React.ReactElement {
   const jobs = useQuery({ queryKey: ['jobs', 300], queryFn: () => api.jobs({ limit: 300 }) })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const maint = useMaintenanceStatus().data
+  // Agent runs the queue knows nothing about (research, lint, hot cache) - they write the
+  // vault too, so "in flight" is incomplete without them.
+  const activeRuns = useActiveRuns()
   const [drawerJob, setDrawerJob] = useState<string | null>(null)
 
   if (isLoading) return <LoadingSkeleton />
@@ -98,16 +115,22 @@ export function Home(): React.ReactElement {
   const activeJobs = (jobs.data?.jobs ?? []).filter((j) => j.status === 'preprocessing' || j.status === 'ingesting')
   const queuedJobs = (jobs.data?.jobs ?? []).filter((j) => j.status === 'queued')
   const gaps = graph.data?.gaps ?? []
+  const busy = activeJobs.length + queuedJobs.length + activeRuns.running.length > 0
 
   return (
-    <div>
-      <Dropzone compact={activeJobs.length + queuedJobs.length > 0} />
-      <InFlight active={activeJobs} queued={queuedJobs} paused={data.queue.paused} onOpenJob={setDrawerJob} />
-      <StateLine stats={data} maint={maint} />
+    <div className="home">
+      <Dropzone compact={busy} />
+      <InFlight
+        active={activeJobs}
+        queued={queuedJobs}
+        runs={activeRuns.running}
+        paused={data.queue.paused}
+        onOpenJob={setDrawerJob}
+      />
       <StatBand stats={data} gapCount={graph.data?.unresolved ?? null} />
+      <StateLine stats={data} maint={maint} />
 
-      <div className="home-grid section">
-        <div className="home-act">
+      <div className="home-grid">
         <ActivityFeed
           stats={data}
           jobs={jobs.data?.jobs ?? []}
@@ -115,7 +138,6 @@ export function Home(): React.ReactElement {
           vaultName={data.vaultName}
           onOpenJob={setDrawerJob}
         />
-        </div>
         <div className="home-side">
           <div className="card card-pad">
             <h3 className="section-title">Growth · 30 days</h3>
@@ -154,8 +176,6 @@ export function Home(): React.ReactElement {
         </div>
       </div>
 
-      {data.hotCache && <HotCache stats={data} />}
-
       {drawerJob !== null && (
         <JobDrawer jobId={drawerJob} vaultName={data.vaultName} authMode={data.authMode} onClose={() => setDrawerJob(null)} onOpenJob={setDrawerJob} />
       )}
@@ -164,56 +184,118 @@ export function Home(): React.ReactElement {
 }
 
 /**
- * In flight: everything the service is working on right now, from every channel - this
- * drop, the watch folder, the bot. Rows leave for the activity stream when they commit.
- * Deliberately lighter than the Inbox's JobCard: no live log, no revert - Home answers
- * "is it moving?", the Inbox answers "what exactly happened".
+ * In flight: everything the service is working on right now - this drop, the watch folder,
+ * the bot, AND the maintenance runs (research, lint, hot cache) that no queue tracks. Rows
+ * leave for the activity stream when they commit.
+ *
+ * Deliberately lighter than the Inbox's JobCard: no live log, no revert. Home answers "is it
+ * moving?", the Inbox answers "what exactly happened". While nothing runs this is ONE line,
+ * not a card with an empty state inside it - the difference is ~70px of the height budget
+ * that made Home scroll.
  */
 function InFlight({
   active,
   queued,
+  runs,
   paused,
   onOpenJob,
 }: {
   active: Job[]
   queued: Job[]
+  runs: MaintenanceRun[]
   paused: boolean
   onOpenJob: (id: string) => void
 }): React.ReactElement {
-  const busy = active.length + queued.length > 0
+  const busy = active.length + queued.length + runs.length > 0
+  const running = active.length + runs.length
+
+  if (!busy) {
+    return (
+      <div className="card inflight idle">
+        <span className="if-lab">In flight</span>
+        <span className="if-idle">Idle - nothing running. Drop something above and it starts here.</span>
+        {paused && <span className="badge deferred">queue paused</span>}
+        <span className="spacer" />
+        <button className="linkish" onClick={() => navigate('/inbox')}>
+          Full inbox
+        </button>
+      </div>
+    )
+  }
+
   return (
-    <div className="card section inflight">
+    <div className="card inflight">
       <div className="feed-head">
         <h3 className="section-title">In flight</h3>
-        {active.length > 0 && (
+        {running > 0 && (
           <span className="badge ingesting">
             <span className="pulse-dot" aria-hidden />
-            {active.length} running
+            {running} running
           </span>
         )}
+        {queued.length > 0 && <span className="badge queued-badge">{queued.length} queued</span>}
         {paused && <span className="badge deferred">queue paused</span>}
         <span className="spacer" />
         <button className="btn ghost" onClick={() => navigate('/inbox')}>
           Full inbox <Icon name="chevron" />
         </button>
       </div>
-      {!busy ? (
-        <div className="empty">Nothing running. Drop something above and it starts here.</div>
-      ) : (
-        <div className="flight-rows">
-          {active.map((j) => (
-            <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
-          ))}
-          {queued.map((j) => (
-            <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
-          ))}
-        </div>
-      )}
+      <div className="flight-rows">
+        {runs.map((r) => (
+          <RunRow key={r.id} run={r} />
+        ))}
+        {active.map((j) => (
+          <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
+        ))}
+        {queued.map((j) => (
+          <FlightRow key={j.id} job={j} onOpen={() => onOpenJob(j.id)} />
+        ))}
+      </div>
     </div>
   )
 }
 
-/** The pipeline as five ticks - enough to see movement, not enough to need a legend. */
+/**
+ * One running maintenance run. A research run names its topic and lens (the server carries
+ * both on the run record now) and shows how far through its fetch budget it is; the other
+ * kinds say what they are doing, because their subject is the whole vault.
+ */
+function RunRow({ run }: { run: MaintenanceRun }): React.ReactElement {
+  const profiles = useQuery({ queryKey: ['research-profiles'], queryFn: api.researchProfiles })
+  const profile = profiles.data?.profiles.find((p) => p.key === run.profileKey)
+  const { text, ratio } = useRunProgressLine(run.channel, profile)
+  const isResearch = run.kind === 'research'
+  const title = run.label ?? RUN_RUNNING_TITLES[run.kind] ?? run.kind
+  return (
+    <button
+      className="frow"
+      onClick={() => navigate(isResearch ? '/research' : '/health')}
+      title={isResearch ? 'Open the research run' : 'Open the health screen'}
+    >
+      <span className={`fico ${isResearch ? 'research' : 'busy'}`}>
+        <Icon name={isResearch ? 'flask' : 'health'} />
+      </span>
+      <span className="fbody">
+        <span className="fname">
+          <span className="ft">{title}</span>
+          {profile !== undefined && run.profileKey !== 'broad' && <span className="lens-tag">{profile.label}</span>}
+        </span>
+        <span className="fmeta">
+          <span>{text}</span>
+          <span>{timeAgo(run.startedAt)}</span>
+        </span>
+      </span>
+      <span className="fright">
+        <span className={`minibar${isResearch ? ' research' : ''}`}>
+          <i style={{ width: `${Math.round(ratio * 100)}%` }} />
+        </span>
+        <span className="fgo">Open run</span>
+      </span>
+    </button>
+  )
+}
+
+/** The pipeline as three ticks - enough to see movement, not enough to need a legend. */
 const FLIGHT_PHASES: JobStatus[] = ['queued', 'preprocessing', 'ingesting']
 
 function FlightRow({ job, onOpen }: { job: Job; onOpen: () => void }): React.ReactElement {
@@ -225,36 +307,67 @@ function FlightRow({ job, onOpen }: { job: Job; onOpen: () => void }): React.Rea
         <Icon name={job.status === 'queued' ? 'inbox' : 'bolt'} />
       </span>
       <span className="fbody">
-        <span className="fname">{job.original_name ?? job.url ?? job.id}</span>
+        <span className="fname">
+          <span className="ft">{job.original_name ?? job.url ?? job.id}</span>
+        </span>
         <span className="fmeta">
           <span>{job.status}</span>
           <span>{timeAgo(since)}</span>
           <span>{job.source}</span>
         </span>
       </span>
-      <span className="fsteps" aria-hidden>
-        {FLIGHT_PHASES.map((p, i) => (
-          <span key={p} className={`st${i < phase ? ' on' : i === phase ? ' now' : ''}`} />
-        ))}
+      <span className="fright">
+        <span className="fsteps" aria-hidden>
+          {FLIGHT_PHASES.map((p, i) => (
+            <span key={p} className={`st${i < phase ? ' on' : i === phase ? ' now' : ''}`} />
+          ))}
+        </span>
+        <span className="fgo">Open job</span>
       </span>
     </button>
   )
 }
 
 /**
- * One plain-language line of state above the tiles. It carries the health summary the
- * old NOW band had a whole cell for - a sentence says it in less space than a card, and
- * it names the window the tiles are measured over, which the tiles themselves cannot.
+ * One line of state under the tiles. It names the window the tiles are measured over (which
+ * the tiles cannot), and carries the two facts that used to cost a card each: the last
+ * commit and the hot cache's freshness. The cache's CONTENT lives on Health, next to the
+ * refresh button that owns it - it was never something to read on the way past.
  */
 function StateLine({ stats, maint }: { stats: Stats; maint: MaintenanceStatusData | null }): React.ReactElement {
   const due = maint?.status.due ?? 0
   const rec = maint?.status.recommended ?? 0
   const last = stats.commits[0]
+  const hotAge =
+    stats.hotCacheUpdatedAt !== null
+      ? Date.now() - Date.parse(stats.hotCacheUpdatedAt) > HOT_CACHE_STALE_DAYS * 24 * 60 * 60 * 1000
+        ? 'stale'
+        : 'fresh'
+      : null
   return (
-    <div className="stateline section">
-      Vault health over the <strong>last 7 days</strong> - every number opens the screen it comes
-      from.
-      {last && <> Last commit {timeAgo(last.date)}.</>}{' '}
+    <div className="stateline">
+      <span>
+        Last <strong>7 days</strong> - every number opens the screen it comes from.
+      </span>
+      {last && (
+        <>
+          <span className="sl-sep" aria-hidden />
+          <span>Last commit {timeAgo(last.date)}</span>
+        </>
+      )}
+      <span className="sl-sep" aria-hidden />
+      <button className="linkish" onClick={() => navigate('/health#card-hot-cache')} title="Refresh it on the Health screen">
+        Hot cache{' '}
+        {hotAge === null ? (
+          <strong className="warnish">never refreshed</strong>
+        ) : (
+          <>
+            <strong className={hotAge === 'stale' ? 'warnish' : 'okish'}>{hotAge}</strong>
+            {stats.hotCacheUpdatedAt !== null && <span className="dim"> ({timeAgo(stats.hotCacheUpdatedAt)})</span>}
+          </>
+        )}
+      </button>
+      <span className="sl-sep" aria-hidden />
       {due + rec > 0 ? (
         <button className="linkish" onClick={() => navigate('/health')}>
           {due > 0 ? `${due} check${due > 1 ? 's' : ''} due` : `${rec} recommended soon`}
@@ -281,7 +394,12 @@ function Delta({ now, prev, invert = false }: { now: number; prev: number; inver
   )
 }
 
-/** Stat tiles that navigate - every number is a door, not a dead end. */
+/**
+ * Stat tiles that navigate - every number is a door, not a dead end. One ROW per tile
+ * since 2026-08-25: label, value with its delta, and the sparkline share a line instead of
+ * stacking three, which is 45px per tile of Home's height budget for no information lost
+ * (the caption still swaps to the destination on hover).
+ */
 function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }): React.ReactElement {
   const doneDaily = dense(stats.kpisDaily, 'done', 14)
   const failedDaily = dense(stats.kpisDaily, 'failed', 14)
@@ -292,7 +410,7 @@ function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }
   const pagesThen = growth[growth.length - 8]?.total ?? growth[0]?.total ?? pagesNow
 
   return (
-    <div className="grid kpis section">
+    <div className="kpis">
       <button className="stat card statlink" onClick={() => navigate('/library')}>
         <div className="label">Pages</div>
         <div className="value">
@@ -333,7 +451,12 @@ function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }
   )
 }
 
-type FeedKind = 'ingest' | 'failed' | 'maintenance' | 'edit'
+/**
+ * Research is its own kind, not a maintenance run with a different prompt: it is the one
+ * agent run the user STARTS on purpose and comes back to look for, so it gets its own
+ * filter. The other kinds are things the vault does to itself.
+ */
+type FeedKind = 'ingest' | 'failed' | 'research' | 'maintenance' | 'edit'
 
 interface FeedEvent {
   key: string
@@ -401,9 +524,9 @@ function ActivityFeed({
       runTimes.push(Date.parse(a.finishedAt))
       out.push({
         key: `run:${kind}:${a.runId}`,
-        kind: 'maintenance',
-        icon: a.ok ? 'health' : 'x',
-        title: `${RUN_TITLES[kind] ?? kind}${a.ok ? '' : ' failed'}`,
+        kind: kind === 'research' ? 'research' : 'maintenance',
+        icon: kind === 'research' ? 'flask' : a.ok ? 'health' : 'x',
+        title: runTitle(kind, a.ok),
         whenIso: a.finishedAt,
         meta: a.error !== null ? [a.error] : [],
         ...(a.pages > 0 ? { pageNote: `${a.pages} page${a.pages > 1 ? 's' : ''}` } : {}),
@@ -443,6 +566,7 @@ function ActivityFeed({
           [
             ['all', 'All'],
             ['ingest', 'Ingests'],
+            ['research', 'Research'],
             ['maintenance', 'Maintenance'],
             ['edit', 'Vault edits'],
           ] as Array<['all' | FeedKind, string]>
@@ -533,42 +657,9 @@ function TypeBars({ byDir }: { byDir: Record<string, number> }): React.ReactElem
   )
 }
 
-/** Hot cache, collapsed - with its age and the refresh action right here in the summary. */
-function HotCache({ stats }: { stats: Stats }): React.ReactElement {
-  const hot = useMaintenanceRun(() => api.hotCache())
-  return (
-    <details className="card card-pad section hot-cache">
-      <summary className="hc-summary">
-        <h3 className="section-title">Hot cache</h3>
-        <span className="hc-meta">
-          {hot.running
-            ? 'refreshing…'
-            : stats.hotCacheUpdatedAt
-              ? `refreshed ${timeAgo(stats.hotCacheUpdatedAt)}`
-              : 'never refreshed'}
-          <button
-            className="btn"
-            disabled={hot.running}
-            onClick={(e) => {
-              // The button lives inside <summary> - don't let the click also toggle the panel.
-              e.preventDefault()
-              e.stopPropagation()
-              hot.start()
-            }}
-          >
-            {hot.running ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </span>
-      </summary>
-      {hot.error && <div className="toast err">{hot.error}</div>}
-      <Markdown source={stats.hotCache ?? ''} />
-    </details>
-  )
-}
-
 function LoadingSkeleton(): React.ReactElement {
   return (
-    <div className="grid kpis section">
+    <div className="kpis">
       {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="skeleton" style={{ height: 88 }} />
       ))}

@@ -658,6 +658,34 @@ button {
 .grid.kpis {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
+/* Home's tile strip: four across, one ROW per tile. Label, value with its delta and the
+   sparkline share a line instead of stacking three - 45px per tile, no information lost. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+.kpis .stat {
+  padding: 8px 13px 9px;
+  row-gap: 0;
+}
+.kpis .stat .label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+.kpis .stat .value {
+  font-family: var(--display);
+  font-size: 23px;
+  margin-top: 0;
+}
+.kpis .stat .spark {
+  width: 66px;
+  height: 26px;
+}
+.kpis .stat .sub,
+.kpis .statlink .goto {
+  font-size: 11.5px;
+}
 .grid.two {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
@@ -1009,20 +1037,35 @@ button.spill-link:hover {
     border-bottom: 1px dashed var(--border-strong);
   }
 }
+/* One BAND, not a hero (2026-08-25): the icon sits beside the text instead of above it,
+   which is ~110px of Home's height budget for exactly the same words. A grid, not a flex
+   row, so the headline and its caption still stack while the icon spans both. */
 .dropzone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  align-content: center;
+  column-gap: 13px;
   border-right: 1px dashed var(--border-strong);
-  padding: 22px 20px;
-  text-align: center;
+  padding: 12px 18px;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s;
+}
+.dropzone .icon {
+  grid-row: 1 / span 2;
+}
+.dropzone h3,
+.dropzone p {
+  grid-column: 2;
 }
 .dropzone:hover,
 .intake.over .dropzone {
   background: var(--accent-soft);
 }
 .dropzone h3 {
-  margin: 6px 0 3px;
-  font-size: 15px;
+  margin: 0;
+  font-size: 14px;
 }
 .dropzone p {
   margin: 0;
@@ -1030,15 +1073,38 @@ button.spill-link:hover {
   font-size: 12.5px;
 }
 .dropzone .icon {
-  font-size: 26px;
-  opacity: 0.7;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--bg-elev-2);
+  color: var(--accent);
+  font-size: 17px;
+  opacity: 1;
 }
 .intake-side {
-  padding: 16px 18px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   justify-content: center;
+}
+/* Two visible lines is plenty for a URL or a one-line note; it grows on focus for longer
+   ones. The old fixed height set the whole intake band's height for the rare case. */
+.intake-note {
+  min-height: 38px;
+  height: 38px;
+  transition: height 0.12s;
+}
+.intake-note:focus,
+.intake-note:not(:placeholder-shown) {
+  height: 62px;
+}
+/* Home bounds its own rows - a section margin inside it would fight the grid gap. */
+.home > .section {
+  margin-bottom: 0;
 }
 .intake-label {
   font-size: 11.5px;
@@ -1500,24 +1566,6 @@ details.hot-cache summary::marker {
 }
 details.hot-cache[open] summary {
   margin-bottom: 10px;
-}
-.hc-summary {
-  /* display:flex drops the native ::marker - the ::before chevron below replaces it. */
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.hc-summary::before {
-  content: "▸";
-  color: var(--text-faint);
-  font-size: 11px;
-  transition: transform 0.15s;
-}
-details.hot-cache[open] .hc-summary::before {
-  transform: rotate(90deg);
-}
-.hc-summary .section-title {
-  margin: 0;
 }
 .hc-meta {
   margin-left: auto;
@@ -5100,41 +5148,55 @@ kbd {
   opacity: 0;
 }
 
+/* ══ Home, bounded (2026-08-25) ═══════════════════════════════════════════════════════
+   Four fixed rows and one filling row. The filling row's two columns scroll INSIDE
+   themselves, so the screen itself never scrolls - at any window height, rather than at
+   the one the old fixed `min-height: 340px` happened to suit. The absolute-positioning
+   trick that used to keep the feed from running past the rail is gone with it: with a
+   real bounded row, `minmax(0, 1fr)` does the same job honestly. ══ */
+.home {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  gap: 11px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px 18px 16px;
+}
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 14px;
-  align-items: stretch;
+  gap: 12px;
+  min-height: 0;
 }
-/* An empty relative box: it contributes no height, so the SIDE RAIL sets the row and
-   Activity fills it. Measured before: the feed ran 1040px past the rail's bottom. */
-.home-act {
-  position: relative;
-  min-height: 340px;
-}
-.home-act > .feed {
-  position: absolute;
-  inset: 0;
+.home-grid > .feed {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
-.home-act .feed-scroll {
+.home-grid .feed-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
-@media (max-width: 1100px) {
-  .home-grid { grid-template-columns: 1fr; }
-  /* Stacked, there is no rail to match - let it run. */
-  .home-act { min-height: 0; }
-  .home-act > .feed { position: static; }
-  .home-act .feed-scroll { overflow: visible; }
-}
 .home-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+@media (max-width: 1100px) {
+  /* Stacked, there is no rail to match - let the screen scroll as a document again. */
+  .home {
+    grid-template-rows: none;
+    height: auto;
+    overflow-y: auto;
+  }
+  .home-grid { grid-template-columns: 1fr; }
+  .home-grid > .feed { overflow: visible; }
+  .home-grid .feed-scroll { overflow: visible; }
+  .home-side { overflow: visible; }
 }
 
 /* The activity stream: ingests, maintenance and edits as one event type. */
@@ -5186,12 +5248,35 @@ kbd {
    the empty line sits right under it. It stays on screen rather than disappearing -
    it is the anchor the next job appears in, and a card that comes and goes would
    shift everything below it on every drop. */
-.inflight .feed-head {
-  padding-bottom: 0;
+.inflight {
+  overflow: hidden;
 }
-.inflight .empty {
-  padding: 14px 16px 16px;
-  text-align: left;
+.inflight .feed-head {
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+}
+/* Idle is ONE line, not a card with an empty state inside it - about 70px of the height
+   budget, and it says the same thing. */
+.inflight.idle {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 15px;
+  font-size: 12.5px;
+}
+.inflight.idle .if-lab {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.inflight.idle .if-idle {
+  color: var(--text-faint);
+}
+.badge.queued-badge {
+  background: var(--muted-bg);
+  color: var(--text-dim);
 }
 
 /* In flight (Home): the Inbox's running + queued rows, folded in. Lighter than the
@@ -5202,11 +5287,11 @@ kbd {
 }
 .frow {
   display: grid;
-  grid-template-columns: 26px 1fr auto;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
   gap: 11px;
   align-items: center;
   width: 100%;
-  padding: 11px 16px;
+  padding: 10px 15px;
   border: 0;
   border-top: 1px solid var(--border);
   background: transparent;
@@ -5216,6 +5301,45 @@ kbd {
 }
 .frow:first-child {
   border-top: 0;
+}
+/* The middle cell must be shrinkable or the long names never ellipsize. */
+.frow > .fbody {
+  min-width: 0;
+}
+.frow .fname {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.frow .fname .ft {
+  font-size: 13.5px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fright {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* "Open run" / "Open job": present but quiet until the row is under the pointer. */
+.fgo {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.frow:hover .fgo {
+  color: var(--accent);
+}
+.fico.research,
+.feed-item .fico.research {
+  background: color-mix(in srgb, var(--research) 18%, transparent);
+  color: var(--research);
+}
+.minibar.research i {
+  background: var(--research);
 }
 .frow:hover {
   background: var(--bg-elev-2);
@@ -5259,9 +5383,30 @@ kbd {
 /* One plain-language line of state above the tiles - it carries the health summary
    the old NOW band spent a whole cell on. */
 .stateline {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: 12px;
   padding: 0 2px;
+}
+.stateline .sl-sep {
+  width: 1px;
+  height: 11px;
+  background: var(--border-strong);
+}
+.stateline .linkish {
+  color: var(--text-dim);
+}
+.stateline .linkish:hover {
+  color: var(--accent);
+}
+.stateline .okish {
+  color: var(--ok);
+}
+.stateline .warnish {
+  color: var(--warn);
 }
 .stateline strong {
   color: var(--text);

@@ -257,7 +257,9 @@ export function App(): React.ReactElement {
         )}
 
         <div className="screens">
-          <section className="screen" hidden={screen !== 'home'} aria-label="Home">
+          {/* Home is a workspace now, not a document: it fills the viewport and its one
+              growing row scrolls inside itself, so the screen never scrolls as a whole. */}
+          <section className="screen flush" hidden={screen !== 'home'} aria-label="Home">
             <div className="lane">
               <Home />
             </div>

@@ -224,6 +224,15 @@ export function Maintenance(): React.ReactElement {
           {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
           {hot.error && <div className="toast err">{hot.error}</div>}
           {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
+          {/* The cache's content, moved off Home (2026-08-25): it is a maintenance artifact,
+              and it belongs next to the button that refreshes it rather than costing the
+              dashboard's landing screen a collapsible panel you had to scroll past. */}
+          {stats.data?.hotCache && (
+            <details className="hot-cache">
+              <summary>Show what the cache contains</summary>
+              <Markdown source={stats.data.hotCache} />
+            </details>
+          )}
         </div>
         )}
 
