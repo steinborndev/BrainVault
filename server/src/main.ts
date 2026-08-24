@@ -25,6 +25,7 @@ import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
 import { ensureVaultExcludes } from './pipeline/vault-excludes.js'
+import { VaultReconciler } from './pipeline/reconcile.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
 import { startVaultWatcher, type VaultWatcher } from './pipeline/vault-watcher.js'
 import { startTelegramBot, type TelegramBot } from './telegram/bot.js'
@@ -89,6 +90,17 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
     validate,
   })
+  // The other half of the F4 rule: the per-run sweep sits out whenever runs overlap, which
+  // with concurrency above 1 is most of the time. This picks up what nobody staged, on the
+  // edge where the writer count returns to zero and attribution is no longer ambiguous.
+  const reconciler = new VaultReconciler({
+    vaultRoot: config.vaultRoot,
+    commitMutex,
+    runRegistry,
+    events,
+    autoCommit: () => settings.effective(config).gitAutoCommit,
+  })
+  reconciler.attach()
   // SETUP MODE (config.auth === null): serve the dashboard so the user can enter the
   // credential there, but start nothing that could spawn an agent — the queue never claims
   // and the inbox watcher stays off. A restart after the credential is written picks

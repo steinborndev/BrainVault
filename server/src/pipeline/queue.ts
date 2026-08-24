@@ -829,7 +829,7 @@ export class IngestQueue {
     // Bracket + register as a writer so Bash-written pages can be swept into the commit, but
     // only when this turns out to be the sole writer (finding F4).
     const dirtyBefore = await dirtyPaths(this.vaultRoot)
-    const endRun = this.runRegistry.begin()
+    const endRun = this.runRegistry.begin(dirtyBefore)
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
@@ -1039,7 +1039,7 @@ export class IngestQueue {
 
     // Same F4 bracket as the single-job path.
     const dirtyBefore = await dirtyPaths(this.vaultRoot)
-    const endRun = this.runRegistry.begin()
+    const endRun = this.runRegistry.begin(dirtyBefore)
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,

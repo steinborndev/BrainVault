@@ -842,7 +842,7 @@ export class MaintenanceRunner {
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
       // can still be committed — but only if we turn out to be the sole writer (F4).
       const dirtyBefore = await dirtyPaths(this.vaultRoot)
-      const endRun = this.runRegistry.begin()
+      const endRun = this.runRegistry.begin(dirtyBefore)
       const written = new Set<string>()
       const res = await this.runAgentFn({
         vaultRoot: this.vaultRoot,

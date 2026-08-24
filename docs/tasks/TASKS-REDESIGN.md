@@ -387,9 +387,25 @@ of each other.
       pages), exposed on `/stats` and derived into a `due` status item + a Health card.
       Read-only: committing them needs a decision about what they are, which the service
       cannot make - the action is deliberately a separate step (A2, not built).
-- [ ] OPEN: reconcile-on-idle. When the queue drains to zero writers there is no attribution
-      ambiguity left, so anything still outside git could be swept into one commit then.
-      That closes the gap without touching the sweep's invariant.
+- [x] Reconcile-on-idle (`pipeline/reconcile.ts`). The attribution rule is not relaxed; the
+      pass waits for the moment it becomes trivial. Attribution is impossible only while runs
+      OVERLAP - once the writer count returns to zero nothing is writing, and whatever is
+      still dirty can only be a leftover. `RunRegistry` now brackets the whole busy period
+      (the first writer donates its F4 baseline, the last writer to leave announces it), so
+      the pass commits the remainder without ever guessing which job a page belonged to.
+      Bounded the same way the per-run sweep is: only `wiki/**`, only what became dirty
+      during the period (so a user edit already in progress is excluded, SPEC §11.3 risk 5),
+      explicit pathspec, behind the shared commit mutex, honouring `gitAutoCommit`, and the
+      writer count is re-checked INSIDE the mutex rather than at the edge that scheduled it.
+      Residual exposure, stated rather than hidden: a page the user edits in Obsidian DURING
+      a busy period is indistinguishable from a Bash-written one and will be committed - the
+      same exposure the per-run sweep already accepts, over a longer window, and the two
+      outcomes are not symmetric (one labelled revertable commit versus knowledge silently
+      absent from history).
+      Proven end to end in `queue-integration.test.ts`: four ingests at concurrency 2, each
+      agent writing one reported and one unreported page, so no run is ever the sole writer
+      and every per-run sweep sits out. The unreported pages are committed. That assertion
+      fails with the pass disabled.
 - [ ] OPEN: the 27 pages currently outside history still need committing (a vault-history
       decision, left to the user).
 
