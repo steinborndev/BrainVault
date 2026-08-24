@@ -510,6 +510,15 @@ run's `.raw/` payload stayed untracked, and the job lost its revert anchor.
       material had been re-dropped in parts, which the deferral message had advised.
       A deferred payload is not lost by this: when one is actually processed it is re-dropped
       and lands in its own committed `.raw/<job-id>/`.
-- [ ] OPEN: four `.raw/<ulid>/` job directories of non-`done` jobs (three failed, one
-      deferred) are untracked, which is arguably correct - no successful ingest, no commit -
-      but has never been stated as a rule, and two of them outlive their job rows.
+- [x] The four `.raw/<ulid>/` directories of non-`done` jobs still on disk (three failed,
+      one deferred) were deleted after checking what each held: an expired signed download
+      URL, a page with no extractable content, an orphan whose job row had been cleared, and
+      one whose preprocessing HAD succeeded and whose agent run died on a usage limit - that
+      last one traded a reusable normalized artifact for a re-fetch, which the user chose
+      knowingly.
+- [ ] OPEN: what happens to a failed job's `.raw/` payload is still not a stated rule. It is
+      never committed (no successful ingest, no commit) and nothing ever removes it, so it
+      accumulates - and a payload can outlive its job row, at which point nothing in the
+      dashboard points at it. Deleting one also silently changes what a retry does: with the
+      manifest present preprocessing is skipped and reused, without it the source is fetched
+      again, which for a signed or expiring URL means the retry cannot work at all.
