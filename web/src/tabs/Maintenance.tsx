@@ -49,7 +49,7 @@ import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMa
 import { buildRunPlan, type MaintStatusItem, type RunPlanStep, type RunStepId } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
 import { timeAgo } from '../lib/format.ts'
-import { RUN_TITLES } from '../lib/runLabels.ts'
+import { runTitle } from '../lib/runLabels.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { pageRoute, navigate } from '../lib/router.ts'
 
@@ -519,7 +519,7 @@ function RunHistory({ data }: { data: MaintenanceStatusData | null }): React.Rea
             <div key={r.kind} className="run-row">
               <span className={`sev ${r.ok ? 'ok' : 'due'}`}>{r.ok ? 'ok' : 'failed'}</span>
               <span className="rr-main">
-                <span className="rr-title">{RUN_TITLES[r.kind] ?? r.kind}</span>
+                <span className="rr-title">{runTitle(r.kind, r.ok)}</span>
                 {r.error !== null && <span className="rr-err">{r.error}</span>}
               </span>
               <span className="rr-meta">

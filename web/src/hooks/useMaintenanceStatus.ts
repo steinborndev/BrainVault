@@ -59,6 +59,9 @@ export function useMaintenanceStatus(): MaintenanceStatusResult {
     ) {
       return null
     }
+    // The lint area needs the RUN record, not just the report file - a run that finished
+    // without writing one is otherwise indistinguishable from no run at all.
+    const lintRun = (state.data?.areas ?? []).find((a) => a.kind === 'lint')
     const status = deriveMaintenanceStatus({
       undomained: candidates.data.undomainedCount,
       registryInstalled: domains.data.installed,
@@ -66,6 +69,7 @@ export function useMaintenanceStatus(): MaintenanceStatusResult {
       missingDomainEchoes: report.domainEchoes.filter((e) => e.domain === 'unassigned').length,
       tagRepairCount: recommendedKeys(report, MAX_TAG_ACTIONS).size,
       lintReport: stats.data.lintReport,
+      lastLintRun: lintRun !== undefined ? { finishedAt: lintRun.finishedAt, ok: lintRun.ok } : null,
       hotCacheUpdatedAt: stats.data.hotCacheUpdatedAt,
       index: index.data ?? null,
       now: new Date(),

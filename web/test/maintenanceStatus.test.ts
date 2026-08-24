@@ -17,6 +17,7 @@ const healthy = (over: Partial<MaintStatusInput> = {}): MaintStatusInput => ({
   missingDomainEchoes: 0,
   tagRepairCount: 0,
   lintReport: { date: '2026-07-20' },
+  lastLintRun: null,
   hotCacheUpdatedAt: '2026-07-23T12:00:00.000Z',
   index: { scriptsPresent: true, provisioned: true },
   now: NOW,
@@ -64,6 +65,55 @@ describe('deriveMaintenanceStatus', () => {
     const s = deriveMaintenanceStatus(healthy({ tagRepairCount: 6 }))
     expect(byId(s, 'tags')?.severity).toBe('due')
     expect(byId(s, 'tags')?.title).toContain('6 tag repairs')
+  })
+
+  it('lint: a run that wrote no report is DUE, not a stale-report recommendation', () => {
+    // The failure this encodes: the run record says a lint finished hours ago, the newest
+    // report in the vault is a month old. Reporting "last report is 31 days old" contradicts
+    // what the user just did; the real problem is that the run produced nothing.
+    const s = deriveMaintenanceStatus(
+      healthy({
+        lintReport: { date: '2026-06-23' },
+        lastLintRun: { finishedAt: '2026-07-23T20:43:41.000Z', ok: true },
+      }),
+    )
+    const item = byId(s, 'lint')
+    expect(item?.severity).toBe('due')
+    expect(item?.title).toBe('Lint ran, but wrote no report')
+    expect(item?.why).toContain('31 days old')
+    expect(s.due).toBe(1)
+  })
+
+  it('lint: a recent run WITH its report is healthy, whatever the report file name says', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({
+        lintReport: { date: '2026-07-23' },
+        lastLintRun: { finishedAt: '2026-07-23T20:43:41.000Z', ok: true },
+      }),
+    )
+    expect(byId(s, 'lint')?.severity).toBe('healthy')
+    expect(byId(s, 'lint')?.why).toContain('in the last 24 hours')
+  })
+
+  it('lint: a recent run that FAILED is due even when an old report exists', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({
+        lintReport: { date: '2026-07-23' },
+        lastLintRun: { finishedAt: '2026-07-23T20:43:41.000Z', ok: false },
+      }),
+    )
+    expect(byId(s, 'lint')?.severity).toBe('due')
+  })
+
+  it('lint: an OLD run does not mask a stale report - the report age still decides', () => {
+    const s = deriveMaintenanceStatus(
+      healthy({
+        lintReport: { date: '2026-06-01' },
+        lastLintRun: { finishedAt: '2026-06-01T10:00:00.000Z', ok: true },
+      }),
+    )
+    expect(byId(s, 'lint')?.severity).toBe('recommended')
+    expect(byId(s, 'lint')?.title).toBe('Lint the wiki, then apply safe fixes')
   })
 
   it('lint: missing report and stale report recommend, fresh report is healthy', () => {
