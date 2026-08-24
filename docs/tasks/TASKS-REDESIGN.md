@@ -243,3 +243,118 @@ tokens, no data-layer change.
 
 Verified against the live service: 567 server + 88 web tests green, clean typecheck and
 build, 0 console errors across 10 screen loads (5 screens x 2 themes).
+
+
+## Phase 6: rework pass (2026-08-25)
+
+Source of truth: the approved clickable mockup ("BrainVault UI Rework", 2026-08-24), six
+points raised against the shipped redesign.
+
+### 1 - Agent runs are visible from everywhere, not just where they were started
+
+- [x] `MaintenanceRun` carries `label` (the research topic) and `profileKey` (the lens).
+      The kind alone says "research"; the run record now says what it is researching, which
+      is what Home, the sidebar and the inbox need to name it.
+- [x] `useActiveRuns` (new): polls `GET /api/v1/maintenance/runs`, an endpoint that already
+      existed and that the web client had never called. Run state used to live only in the
+      starting screen's `useMaintenanceRun` hook, so a research run was invisible on every
+      other screen and gone entirely after a reload while the server kept running it.
+- [x] Home's "In flight" merges maintenance runs with the ingest queue; the inbox shows them
+      as live rows; the sidebar gets a violet Research badge (colour says WHICH kind of work
+      is running, the number says how much).
+
+### 2 - Home fits on one screen at any window height
+
+- [x] Home became a `flush` screen: four fixed rows plus one filling row whose two columns
+      scroll inside themselves. Previously a document that grew past the viewport with a
+      fixed `min-height: 340px` guess for the activity row.
+- [x] Trims that bought the budget: intake band 190px to ~110px (grid, icon beside the text),
+      tiles three lines to one (~45px each), in flight collapses to one line while idle
+      (~70px), hot cache off Home entirely.
+- [x] The hot cache's CONTENT moved to the Health card that already owns its refresh button;
+      Home's state line carries its freshness in four words. It was a maintenance artifact
+      occupying the landing screen with a panel you had to scroll past.
+- [x] Verified on the live service at 1500x940: screen scrollHeight == clientHeight, no page
+      scroll, both inner columns scrolling on their own.
+
+### 3 - The graph's shortcut panel is readable again
+
+- [x] ROOT CAUSE: the rule that flipped the tooltip downward keyed off `.gtopline`, a wrapper
+      the density pass (83acfeb) deleted. The selector silently stopped matching, so the panel
+      fell back to opening UPWARD - out of a box with `overflow: hidden`, at the top of the
+      screen. Dead CSS is not harmless; this one took a whole panel off-screen.
+- [x] Replaced by `components/Shortcuts.tsx`: a real popover, right-anchored under the bar,
+      372px wide, click-to-pin, Escape closes (and stops propagation so it does not also back
+      the graph out of a focus). Opening downward is structural here, so it belongs to the
+      component's own class rather than to an override on a generic tooltip.
+- [x] Verified: popover box fully inside the canvas box on the live service.
+
+### 4 - Panel and box start and end on the same two lines
+
+- [x] The WORKSPACE owns the padding now, not the columns. The graph canvas padded itself
+      (`.graph-stage`) while the panel ran edge to edge; the library's toolbar sat inside the
+      right column and pushed the table down by its own height. Neither could ever line up.
+- [x] Shared `.ws-bar` row spanning both columns (library search/scope, inbox search/actions,
+      the graph's cluster and focus bars), reserved only when a bar is actually rendered.
+- [x] Verified on the live service, panel vs box bounding boxes: graph 64/785 = 64/785,
+      library 103/785 = 103/785, inbox 106/785 = 106/785.
+
+### 5 - Inbox redesign
+
+- [x] One table instead of Active / Queue / History stacked: in-flight rows ride at the top,
+      tinted, with their phase inline, so a job moves DOWN into history instead of jumping
+      between sections. Maintenance runs appear there too.
+- [x] The filter panel replaces the wrapping chip row: state with all-time counts, channel,
+      time range, plus the queue's state and the reason it is paused.
+- [x] No second drop hero - Home owns intake, "Add" goes there. Batch grouping survived the
+      move as a header row with cancel-all; `components/JobCard.tsx` is deleted with the card
+      list it belonged to.
+- [x] NOT built: a manual pause/resume control. The mockup showed one, but the queue only
+      pauses itself (budget, rate limit) and there is no endpoint - a button would have
+      promised a feature that does not exist. The panel states the queue's condition instead.
+
+### 6a - Research progress
+
+- [x] `lib/researchProgress.ts`: derives five real steps, live counters and a "doing now"
+      line from the log the run already streams. No new endpoint - the agent's tool calls
+      ARE the progress signal, they were just never read as one.
+- [x] DESIGN RULE: every number is counted, never estimated. Only "Read sources" gets a bar,
+      because the lens declares its fetch cap before the run starts and is the one phase with
+      a real denominator. A global percentage would be invented.
+- [x] Known limitation: maintenance logs stream but are not persisted, so a reload mid-run
+      starts from an empty buffer and the steps re-fill within seconds. Persisting them is a
+      separate change.
+- [x] 13 unit tests including the formatter's 160-char truncation of tool input (the log
+      frequently carries invalid JSON, so the parser reads fields out of raw text).
+
+### 6b - The lint badge contradicted what the user had just done
+
+- [x] FINDING, two defects, the second the more serious:
+      1. `deriveMaintenanceStatus` dated the lint area from ONE thing - the newest
+         `wiki/meta/lint-report-YYYY-MM-DD.md` file name. The run record was never consulted.
+      2. The lint run of 2026-08-23T20:43:41Z settled `ok` with `pages: 0` and wrote NO
+         report: no August report on disk, no lint commit in the vault git log. The status
+         head therefore reported "last report is 31 days old" while the activity feed
+         announced "Lint report written" in the same session. The badge was right about the
+         vault and wrong about the user.
+- [x] RESOLUTION (three parts, all landed):
+      - `MaintenanceRunner`: a lint whose report is not newer than the run's own start settles
+        as FAILED. The report IS the deliverable - lint-fix is bounded by it, and the status
+        model dates the area from it. Measured against the run start so an old report can
+        never stand in for a run that produced nothing.
+      - The status model takes `lastLintRun` alongside `lintReport` and distinguishes three
+        outcomes: ran + report = healthy, ran + no report = DUE ("Lint ran, but wrote no
+        report"), nothing recent = the report's own age decides, as before. Report and run are
+        compared as calendar days with a day of slack, because the report's date comes from a
+        file name (midnight) while the run carries an instant.
+      - `runTitle(kind, ok)` names what a run PRODUCED rather than whether it threw, so the
+        feed and the Health run list say "Lint finished, no report written".
+- [x] Verified on the live service: the Health head now reads "Lint ran, but wrote no report
+      - Lint ran in the last 24 hours but left no report in wiki/meta/ - the newest one there
+      is 31 days old", severity due, badge 1.
+- [x] OPEN: why the agent exited without writing the report is not diagnosed. The run will now
+      surface as failed instead of silently succeeding, which is the precondition for finding
+      out. Worth watching on the next lint.
+
+Verified: 571 server + 105 web tests green (4 + 17 new), clean typecheck and build, live
+service restarted and all six screens checked against the running instance.
