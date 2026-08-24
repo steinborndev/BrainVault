@@ -784,10 +784,10 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // The search lives INSIDE the drawing area (top-right), like the zoom controls
-  // (top-left) - it searches the canvas, so it sits on the canvas.
+  // The search sits in the canvas bar with Fit and the view actions: it acts on the
+  // canvas, and a second floating box was claiming the same corner as the bar.
   const searchOverlay = (
-    <div className="graph-search graph-search-overlay">
+    <div className="graph-search graph-search-inbar">
       <Icon name="search" />
       <input
         ref={searchRef}
@@ -887,57 +887,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onReset={resetView}
         />
         <div className="graph-main">
-      {/* One thin context line above the canvas: what is in scope, in a sentence, plus
-          the two things that act on the whole view. Everything that used to live in four
-          stacked rows is in the panel to the left now. */}
-      <div className="gtopline">
-        <span className="scopeline">
-          Showing{' '}
-          <strong>
-            {realCount} of {graph.nodes.length}
-          </strong>{' '}
-          pages and <strong>{realEdgeCount}</strong> links
-          {scopeTail}
-          {graph.unresolved > 0 && !showGaps && (
-            <>
-              {' · '}
-              <button
-                className="linkish"
-                // Same landing as the Gaps toggle in the panel: the gaps view with the
-                // explorer's ranked list (it shows whenever gaps are on and nothing is
-                // selected). The two entry points used to diverge.
-                onClick={() => setShowGaps(true)}
-                title="Explore the unresolved links as knowledge gaps"
-              >
-                {graph.unresolved} gaps
-              </button>
-            </>
-          )}
-        </span>
-        <span className="spacer" />
-        <Tip
-          text={
-            <span className="shortcuts">
-              <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
-              <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
-              <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
-              <span className="k"><kbd>Esc</kbd></span> <span>leave fullscreen · clear search · close panel · leave cluster · leave focus - and back out of a page</span>
-              <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters - show the whole vault</span>
-              <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
-              <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
-              <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>
-            </span>
-          }
-        />
-        <button
-          className="btn"
-          onClick={() => setFullscreen(true)}
-          title="Show the graph on its own - Esc returns"
-        >
-          <Icon name="expand" /> Fullscreen
-        </button>
-      </div>
-
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
           the "· domain" suffix make the cluster ≠ domain distinction visible - one domain
@@ -1022,7 +971,61 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           network={showNetwork}
           spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
-          fitKey={`${[...selectedDomains].sort().join(',')}|${[...selectedTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
+          // Fullscreen rides along: entering or leaving changes the canvas width by ~40%,
+          // and re-fitting through the fitKey also clears `userMoved` - so a graph the user
+          // had panned is re-framed too, instead of staying parked off-screen.
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...selectedTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}|${fullscreen}`}
+          barExtra={
+            <>
+              <span className="scopeline">
+                Showing{' '}
+                <strong>
+                  {realCount} of {graph.nodes.length}
+                </strong>{' '}
+                pages and <strong>{realEdgeCount}</strong> links
+                {scopeTail}
+                {graph.unresolved > 0 && !showGaps && (
+                  <>
+                    {' · '}
+                    <button
+                      className="linkish"
+                      // Same landing as the Gaps toggle in the panel: the gaps view with the
+                      // explorer's ranked list. The two entry points used to diverge.
+                      onClick={() => setShowGaps(true)}
+                      title="Explore the unresolved links as knowledge gaps"
+                    >
+                      {graph.unresolved} gaps
+                    </button>
+                  </>
+                )}
+              </span>
+              <span className="spacer" />
+              {searchOverlay}
+              <Tip
+                text={
+                  <span className="shortcuts">
+                    <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
+                    <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
+                    <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
+                    <span className="k"><kbd>Esc</kbd></span> <span>leave fullscreen · clear search · close panel · leave cluster · leave focus</span>
+                    <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters - show the whole vault</span>
+                    <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
+                    <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
+                    <span className="k"><kbd>Ctrl</kbd> <kbd>wheel</kbd></span> <span>zoom in and out</span>
+                    <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>
+                    <span className="k"><kbd>drag</kbd></span> <span>pan the canvas</span>
+                  </span>
+                }
+              />
+              <button
+                className="btn ghost"
+                onClick={() => setFullscreen((v) => !v)}
+                title={fullscreen ? 'Back to the full view (Esc)' : 'Show the graph on its own - Esc returns'}
+              >
+                <Icon name={fullscreen ? 'shrink' : 'expand'} /> {fullscreen ? 'Exit' : 'Fullscreen'}
+              </button>
+            </>
+          }
           onSelect={(n) =>
             n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
           }
@@ -1063,7 +1066,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onClear={() => setSelection(null)}
           overlay={
             <>
-              {searchOverlay}
               {query.trim() !== '' && realCount === 0 && (
                 <div className="graph-empty" role="status">
                   No pages match “{query.trim()}”.
@@ -1102,29 +1104,6 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onSelectGap={selectGap}
           onClose={closeExplorer}
         />
-        {/* Fullscreen keeps only what belongs to the drawing: the lens, and the way out.
-            The rest of the panel is one Esc away. */}
-        {fullscreen && (
-          <div className="fsbar" role="group" aria-label="Graph controls">
-            <span className="seg">
-              {LENSES.map((l) => (
-                <button
-                  key={l.key}
-                  className={lens === l.key ? 'active' : ''}
-                  aria-pressed={lens === l.key}
-                  disabled={l.key === 'domain' && !hasDomains}
-                  onClick={() => setLens(l.key)}
-                  title={l.desc}
-                >
-                  {l.label}
-                </button>
-              ))}
-            </span>
-            <button className="btn" onClick={() => setFullscreen(false)} title="Back to the full view (Esc)">
-              <Icon name="shrink" /> Exit
-            </button>
-          </div>
-        )}
           </div>
         </div>
       </div>
@@ -1567,8 +1546,10 @@ function GraphPanel({
   onReset: () => void
 }): React.ReactElement {
   const [domFilter, setDomFilter] = useState('')
-  const secondaryLens = SECONDARY_KEYS.has(lens)
   const includeOn = (showSystem ? 1 : 0) + (showGaps ? 1 : 0)
+  /** Hovering a pill previews its meaning; leaving falls back to the one in force. */
+  const [lensPreview, setLensPreview] = useState<Lens | null>(null)
+  const shownLens = LENSES.find((l) => l.key === (lensPreview ?? lens)) ?? LENSES[0]!
 
   const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
   const q = domFilter.trim().toLowerCase()
@@ -1588,30 +1569,29 @@ function GraphPanel({
             Reset
           </button>
         </div>
-        <p className="gp-note">The lens decides which question the graph answers.</p>
-        <div className="lenslist" role="radiogroup" aria-label="Colour by">
-          {LENSES.map((l) => (
-            <LensOption
-              key={l.key}
-              lens={l}
-              active={lens === l.key}
-              disabled={l.key === 'domain' && !hasDomains}
-              onSelect={() => onLens(l.key)}
-            />
-          ))}
+        <div className="pillrow" role="radiogroup" aria-label="Colour by">
+          {LENSES.map((l) => {
+            const disabled = l.key === 'domain' && !hasDomains
+            return (
+              <button
+                key={l.key}
+                className="viewpill"
+                role="radio"
+                aria-checked={lens === l.key}
+                disabled={disabled}
+                onClick={() => onLens(l.key)}
+                onMouseEnter={() => setLensPreview(l.key)}
+                onMouseLeave={() => setLensPreview(null)}
+                onFocus={() => setLensPreview(l.key)}
+                onBlur={() => setLensPreview(null)}
+              >
+                <span className="pd" aria-hidden />
+                {l.label}
+              </button>
+            )
+          })}
         </div>
-        <Fold
-          label="More lenses"
-          state={secondaryLens ? 'in use' : String(LENSES_SECONDARY.length)}
-          lit={secondaryLens}
-          openWhen={secondaryLens}
-        >
-          <div className="lenslist" role="radiogroup" aria-label="More colour lenses">
-            {LENSES_SECONDARY.map((l) => (
-              <LensOption key={l.key} lens={l} active={lens === l.key} disabled={false} onSelect={() => onLens(l.key)} />
-            ))}
-          </div>
-        </Fold>
+        <div className="pillhint">{shownLens.desc}</div>
       </div>
 
       <div className="gp-sec">
@@ -1744,36 +1724,6 @@ function GraphPanel({
   )
 }
 
-/** One lens choice: the name, and one line saying what the colour means. */
-function LensOption({
-  lens,
-  active,
-  disabled,
-  onSelect,
-}: {
-  lens: { key: Lens; label: string; desc: string }
-  active: boolean
-  disabled: boolean
-  onSelect: () => void
-}): React.ReactElement {
-  return (
-    <button
-      className="lensopt"
-      role="radio"
-      aria-checked={active}
-      disabled={disabled}
-      onClick={onSelect}
-      title={disabled ? 'No page carries a domain yet' : lens.desc}
-    >
-      <span className="radio" aria-hidden />
-      <span>
-        <span className="lname">{lens.label}</span>
-        <span className="ldesc">{disabled ? 'no page carries a domain yet' : lens.desc}</span>
-      </span>
-    </button>
-  )
-}
-
 /** A binary view option as a switch row: name, one line of why, optional count. */
 function RowToggle({
   on,
@@ -1838,27 +1788,19 @@ function Fold({
 }
 
 /**
- * The colour lenses. Each description says the same thing in the same grammar: what the
- * COLOUR means. Split by how they are used, not by what they measure:
- *
- *  - PRIMARY are the three axes you browse by, and they stand open in the panel. The lens
- *    decides which question the graph answers, so it must never cost a click to find out
- *    what it is set to.
- *  - SECONDARY are diagnostics - reached for when something is wrong, not while browsing -
- *    so they fold away. The fold says "in use" when one of them is active, because a
- *    collapsed control that hides the state in force is worse than no control.
+ * The colour lenses, as pills. Each description says what the COLOUR means, in the same
+ * grammar and - load-bearing - on ONE line: the hint sits above the rest of the panel, so
+ * a description that wraps for some lenses and not others makes everything below it jump
+ * as the pointer crosses the row. The pill carries the name, so the hint never repeats it.
  */
 const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
   { key: 'domain', label: 'Domain', desc: 'one colour per field of knowledge' },
   { key: 'authority', label: 'Authority', desc: 'brighter = more pages link here' },
   { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
-]
-const LENSES_SECONDARY: Array<{ key: Lens; label: string; desc: string }> = [
   { key: 'type', label: 'Page type', desc: 'a colour per wiki bucket' },
   { key: 'orphans', label: 'Orphans', desc: 'red = nothing links here' },
   { key: 'stubs', label: 'Stubs', desc: 'amber = thin page, under 1 KB' },
 ]
-const SECONDARY_KEYS: ReadonlySet<Lens> = new Set(LENSES_SECONDARY.map((l) => l.key))
 
 /**
  * A small canvas-corner legend (bottom-right). The metric lenses each get a one-line key; the

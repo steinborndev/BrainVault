@@ -355,7 +355,7 @@ button {
 .screen[hidden] {
   display: none;
 }
-/* Full-bleed screens (graph, research columns) manage their own inner padding. */
+/* Full-bleed screens (graph, library, research columns) manage their own inner padding. */
 .screen.flush {
   padding: 0;
   overflow: hidden;
@@ -716,11 +716,34 @@ button.spill-link:hover {
   border-radius: 0 4px 4px 0;
 }
 
-/* ---- Stat tiles ---- */
+/* ---- Stat tiles ----
+   Three rows, two columns: the label spans, the number and its sparkline share a row,
+   and the caption row is SHARED by `.sub` and the hover affordance `.goto` - stacked,
+   not stacked up. Both used to cost a row each: the sparkline sat absolutely in space
+   the padding had to leave free, and `.goto` reserved 23px in every tile to render at
+   opacity 0. Together that was a blank line in all four tiles because one of them has
+   a chart. */
 .stat {
-  padding: 12px 14px;
+  padding: 11px 14px 10px;
   position: relative;
   overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+}
+.stat .label,
+.stat .sub,
+.statlink .goto {
+  grid-column: 1 / -1;
+}
+.stat .value {
+  grid-column: 1;
+}
+/* Same cell: the caption gives way to "where this goes" while the pointer is on it. */
+.stat .sub,
+.statlink .goto {
+  grid-row: 3;
 }
 .stat .delta {
   font-size: 11.5px;
@@ -732,11 +755,10 @@ button.spill-link:hover {
 .stat .delta.good { color: var(--ok); }
 .stat .delta.bad { color: var(--err); }
 .stat .spark {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  grid-column: 2;
+  grid-row: 2;
   width: 74px;
-  height: 26px;
+  height: 28px;
   opacity: 0.9;
 }
 .spark polyline {
@@ -758,14 +780,14 @@ button.spill-link:hover {
 .stat .value {
   font-size: 25px;
   font-weight: 700;
-  line-height: 1.1;
-  margin-top: 4px;
+  line-height: 1.15;
+  margin-top: 2px;
   letter-spacing: -0.02em;
 }
 .stat .sub {
   font-size: 12px;
   color: var(--text-dim);
-  margin-top: 2px;
+  transition: opacity 0.12s;
 }
 .stat .value.ok {
   color: var(--ok);
@@ -2733,8 +2755,66 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
 }
 
-/* ── The lens list: a radio group, not a dropdown. Every option shows what its colour
-   means, in the same grammar, so the three read as one scale of choices. ── */
+/* ── View pills. Six options in the space the three-row radio list took, so the
+   diagnostic lenses no longer need a fold of their own. What each one means is said
+   on demand, in the hint line below. ── */
+.pillrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.viewpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.viewpill:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.viewpill[aria-checked='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.viewpill:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.viewpill .pd {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+.viewpill[aria-checked='true'] .pd {
+  opacity: 1;
+}
+/* Fixed height and one line, always: this sits above the rest of the panel, so a hint
+   that wrapped for some options and not others would shift everything below it every
+   time the pointer crossed the row. */
+.pillhint {
+  height: 16px;
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .lenslist {
   display: grid;
   gap: 2px;
@@ -3125,15 +3205,16 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-dim);
 }
 /* The search sits ON the canvas (top-right), mirroring the zoom controls top-left. */
-.graph-search-overlay {
-  position: absolute;
-  top: 10px;
-  right: 12px;
+/* In the canvas bar now, not floating over the corner it used to share with it. The
+   result list still drops from the field, so the field stays the positioning context. */
+.graph-search-inbar {
+  position: relative;
   z-index: 5;
+  flex: none;
+  width: min(300px, 34%);
   background: var(--bg);
-  width: min(320px, calc(100% - 140px));
 }
-.graph-search-overlay input {
+.graph-search-inbar input {
   min-width: 0;
   flex: 1;
 }
@@ -3936,9 +4017,22 @@ details.hot-cache[open] .hc-summary::before {
 .graph-controls {
   position: absolute;
   top: 10px;
-  left: 12px;
+  left: 10px;
+  right: 10px;
+  z-index: 3;
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  backdrop-filter: blur(8px);
+}
+.graph-controls .scopeline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .graph-controls .btn {
   background: var(--bg);
@@ -4449,7 +4543,52 @@ kbd {
   font-size: 13.5px;
 }
 
-/* ---- Library (redesign 2026-08): the browse path ---- */
+/* ---- Library: the graph's panel, over the page table (rework 2026-08-24) ----
+   Same two scope filters in the same place, so what you learn in one screen works in
+   the other. The row above the table keeps only what is about the table. */
+.library {
+  display: grid;
+  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+.library > .gpanel,
+.lib-main {
+  min-height: 0;
+}
+.lib-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.lib-main > .dtable-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lib-main > .dtable-card > table {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The header has to stay put while the body scrolls under it. */
+.lib-main > .dtable-card thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}
+.typechips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
 .lib-bar {
   display: flex;
   align-items: center;
@@ -4864,7 +5003,6 @@ kbd {
   color: var(--accent);
   font-size: 11.5px;
   font-weight: 500;
-  margin-top: 6px;
   opacity: 0;
   transition: opacity 0.12s;
 }
@@ -4872,15 +5010,41 @@ kbd {
 .statlink:focus-visible .goto {
   opacity: 1;
 }
+.statlink:hover .sub,
+.statlink:focus-visible .sub {
+  opacity: 0;
+}
 
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
+}
+/* An empty relative box: it contributes no height, so the SIDE RAIL sets the row and
+   Activity fills it. Measured before: the feed ran 1040px past the rail's bottom. */
+.home-act {
+  position: relative;
+  min-height: 340px;
+}
+.home-act > .feed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.home-act .feed-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 @media (max-width: 1100px) {
   .home-grid { grid-template-columns: 1fr; }
+  /* Stacked, there is no rail to match - let it run. */
+  .home-act { min-height: 0; }
+  .home-act > .feed { position: static; }
+  .home-act .feed-scroll { overflow: visible; }
 }
 .home-side {
   display: flex;

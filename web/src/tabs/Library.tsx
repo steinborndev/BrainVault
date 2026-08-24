@@ -31,7 +31,24 @@ const BUCKET_LABELS: Record<string, string> = {
 const bucketLabel = (type: string): string => BUCKET_LABELS[type] ?? type
 
 type SortKey = 'changed' | 'title' | 'backlinks'
-type HealthFilter = 'any' | 'orphans' | 'stubs'
+/**
+ * The four subsets of the page index, as ONE choice. System used to be a separate
+ * toggle sitting apart from the three it belongs with - but it is a subset like the
+ * others, not a second axis, so the other three now never show system pages.
+ */
+type Subset = 'all' | 'orphans' | 'stubs' | 'system'
+
+const SUBSETS: Array<{ key: Subset; label: string; desc: string }> = [
+  { key: 'all', label: 'All pages', desc: 'every page except the system ones' },
+  { key: 'orphans', label: 'Orphans', desc: 'nothing links to these' },
+  { key: 'stubs', label: 'Stubs', desc: 'thin pages, under 1 KB' },
+  { key: 'system', label: 'System', desc: 'index hubs, MOCs, reports' },
+]
+const SORTS: Array<{ key: SortKey; label: string; desc: string }> = [
+  { key: 'changed', label: 'Changed', desc: 'most recently edited first' },
+  { key: 'title', label: 'Title', desc: 'alphabetical, A to Z' },
+  { key: 'backlinks', label: 'Backlinks', desc: 'most linked pages first' },
+]
 
 const PAGE_SIZE = 50
 
@@ -48,18 +65,21 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
   const [query, setQuery] = useState('')
   const [type, setType] = useState<string | null>(null)
   const [domain, setDomain] = useState<string | null | 'none'>(null)
-  const [health, setHealth] = useState<HealthFilter>('any')
+  const [subset, setSubset] = useState<Subset>('all')
   const [sort, setSort] = useState<SortKey>('changed')
-  const [showSystem, setShowSystem] = useState(false)
   const [limit, setLimit] = useState(PAGE_SIZE)
+  const [domFilter, setDomFilter] = useState('')
+  /** Hover previews an option's meaning; leaving falls back to the one in force. */
+  const [subsetHover, setSubsetHover] = useState<Subset | null>(null)
+  const [sortHover, setSortHover] = useState<SortKey | null>(null)
 
   const nodes = graph.data?.nodes
 
   // System pages (index hubs, reports) are scaffolding - hidden unless asked for, same
   // default the graph uses.
   const knowledge = useMemo(
-    () => (nodes ?? []).filter((n) => showSystem || (n.kind ?? 'knowledge') === 'knowledge'),
-    [nodes, showSystem],
+    () => (nodes ?? []).filter((n) => (subset === 'system' ? (n.kind ?? 'knowledge') !== 'knowledge' : (n.kind ?? 'knowledge') === 'knowledge')),
+    [nodes, subset],
   )
 
   const typeCounts = useMemo(() => {
@@ -85,8 +105,8 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       if (type !== null && n.type !== type) return false
       if (domain === 'none' && n.domain !== null) return false
       if (domain !== null && domain !== 'none' && n.domain !== domain) return false
-      if (health === 'orphans' && !isOrphan(n)) return false
-      if (health === 'stubs' && !isStub(n)) return false
+      if (subset === 'orphans' && !isOrphan(n)) return false
+      if (subset === 'stubs' && !isStub(n)) return false
       if (terms.length > 0) {
         const hay = `${n.title} ${n.tags.join(' ')} ${n.domain ?? ''}`.toLowerCase()
         if (!terms.every((t) => hay.includes(t))) return false
@@ -98,10 +118,9 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
     else if (sort === 'backlinks') list.sort((a, b) => b.in - a.in || a.title.localeCompare(b.title))
     else list.sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))
     return list
-  }, [knowledge, query, type, domain, health, sort])
+  }, [knowledge, query, type, domain, subset, sort])
 
   const shown = filtered.slice(0, limit)
-  const [domainOpen, setDomainOpen] = useState(false)
 
   if (graph.isLoading) return <div className="empty">Loading the page index…</div>
   if (graph.isError)
@@ -114,121 +133,186 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       </div>
     )
 
+  const domainRows = [
+    ...domainCounts.domains.map(([d, c]) => [d, c] as [string, number]),
+    ...(domainCounts.none > 0 ? [['', domainCounts.none] as [string, number]] : []),
+  ]
+    .sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : a.localeCompare(b)))
+    .filter(([d]) => {
+      const f = domFilter.trim().toLowerCase()
+      return f === '' || (d === '' ? 'no domain' : d).toLowerCase().includes(f)
+    })
+  const subsetHint = SUBSETS.find((x) => x.key === (subsetHover ?? subset))!.desc
+  const sortHint = SORTS.find((x) => x.key === (sortHover ?? sort))!.desc
+  const reset = (): void => {
+    setQuery('')
+    setType(null)
+    setDomain(null)
+    setSubset('all')
+    setSort('changed')
+    setDomFilter('')
+    setLimit(PAGE_SIZE)
+  }
+
   return (
     <div className="library">
-      <div className="lib-bar">
-        <div className="hist-search lib-search">
-          <Icon name="search" />
-          <input
-            type="search"
-            placeholder="Filter by title, tag or domain…"
-            aria-label="Filter pages by title, tag or domain"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setLimit(PAGE_SIZE)
-            }}
-          />
-        </div>
-        <div className="seg lib-types" role="group" aria-label="Page type">
-          <button className={type === null ? 'active' : ''} onClick={() => setType(null)}>
-            All <span className="chip-n">{knowledge.length}</span>
-          </button>
-          {typeCounts.slice(0, 4).map(([t, count]) => (
-            <button key={t} className={type === t ? 'active' : ''} onClick={() => setType(type === t ? null : t)}>
-              {bucketLabel(t)} <span className="chip-n">{count}</span>
+      {/* The same standing panel as the graph, carrying the same two scope filters in
+          the same order - page types, then domains - so a filter learned in one screen
+          behaves the same in the other. What is left above the table belongs to the
+          table: how much of it is in view, and the one tool that narrows it. */}
+      <aside className="gpanel" aria-label="Library filters">
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Page types</span>
+            <span className="spacer" />
+            <span className="gp-state">{type === null ? 'all' : bucketLabel(type)}</span>
+            <button className="btn ghost" onClick={reset} title="Back to every page, newest first">
+              Reset
             </button>
-          ))}
+          </div>
+          <div className="typechips">
+            {typeCounts.map(([t, count]) => {
+              const active = type === t
+              return (
+                <button
+                  key={t}
+                  className={`chip${active ? ' active' : ''}${type !== null && !active ? ' dimmed' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => setType(active ? null : t)}
+                >
+                  {bucketLabel(t)} <span className="chip-n">{count}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div className="dropdown">
-          <button
-            className={`chip${domain !== null ? ' active' : ''}`}
-            aria-haspopup="menu"
-            aria-expanded={domainOpen}
-            onClick={() => setDomainOpen((o) => !o)}
-          >
-            {domain === null ? 'All domains' : domain === 'none' ? 'no domain' : domain} <Icon name="chevron" />
-          </button>
-          {domainOpen && (
-            <div className="dropdown-menu" role="menu">
-              <button
-                className="dropdown-item"
-                onClick={() => {
-                  setDomain(null)
-                  setDomainOpen(false)
-                }}
-              >
-                All domains
+
+        <div className="gp-sec grow">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Domains</span>
+            <span className="spacer" />
+            {domain !== null ? (
+              <button className="btn ghost" onClick={() => setDomain(null)} title="Show all domains">
+                <Icon name="x" /> Clear
               </button>
-              <div className="dropdown-sep" />
-              {domainCounts.domains.map(([d, count]) => (
+            ) : (
+              <span className="gp-state">showing all</span>
+            )}
+          </div>
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={domFilter}
+              placeholder="Filter domains…"
+              onChange={(e) => setDomFilter(e.target.value)}
+              aria-label="Filter the domain list"
+            />
+          </div>
+          <div className="domlist">
+            {domainRows.map(([d, count]) => {
+              const key = d === '' ? 'none' : d
+              const active = domain === key
+              return (
                 <button
-                  key={d}
-                  className="dropdown-item"
-                  onClick={() => {
-                    setDomain(d)
-                    setDomainOpen(false)
-                  }}
+                  key={key}
+                  className={`domrow${active ? ' active' : ''}${domain !== null && !active ? ' dimmed' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => setDomain(active ? null : key)}
                 >
-                  <span className="chip-dot" style={{ background: domainColor(d) }} />
-                  {d}
-                  <span className="count">{count}</span>
+                  <span className="dot" style={{ background: d === '' ? 'var(--muted)' : domainColor(d) }} aria-hidden />
+                  <span className="nm">{d === '' ? 'no domain' : d}</span>
+                  <span className="n">{count}</span>
                 </button>
-              ))}
-              {domainCounts.none > 0 && (
-                <button
-                  className="dropdown-item"
-                  onClick={() => {
-                    setDomain('none')
-                    setDomainOpen(false)
-                  }}
-                >
-                  <em>no domain</em>
-                  <span className="count">{domainCounts.none}</span>
-                </button>
-              )}
-            </div>
-          )}
+              )
+            })}
+            {domainRows.length === 0 && <div className="gp-none">No domain matches that.</div>}
+          </div>
         </div>
-        <div className="seg" role="group" aria-label="Health filter">
-          <button className={health === 'any' ? 'active' : ''} onClick={() => setHealth('any')}>
-            All pages
-          </button>
-          <button
-            className={health === 'orphans' ? 'active' : ''}
-            onClick={() => setHealth(health === 'orphans' ? 'any' : 'orphans')}
-            title="Knowledge pages with no links in either direction"
-          >
-            Orphans
-          </button>
-          <button
-            className={health === 'stubs' ? 'active' : ''}
-            onClick={() => setHealth(health === 'stubs' ? 'any' : 'stubs')}
-            title="Thin pages (under 1 KB)"
-          >
-            Stubs
-          </button>
+
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Show</span>
+          </div>
+          <div className="pillrow" role="radiogroup" aria-label="Subset">
+            {SUBSETS.map((x) => (
+              <button
+                key={x.key}
+                className="viewpill"
+                role="radio"
+                aria-checked={subset === x.key}
+                onClick={() => {
+                  setSubset(x.key)
+                  setLimit(PAGE_SIZE)
+                }}
+                onMouseEnter={() => setSubsetHover(x.key)}
+                onMouseLeave={() => setSubsetHover(null)}
+                onFocus={() => setSubsetHover(x.key)}
+                onBlur={() => setSubsetHover(null)}
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
+          <div className="pillhint">{subsetHint}</div>
         </div>
-        <span className="spacer" />
-        <button
-          className={`chip${showSystem ? ' active' : ''}`}
-          onClick={() => setShowSystem((s) => !s)}
-          title="Include structural pages (index hubs, registry) and reports"
-        >
-          System
-        </button>
-        <div className="seg" role="group" aria-label="Sort order">
-          <button className={sort === 'changed' ? 'active' : ''} onClick={() => setSort('changed')}>
-            Changed
-          </button>
-          <button className={sort === 'title' ? 'active' : ''} onClick={() => setSort('title')}>
-            Title
-          </button>
-          <button className={sort === 'backlinks' ? 'active' : ''} onClick={() => setSort('backlinks')}>
-            Backlinks
-          </button>
+
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Sort by</span>
+          </div>
+          <div className="pillrow" role="radiogroup" aria-label="Sort by">
+            {SORTS.map((x) => (
+              <button
+                key={x.key}
+                className="viewpill"
+                role="radio"
+                aria-checked={sort === x.key}
+                onClick={() => setSort(x.key)}
+                onMouseEnter={() => setSortHover(x.key)}
+                onMouseLeave={() => setSortHover(null)}
+                onFocus={() => setSortHover(x.key)}
+                onBlur={() => setSortHover(null)}
+              >
+                {x.label}
+              </button>
+            ))}
+          </div>
+          <div className="pillhint">{sortHint}</div>
         </div>
-      </div>
+      </aside>
+
+      <div className="lib-main">
+        <div className="lib-bar">
+          <span className="scopeline">
+            Showing <strong>{shown.length} of {nodes?.length ?? 0}</strong> pages
+            {type !== null || domain !== null || subset !== 'all' || query.trim() !== ''
+              ? ` - ${[
+                  subset !== 'all' ? SUBSETS.find((x) => x.key === subset)!.label.toLowerCase() : '',
+                  type !== null ? bucketLabel(type).toLowerCase() : '',
+                  domain !== null ? `in ${domain === 'none' ? 'no domain' : domain}` : '',
+                  query.trim() !== '' ? `matching “${query.trim()}”` : '',
+                ]
+                  .filter(Boolean)
+                  .join(', ')}`
+              : ' - the whole vault'}
+            , {sortHint}.
+          </span>
+          <span className="spacer" />
+          <div className="hist-search lib-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              placeholder="Filter by title, tag or domain…"
+              aria-label="Filter pages by title, tag or domain"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setLimit(PAGE_SIZE)
+              }}
+            />
+          </div>
+        </div>
 
       <div className="card dtable-card">
         {shown.length === 0 ? (
@@ -294,7 +378,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
         <div className="dtable-foot">
           <span>
             Showing {shown.length} of {filtered.length} pages
-            {filtered.length !== knowledge.length ? ` (${knowledge.length} total)` : ''}
+            {filtered.length !== knowledge.length ? ` (${knowledge.length} in this subset)` : ''}
           </span>
           <span className="spacer" />
           {filtered.length > limit && (
@@ -303,6 +387,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </button>
           )}
         </div>
+      </div>
       </div>
     </div>
   )

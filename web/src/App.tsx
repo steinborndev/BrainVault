@@ -38,8 +38,8 @@ const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
   {
     label: 'Knowledge',
     items: [
-      { id: 'library', label: 'Library', icon: 'book', route: '/library' },
       { id: 'vault', label: 'Graph', icon: 'graph', route: '/graph' },
+      { id: 'library', label: 'Library', icon: 'book', route: '/library' },
     ],
   },
   {
@@ -225,11 +225,6 @@ export function App(): React.ReactElement {
             {crumbSub !== '' && <span className="sub">{crumbSub}</span>}
           </h1>
           <span className="spacer" />
-          <button className="searchbtn" onClick={() => setPaletteOpen(true)} aria-haspopup="dialog">
-            <Icon name="search" />
-            Search pages, jump anywhere…
-            <kbd>Ctrl K</kbd>
-          </button>
           <StatusPopover connected={connected} />
         </header>
 
@@ -249,8 +244,10 @@ export function App(): React.ReactElement {
               <Home />
             </div>
           </section>
-          <section className="screen" hidden={screen !== 'library'} aria-label="Library">
-            <div className="lane">
+          {/* Library is a workspace like the graph: panel plus a table that scrolls
+              inside itself, filling the viewport rather than growing past it. */}
+          <section className="screen flush" hidden={screen !== 'library'} aria-label="Library">
+            <div className="lane wide">
               <Library vaultName={vaultName} />
             </div>
           </section>

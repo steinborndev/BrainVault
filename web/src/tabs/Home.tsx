@@ -107,6 +107,7 @@ export function Home(): React.ReactElement {
       <StatBand stats={data} gapCount={graph.data?.unresolved ?? null} />
 
       <div className="home-grid section">
+        <div className="home-act">
         <ActivityFeed
           stats={data}
           jobs={jobs.data?.jobs ?? []}
@@ -114,6 +115,7 @@ export function Home(): React.ReactElement {
           vaultName={data.vaultName}
           onOpenJob={setDrawerJob}
         />
+        </div>
         <div className="home-side">
           <div className="card card-pad">
             <h3 className="section-title">Growth · 30 days</h3>
@@ -430,7 +432,7 @@ function ActivityFeed({
     return out
   }, [jobs, stats.commits, maint, onOpenJob])
 
-  const shown = events.filter((e) => filter === 'all' || e.kind === filter || (filter === 'ingest' && e.kind === 'failed')).slice(0, 14)
+  const shown = events.filter((e) => filter === 'all' || e.kind === filter || (filter === 'ingest' && e.kind === 'failed')).slice(0, 40)
 
   return (
     <div className="card feed">
@@ -450,6 +452,7 @@ function ActivityFeed({
           </button>
         ))}
       </div>
+      <div className="feed-scroll">
       {shown.length === 0 ? (
         <div className="empty">Nothing here yet - ingest something and the stream begins.</div>
       ) : (
@@ -498,6 +501,7 @@ function ActivityFeed({
           </div>
         ))
       )}
+      </div>
       <div className="feed-foot">
         <button className="linkish" onClick={() => navigate('/inbox')}>
           Full history in the inbox

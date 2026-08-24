@@ -208,3 +208,38 @@ it did nothing. The guard now measures box size instead.
 Verified: 567 server + 88 web tests green, clean typecheck and build, 0 console errors
 across 10 screen loads (5 screens x 2 themes) against the live service, fullscreen entered
 and left by keyboard.
+
+
+## Phase 10: density pass (2026-08-24)
+
+Second review round on the mockup, then implemented. Structure and density only - no new
+tokens, no data-layer change.
+
+- [x] Sidebar: Graph above Library; the global search trigger leaves the topbar (Ctrl+K
+      still opens the palette - the button was 260px of permanent reminder)
+- [x] Home: stat tiles 119px -> 90px. Two things each cost a row in all four tiles: the
+      sparkline sat absolutely in space the padding had to leave free, and `.goto`
+      reserved 23px to render at opacity 0. The sparkline is in the flow beside the
+      number now, and `.goto` shares the caption row with `.sub` (they swap on hover)
+- [x] Home: Activity is bounded and scrolls. In a plain grid the taller column sets the
+      row and Activity is always the taller one - measured, the feed ran 1040px past the
+      side rail. Its column is now an empty relative box with the card laid over it, so
+      the rail sets the height (verified flush to the pixel, 4890px of feed in 622px)
+- [x] Graph: the context row above the canvas is gone. Fit, the scope line, the search,
+      the shortcut tip and Fullscreen share one bar ON the canvas (`GraphCanvas` grew a
+      `barExtra` slot). The -/+ buttons are gone; the tip documents Ctrl+wheel and drag
+- [x] Graph: six lens pills replace the three-row radio list plus its fold. The hint line
+      below them is FIXED height and one line - it sits above the rest of the panel, so a
+      description that wrapped for some lenses would shift everything below it on hover
+      (verified: 16px and a constant panel offset across all six)
+- [x] Graph: entering or leaving fullscreen re-frames, via the fitKey - which also clears
+      `userMoved`, so a graph the user had panned is re-framed too instead of staying
+      parked off-screen (verified 1190 -> 1658 -> 1190px, symmetric margins throughout)
+- [x] Library: the graph's panel, with the same two scope filters in the same order
+      (page types, then domains), then the table's own options as pills with the same
+      hover hints. `System` became the fourth option of All pages / Orphans / Stubs
+      rather than a separate toggle - it was always a subset, not a second axis, so the
+      other three now never show system pages
+
+Verified against the live service: 567 server + 88 web tests green, clean typecheck and
+build, 0 console errors across 10 screen loads (5 screens x 2 themes).

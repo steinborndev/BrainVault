@@ -93,6 +93,8 @@ export interface GraphCanvasProps {
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
    */
   fitKey?: string
+  /** Rendered in the canvas control bar, right of Fit (scope line, tip, fullscreen). */
+  barExtra?: React.ReactNode
   /** Single click/tap on a node (when the click doesn't isolate - see onClusterClick). */
   onSelect: (node: GraphNode) => void
   /**
@@ -222,7 +224,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, onSelect, onClusterClick, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, barExtra, onSelect, onClusterClick, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -1397,6 +1399,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
           touchAction: 'none',
         }}
       />
+      {/* The canvas bar: Fit, then whatever the screen puts beside it (the scope line,
+          the shortcut tip, fullscreen). The −/+ buttons are gone - Ctrl+wheel and the
+          +/- keys do the same job without spending bar width on it. */}
       <div className="graph-controls">
         <button
           className="btn ghost"
@@ -1404,16 +1409,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
             userMovedRef.current = false
             fitToView()
           }}
-          title="Fit the view to the graph"
+          title="Fit the view to the graph (f)"
         >
           Fit
         </button>
-        <button className="btn ghost" onClick={() => zoomBy(1 / 1.4)} title="Zoom out" aria-label="Zoom out">
-          −
-        </button>
-        <button className="btn ghost" onClick={() => zoomBy(1.4)} title="Zoom in" aria-label="Zoom in">
-          +
-        </button>
+        {barExtra}
       </div>
       {overlay}
       {layouting && <div className="graph-status">Laying out…</div>}
