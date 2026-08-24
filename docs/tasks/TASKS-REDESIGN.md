@@ -447,3 +447,60 @@ The lint verdict keyed on the run's exit status AND its artifact, so after the r
 recovered the card read "Lint ran, but wrote no report - the newest one there is 0 days old".
 The artifact alone decides now: a covering report is healthy however it got there, and the
 failed run stays visible on its own in the run history.
+
+## Phase 8: the ingest commit that lost a race with our own status poll (2026-08-26)
+
+Surfaced the day after Phase 7 shipped, by the reconcile pass firing with a suspiciously
+round number: `reconcile: 13 page(s) left uncommitted` - an entire ingest, not the one or
+two leftovers the pass exists for.
+
+**Evidence.** No `ingest: <source>` commit in the vault for that job; `commit_hash` and
+`created_pages` NULL on the job row; the reconcile commit timestamped the same second. The
+job log has both halves:
+
+```
+staging 13 page(s) the tool stream did not report (F4)
+git commit failed: fatal: Unable to create '<vault>/.git/index.lock': File exists.
+```
+
+So the per-run sweep worked - this run WAS the sole writer - and the commit still did not
+happen.
+
+**Root cause.** `.git/index.lock` contention with our own read. `queue.ts` transitions the
+job to `done` and then commits:
+
+```
+this.store.transition(job.id, 'done', …)   // publishes the SSE tick
+const committed = await this.commitStep(…) // git add, milliseconds later
+```
+
+Every open dashboard refetches `['stats']` on that tick, and `/api/v1/stats` calls
+`unversionedWikiPages()` - a `git status` OUTSIDE the commit mutex. A plain `git status` is
+not a pure read: it refreshes the index and writes it back, holding `.git/index.lock` while
+it does. The commit mutex serializes every WRITE the service makes and never covered this
+one read, so the window opened on every single ingest completion and closed only when no
+dashboard was watching. Measured on a 400-file repo: the index mtime moves after a plain
+`git status` and does not move with `--no-optional-locks`.
+
+Worth stating: the Phase 7 net did its job - the wiki pages were committed seconds later and
+no knowledge was lost. What the net does not cover is everything outside `wiki/**`, so the
+run's `.raw/` payload stayed untracked, and the job lost its revert anchor.
+
+- [x] `gitRead()` for the status calls that run outside the mutex (`dirtyPaths`,
+      `unversionedWikiPages`): `--no-optional-locks` makes git skip the index write-back, so
+      a read cannot take the lock. Identical output, only the write is skipped.
+- [x] `git()` retries on lock contention (3 attempts, 120/240/360 ms). The vault is a shared
+      DIRECTORY, not just our repo - Obsidian's git plugin or a terminal can hold the lock
+      too, and our mutex will never cover those. Safe for every command including `commit`,
+      because git bails before doing any work when it cannot take the lock; bounded, so a
+      lock left by a crashed git still surfaces as the same failure it does today.
+- [x] Pinned in `git-dirty.test.ts` against a real repo: a read leaves the index mtime
+      untouched, a plain `git status` moves it (the control), a write survives a lock held
+      for 150 ms, and a lock that never clears still fails. The first and third fail with
+      the fix backed out.
+- [x] The orphaned `.raw/` payload committed to the vault by hand.
+- [ ] OPEN: three `.raw/<ulid>/` payloads of FAILED jobs are untracked, which is arguably
+      correct (no successful ingest, no commit) but has never been stated as a rule.
+- [ ] OPEN: `.raw/deferred/` holds 179 MB of parked payloads, untracked and in no ignore
+      list. Committing that into vault history would be a mistake; excluding it should be a
+      deliberate decision, not an accident.

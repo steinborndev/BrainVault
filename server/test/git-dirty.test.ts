@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { dirtyPaths, newWikiPaths, commitVault, unversionedWikiPages } from '../src/pipeline/git.js'
+import { dirtyPaths, newWikiPaths, commitPaths, commitVault, unversionedWikiPages } from '../src/pipeline/git.js'
 
 // Runs against a REAL git repo: the bug this guards (finding F4) was about how git reports
 // paths — quoting, renames — which a mocked git could not reproduce.
@@ -116,6 +116,71 @@ describe('unversionedWikiPages', () => {
       expect(await unversionedWikiPages(bare)).toEqual({ untracked: [], modified: [] })
     } finally {
       fs.rmSync(bare, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('index.lock discipline', () => {
+  // 2026-08-24: an ingest's `git add` failed with "Unable to create .git/index.lock: File
+  // exists" and its commit was dropped - the run's `.raw/` payload and address counter stayed
+  // unversioned, and only the wiki pages were recovered (by the reconcile pass, which covers
+  // nothing else). The lock holder was our own status polling: `/api/v1/stats` runs one on
+  // every SSE tick, and a job's `done` transition publishes that tick milliseconds before the
+  // run's own commit. Both halves of the fix are pinned here.
+
+  /** Stat info git has cached is now stale, so the next read WANTS to refresh the index. */
+  const staleTheIndex = (): void => {
+    const now = Date.now() / 1000 + 5
+    fs.utimesSync(path.join(repo, 'wiki/concepts/Existing.md'), now, now)
+  }
+  const indexMtime = (): number => fs.statSync(path.join(repo, '.git/index')).mtimeMs
+
+  it('a read does not take the lock - it never rewrites the index', async () => {
+    staleTheIndex()
+    const before = indexMtime()
+    await dirtyPaths(repo)
+    await unversionedWikiPages(repo)
+    // A plain `git status` writes the refreshed index back, and holds `.git/index.lock`
+    // while it does. `--no-optional-locks` is what skips that write; without it these two
+    // reads race every commit the service makes.
+    expect(indexMtime()).toBe(before)
+  })
+
+  it('the control: a plain status DOES rewrite it, which is the race being avoided', () => {
+    staleTheIndex()
+    const before = indexMtime()
+    execFileSync('git', ['-C', repo, 'status', '--porcelain', '-z', '--untracked-files=all'], { stdio: 'pipe' })
+    expect(indexMtime()).not.toBe(before)
+  })
+
+  it('a write retries through a lock held by someone else', async () => {
+    // Anything may hold it for a few milliseconds - Obsidian's git plugin, a terminal, our
+    // own reads before this fix. A command that loses the race did no work at all, so the
+    // retry is safe: this must end in a commit, not in pages left on disk.
+    write('wiki/concepts/Written While Locked.md', '# page')
+    const lock = path.join(repo, '.git/index.lock')
+    fs.writeFileSync(lock, '')
+    const release = setTimeout(() => fs.rmSync(lock, { force: true }), 150)
+    try {
+      const res = await commitPaths(repo, 'ingest: contested', ['wiki/concepts/Written While Locked.md'])
+      expect(res.committed).toBe(true)
+      expect(res.committedPages).toEqual(['wiki/concepts/Written While Locked.md'])
+    } finally {
+      clearTimeout(release)
+      fs.rmSync(lock, { force: true })
+    }
+  })
+
+  it('gives up on a lock that never clears, rather than hanging', async () => {
+    write('wiki/concepts/Never Committed.md', '# page')
+    const lock = path.join(repo, '.git/index.lock')
+    fs.writeFileSync(lock, '')
+    try {
+      await expect(commitPaths(repo, 'ingest: stuck', ['wiki/concepts/Never Committed.md'])).rejects.toThrow(
+        /index\.lock/,
+      )
+    } finally {
+      fs.rmSync(lock, { force: true })
     }
   })
 })

@@ -41,9 +41,53 @@ export interface CommitResult {
   readonly note?: string
 }
 
+/**
+ * `.git/index.lock` is held by every git command that writes the index, and a plain
+ * `git status` is one of them - it refreshes the index and writes it back. Our own commits
+ * are serialized by the shared commit mutex, but the vault is a shared DIRECTORY: the
+ * dashboard's own status polling, Obsidian's git plugin, a terminal, anything can hold the
+ * lock for a few milliseconds at exactly the wrong moment.
+ *
+ * A command that fails this way did no work at all - git bails before touching anything - so
+ * retrying it is safe for reads and writes alike, `commit` included. Measured 2026-08-24: an
+ * ingest's `git add` lost this race, the run's commit was dropped, and its `.raw/` payload
+ * and address counter stayed unversioned (the wiki pages were recovered by the reconcile
+ * pass, which only covers `wiki/**`).
+ */
+const LOCK_RETRIES = 3
+const LOCK_BACKOFF_MS = 120
+
+function isIndexLockContention(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes('index.lock') && message.includes('File exists')
+}
+
 async function git(vaultRoot: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await runTool('git', ['-C', vaultRoot, ...args], { timeoutMs: 60_000 })
-  return stdout
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const { stdout } = await runTool('git', ['-C', vaultRoot, ...args], { timeoutMs: 60_000 })
+      return stdout
+    } catch (err) {
+      // A lock held by a crashed git never clears, so this stays bounded: after the last
+      // attempt the caller sees the original failure, exactly as before.
+      if (attempt > LOCK_RETRIES || !isIndexLockContention(err)) throw err
+      await new Promise((resolve) => setTimeout(resolve, LOCK_BACKOFF_MS * attempt))
+    }
+  }
+}
+
+/**
+ * Read-only git, for the status calls that run OUTSIDE the commit mutex - `/api/v1/stats`
+ * polls one on every SSE tick, and a `done` transition publishes that tick milliseconds
+ * before the run's own commit runs, so an open dashboard sat right in the window.
+ *
+ * `--no-optional-locks` is what keeps a read out of `.git/index.lock`: git then skips the
+ * index write-back it would otherwise do to refresh cached stat info. The reported status is
+ * identical - only the write is skipped (verified against a 400-file repo: the index mtime
+ * moves after a plain `git status` and does not move with the flag).
+ */
+async function gitRead(vaultRoot: string, args: readonly string[]): Promise<string> {
+  return git(vaultRoot, ['--no-optional-locks', ...args])
 }
 
 /**
@@ -61,7 +105,7 @@ async function git(vaultRoot: string, args: readonly string[]): Promise<string> 
 export async function dirtyPaths(vaultRoot: string): Promise<Set<string>> {
   let raw: string
   try {
-    raw = await git(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+    raw = await gitRead(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
   } catch {
     // Not a repo, or git unavailable. Degrade to the Write/Edit-derived pathspec rather than
     // sinking the run: a commit that stages a little less is recoverable, a failed ingest is not.
@@ -119,7 +163,7 @@ export interface UnversionedPages {
 export async function unversionedWikiPages(vaultRoot: string): Promise<UnversionedPages> {
   let raw: string
   try {
-    raw = await git(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+    raw = await gitRead(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
   } catch {
     return { untracked: [], modified: [] }
   }
