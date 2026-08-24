@@ -2,7 +2,7 @@
  * Keeps derived artifacts and agent scratch out of the vault's git history.
  *
  * The vault is a git repo whose history is the user's record of what their knowledge base
- * actually is. Two kinds of file must never enter it:
+ * actually is. Three kinds of file must never enter it:
  *
  *  - REBUILDABLE INDEX DATA (`.vault-meta/chunks`, `bm25`, `embed-cache.json`) - hundreds of
  *    megabytes that regenerate from the wiki, and that `dirtyPaths` bracketing would
@@ -12,6 +12,10 @@
  *    scanner and dump its findings somewhere. That happened: a lint run committed a 254-line
  *    Python script and a 472 KB JSON dump into the vault permanently. The scratch was
  *    legitimate; keeping it forever was not.
+ *
+ *  - DEFERRED PAYLOADS (`.raw/deferred/`) - the waiting room for sources the pipeline
+ *    recognises but deliberately does not process, which are large by the very criteria
+ *    that park them there.
  *
  * Why an exclude and not "tell the agent to clean up": `BOOKKEEPING_PATHS` stages
  * `.vault-meta` wholesale on every commit, so anything left there at commit time lands in
@@ -48,7 +52,25 @@ export const SCRATCH_EXCLUDE_ENTRIES = [
   '.vault-meta/lint_scan*',
 ] as const
 
-const ALL_ENTRIES = [...RETRIEVE_EXCLUDE_ENTRIES, ...SCRATCH_EXCLUDE_ENTRIES] as const
+/**
+ * The deferred waiting room (`.raw/deferred/`, SPEC.md §4.2).
+ *
+ * `.raw/` is otherwise TRACKED on purpose - a commit captures the original source next to the
+ * pages made from it. Deferred payloads are the exception, because of what puts them there:
+ * audio/video awaiting a transcription plugin, unextracted archives, and PDFs deferred for
+ * being too large to OCR. They are big by definition (this vault parked a 179 MB scan), they
+ * are a WAITING ROOM rather than a record, and the moment one is actually processed it is
+ * re-dropped and lands in its own committed `.raw/<job-id>/`. Versioning the waiting room
+ * would put hundreds of megabytes into the user's history for material that either never
+ * gets ingested or gets committed properly on the second pass.
+ */
+export const DEFERRED_EXCLUDE_ENTRIES = ['.raw/deferred/'] as const
+
+const ALL_ENTRIES = [
+  ...RETRIEVE_EXCLUDE_ENTRIES,
+  ...SCRATCH_EXCLUDE_ENTRIES,
+  ...DEFERRED_EXCLUDE_ENTRIES,
+] as const
 
 /**
  * Idempotently appends the entries to the vault's `.git/info/exclude`. No-op when the vault

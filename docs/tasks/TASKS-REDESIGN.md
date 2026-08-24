@@ -499,8 +499,17 @@ run's `.raw/` payload stayed untracked, and the job lost its revert anchor.
       for 150 ms, and a lock that never clears still fails. The first and third fail with
       the fix backed out.
 - [x] The orphaned `.raw/` payload committed to the vault by hand.
-- [ ] OPEN: three `.raw/<ulid>/` payloads of FAILED jobs are untracked, which is arguably
-      correct (no successful ingest, no commit) but has never been stated as a rule.
-- [ ] OPEN: `.raw/deferred/` holds 179 MB of parked payloads, untracked and in no ignore
-      list. Committing that into vault history would be a mistake; excluding it should be a
-      deliberate decision, not an accident.
+- [x] `.raw/deferred/` joins the vault excludes (`DEFERRED_EXCLUDE_ENTRIES`). The rest of
+      `.raw/` is tracked on purpose - a commit captures the original source next to the pages
+      made from it - but the waiting room is the exception, because of what puts things
+      there: audio/video awaiting transcription, unextracted archives, and PDFs too large to
+      OCR. Large by the very criteria that park them. This vault held one 179 MB textless
+      851-page scan (`Print To PDF`, ~1 char/page), dropped 2026-07-24, whose job row had
+      since been cleared from history - so nothing pointed at it and nothing would ever have
+      cleaned it up. Deleted after confirming it had never been committed and that the
+      material had been re-dropped in parts, which the deferral message had advised.
+      A deferred payload is not lost by this: when one is actually processed it is re-dropped
+      and lands in its own committed `.raw/<job-id>/`.
+- [ ] OPEN: four `.raw/<ulid>/` job directories of non-`done` jobs (three failed, one
+      deferred) are untracked, which is arguably correct - no successful ingest, no commit -
+      but has never been stated as a rule, and two of them outlive their job rows.
