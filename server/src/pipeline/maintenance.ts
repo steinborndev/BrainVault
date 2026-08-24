@@ -152,6 +152,15 @@ export interface MaintenanceRun {
   /** SSE channel carrying this run's live log — the UI subscribes to it. */
   readonly channel: string
   readonly status: MaintenanceRunStatus
+  /**
+   * What this run is ABOUT, for surfaces outside the screen that started it (Home's
+   * in-flight list, the sidebar badge, the inbox). Only kinds whose subject is not implied
+   * by the kind itself set it: a research run's topic, a cleanup's page list. Without it
+   * the client falls back to the kind's title, which is exactly right for `lint`.
+   */
+  readonly label?: string
+  /** Research runs only: the lens key the run was started under (SPEC.md, "Achse A"). */
+  readonly profileKey?: string
   readonly startedAt: string
   readonly finishedAt?: string
   readonly result?: MaintenanceResult
@@ -166,6 +175,10 @@ const RUN_HISTORY_CAP = 25
 interface RunOptions {
   /** SDK session to resume, so the run inherits a conversation (used by `save`). */
   readonly resumeSessionId?: string
+  /** Human subject of the run, surfaced on the tracked record (see `MaintenanceRun.label`). */
+  readonly label?: string
+  /** Research lens key, surfaced on the tracked record. */
+  readonly profileKey?: string
   /** Overrides the default `maintenance: <kind>` commit subject. */
   readonly commitMessage?: string
   /** Vault-derived system-prompt extension; defaults to the domain registry for write runs. */
@@ -324,6 +337,9 @@ export class MaintenanceRunner {
         lens +
         overlap,
       'research',
+      // The topic and lens ride on the run record so every OTHER screen can name what is
+      // running - the dashboard used to know this only inside the composer that started it.
+      { label: topic, profileKey: profile.key },
     )
   }
 
@@ -632,6 +648,8 @@ export class MaintenanceRunner {
       kind,
       channel: maintenanceChannel(kind),
       status: 'running',
+      ...(opts.label !== undefined ? { label: opts.label } : {}),
+      ...(opts.profileKey !== undefined ? { profileKey: opts.profileKey } : {}),
       startedAt: new Date().toISOString(),
     }
     this.runs.set(id, run)
@@ -732,6 +750,9 @@ export class MaintenanceRunner {
   ): Promise<MaintenanceResult> {
     return this.runMutex.runExclusive(async () => {
       const channel = maintenanceChannel(kind)
+      // Stamped inside the mutex, i.e. when this run actually starts writing - the artifact
+      // check below asks "did THIS run produce it", not "does some old one exist".
+      const startedMs = Date.now()
       const log = (level: 'info' | 'warn' | 'error', message: string): void =>
         this.events.publish({ kind: 'log', log: { jobId: channel, ts: new Date().toISOString(), level, message } })
 
@@ -814,15 +835,33 @@ export class MaintenanceRunner {
 
       const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage, answer: res.result }
       if (kind === 'lint') {
-        // Prefer the written report file; fall back to parsing the agent's inline answer, so
-        // a run that summarised in text instead of writing a file still yields structure.
-        const fromFile = this.readLatestLintReport()
-        if (fromFile && fromFile.report.totalFindings > 0) {
-          return { ...base, lint: fromFile.report, reportPath: fromFile.path }
+        // The report file IS the deliverable: lint-fix is bounded by it, and the status model
+        // dates the whole area from it. A run that exits cleanly without writing one leaves
+        // both of those reading a report that may be months old - which is why this settles as
+        // a FAILURE rather than a success with nothing behind it. Measured against the run's
+        // own start, so yesterday's report can never stand in for today's run.
+        const fresh = this.readLatestLintReport(startedMs)
+        if (fresh) {
+          return { ...base, lint: fresh.report, reportPath: fresh.path }
         }
+        // No file, but the agent may still have summarised inline - usable, and honest about
+        // where it came from, so the UI can say "no report written" while showing findings.
         const fromText = this.parseReportText(res.result)
-        if (fromFile) return { ...base, lint: fromFile.report, reportPath: fromFile.path }
-        if (fromText.totalFindings > 0 || fromText.sections.length > 0) return { ...base, lint: fromText }
+        if (fromText.totalFindings > 0 || fromText.sections.length > 0) {
+          log('warn', 'lint wrote no report file - reporting the findings from the answer text only')
+          return { ...base, lint: fromText }
+        }
+        log('error', 'lint finished without writing a report to wiki/meta/')
+        return {
+          ok: false,
+          kind,
+          pages,
+          usage: res.usage,
+          error:
+            'the lint run finished without writing a report to wiki/meta/ - nothing to base safe ' +
+            'fixes on, so the run counts as failed. Re-run the lint.',
+          ...(res.result !== undefined ? { answer: res.result } : {}),
+        }
       }
       if (kind === 'domain-review') {
         // The answer IS the deliverable here (nothing is written), so parse it directly. An
@@ -847,8 +886,15 @@ export class MaintenanceRunner {
     }))
   }
 
-  /** Finds and parses the newest `wiki/meta/lint-report-*.md` the run just wrote. */
-  private readLatestLintReport(): { report: LintReport; path: string } | undefined {
+  /**
+   * Finds and parses the newest `wiki/meta/lint-report-*.md`.
+   *
+   * `writtenAfterMs` is what separates "a report exists" from "THIS run wrote a report":
+   * pass a run's start time and a stale report is ignored, so a run that produced nothing
+   * cannot inherit an older run's artifact. Callers that just want the current report
+   * (lint-fix, which is deliberately bounded by whatever the newest one is) omit it.
+   */
+  private readLatestLintReport(writtenAfterMs?: number): { report: LintReport; path: string } | undefined {
     const metaDir = path.join(this.vaultRoot, 'wiki', 'meta')
     let files: string[]
     try {
@@ -861,6 +907,15 @@ export class MaintenanceRunner {
     }
     const newest = files[files.length - 1]
     if (!newest) return undefined
+    if (writtenAfterMs !== undefined) {
+      // Second granularity on some filesystems - allow a small slack rather than rejecting a
+      // report written in the same second the run began.
+      try {
+        if (fs.statSync(path.join(metaDir, newest)).mtimeMs < writtenAfterMs - 1000) return undefined
+      } catch {
+        return undefined
+      }
+    }
     const markdown = fs.readFileSync(path.join(metaDir, newest), 'utf8')
     const pageIndex = indexWikiPages(this.vaultRoot)
     const report = parseLintReport(markdown, (label) => ({
