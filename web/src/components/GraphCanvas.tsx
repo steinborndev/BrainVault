@@ -323,6 +323,59 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     [nodes],
   )
 
+  /**
+   * Backlink counts of the real pages, sorted - the domain of the authority ramp (see
+   * `authorityT`). Ghost nodes (unresolved link targets) are left out on purpose: they
+   * are not pages, and letting them into the domain would shift every page's colour the
+   * moment the gaps view is toggled.
+   */
+  const authoritySorted = useMemo(() => {
+    if (lens !== 'authority') return null
+    const counts: number[] = []
+    for (let i = 0; i < nodes.length; i++) {
+      if (ghostIndices?.has(i) === true) continue
+      counts.push(nodes[i]!.in)
+    }
+    if (counts.length < 2) return null
+    counts.sort((a, b) => a - b)
+    return counts
+  }, [nodes, ghostIndices, lens])
+
+  /**
+   * Backlink count → position on the authority ramp (0 = least linked, 1 = most).
+   *
+   * Not `in / max`, which is what this used to be: backlink counts do not spread out. They
+   * bunch in a narrow band (in this vault: p10 = 6, median = 9, p90 = 15) under a thin tail
+   * of hubs (max 83), so dividing by the tail put ~90% of the vault below a fifth of the
+   * ramp - a grey field with a handful of bright dots, which is what the lens looked like.
+   *
+   * Two thirds RANK (the share of pages with fewer backlinks) and one third log MAGNITUDE.
+   * The rank term spreads the crowded middle so neighbouring pages actually differ; the
+   * magnitude term keeps the tail apart, which a pure rank scale flattens - by rank alone a
+   * page with 20 backlinks and one with 83 are both simply "top". Ties share a value, so
+   * equally-linked pages read as equally bright, and the mapping stays monotone: more
+   * backlinks is never darker.
+   */
+  const authorityT = useCallback(
+    (count: number): number => {
+      const sorted = authoritySorted
+      if (sorted === null) return 0
+      // Number of pages with strictly fewer backlinks (binary search, ties land on the
+      // start of their run) → the rank term.
+      let lo = 0
+      let hi = sorted.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (sorted[mid]! < count) lo = mid + 1
+        else hi = mid
+      }
+      const rank = lo / (sorted.length - 1)
+      const magnitude = Math.log1p(Math.max(0, count)) / Math.log1p(Math.max(1, sorted[sorted.length - 1]!))
+      return Math.min(1, 0.65 * rank + 0.35 * magnitude)
+    },
+    [authoritySorted],
+  )
+
   /** One draw pass. Reads CSS variables live, so light/dark theme switches just work. */
   const draw = useCallback((): void => {
     const canvas = canvasRef.current
@@ -342,7 +395,6 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const muted = cssVar('--muted', '#888')
     // Neutral floor for the metric-gradient lenses (a dim, low-contrast base the metric lifts from).
     const dimBase = mixColor(cssVar('--bg-elev-2', '#1f2637'), muted, 0.55)
-    const maxIn = lens === 'authority' ? Math.max(1, ...nodes.map((n) => n.in)) : 1
     const nowMs = Date.now()
     const colorFor = (n: GraphNode): string => {
       switch (lens) {
@@ -351,8 +403,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         case 'type':
           return cssVar(TYPE_VARS[n.type] ?? '--muted', '#888')
         case 'authority':
-          // Backlink count → dim-to-accent gradient: the vault's authorities light up.
-          return mixColor(dimBase, cssVar('--accent', '#5b8def'), Math.min(1, n.in / maxIn))
+          // Rank-and-magnitude position on the ramp → dim-to-accent gradient: the vault's
+          // authorities light up, and the crowded middle still separates.
+          return mixColor(dimBase, cssVar('--accent', '#5b8def'), 0.1 + 0.9 * authorityT(n.in))
         case 'orphans':
           // No backlinks = unreachable except by search. Everything else recedes.
           return n.in === 0 ? cssVar('--err', '#e0645b') : dimBase
@@ -730,7 +783,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
     if (flashActive) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius, authorityT])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
@@ -1371,37 +1424,12 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
   return (
     <div className="graph-canvas-wrap">
-      <canvas
-        ref={canvasRef}
-        className="graph-canvas"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-        onPointerLeave={() => {
-          // Off-canvas: no position to re-resolve against - later refreshes must clear, not stick.
-          lastPointerRef.current = null
-          if (hoverRef.current !== null) {
-            setHover(null)
-            scheduleDraw()
-          }
-          if (hullHoverRef.current !== null) {
-            setHullHover(null)
-            scheduleDraw()
-          }
-        }}
-        role="img"
-        aria-label={`Wikilink graph with ${nodes.length} pages`}
-        style={{
-          // zoom-in on the hull area (a click drills into the community); pointer on a node
-          // (a click opens it, or selects it in normal mode); grab on empty canvas.
-          cursor: hoverAreaDrills ? 'zoom-in' : hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab',
-          touchAction: 'none',
-        }}
-      />
       {/* The canvas bar: Fit, then whatever the screen puts beside it (the scope line,
           the shortcut tip, fullscreen). The −/+ buttons are gone - Ctrl+wheel and the
-          +/- keys do the same job without spending bar width on it. */}
+          +/- keys do the same job without spending bar width on it.
+          It is the panel's HEADER ROW, not a floating box (2026-08-26): a second bordered
+          box inset inside the first read as a box in a box, and the graph kept drawing
+          underneath it, so whatever the layout put up there was hidden behind the bar. */}
       <div className="graph-controls">
         <button
           className="btn ghost"
@@ -1415,42 +1443,75 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         </button>
         {barExtra}
       </div>
-      {overlay}
-      {layouting && <div className="graph-status">Laying out…</div>}
-      {hover !== null && nodes[hover] && (
-        <div className="graph-tooltip" ref={tooltipRef}>
-          <strong>{nodes[hover]!.title}</strong>
-          {ghostIndices?.has(hover) ? (
-            <span>
-              missing page · {nodes[hover]!.in} page{nodes[hover]!.in === 1 ? '' : 's'} link here
-            </span>
-          ) : (
-            <>
+      {/* Everything positioned against the drawing - the overlays, the tooltip, and the
+          canvas sizing itself (the canvas measures its PARENT) - hangs off this box, so
+          the bar above is outside the graph's coordinate space rather than over it. */}
+      <div className="graph-canvas-area">
+        <canvas
+          ref={canvasRef}
+          className="graph-canvas"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerCancel}
+          onPointerLeave={() => {
+            // Off-canvas: no position to re-resolve against - later refreshes must clear, not stick.
+            lastPointerRef.current = null
+            if (hoverRef.current !== null) {
+              setHover(null)
+              scheduleDraw()
+            }
+            if (hullHoverRef.current !== null) {
+              setHullHover(null)
+              scheduleDraw()
+            }
+          }}
+          role="img"
+          aria-label={`Wikilink graph with ${nodes.length} pages`}
+          style={{
+            // zoom-in on the hull area (a click drills into the community); pointer on a node
+            // (a click opens it, or selects it in normal mode); grab on empty canvas.
+            cursor: hoverAreaDrills ? 'zoom-in' : hover !== null ? 'pointer' : drag.current ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+        />
+        {overlay}
+        {layouting && <div className="graph-status">Laying out…</div>}
+        {hover !== null && nodes[hover] && (
+          <div className="graph-tooltip" ref={tooltipRef}>
+            <strong>{nodes[hover]!.title}</strong>
+            {ghostIndices?.has(hover) ? (
               <span>
-                {nodes[hover]!.path}
-                {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
-                {nodes[hover]!.out} out
+                missing page · {nodes[hover]!.in} page{nodes[hover]!.in === 1 ? '' : 's'} link here
               </span>
-              {hoverNodeOpens ? (
-                <span className="tt-hint">click to open the page</span>
-              ) : (
-                onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>
-              )}
-            </>
-          )}
-        </div>
-      )}
-      {/* Hull hover (inside a community's tinted area, between nodes): name the community
-          the click would isolate - same pointer-following tooltip, node variant wins. */}
-      {hover === null && hullHover !== null && (
-        <div className="graph-tooltip" ref={tooltipRef}>
-          <strong>{clusterLabels?.get(hullHover) ?? 'community'}</strong>
-          <span>
-            {clusterSets?.get(hullHover)?.size ?? 0} pages
-            {onClusterClick !== undefined ? ' · click to isolate' : ''}
-          </span>
-        </div>
-      )}
+            ) : (
+              <>
+                <span>
+                  {nodes[hover]!.path}
+                  {nodes[hover]!.domain ? ` · ${nodes[hover]!.domain}` : ''} · {nodes[hover]!.in} in /{' '}
+                  {nodes[hover]!.out} out
+                </span>
+                {hoverNodeOpens ? (
+                  <span className="tt-hint">click to open the page</span>
+                ) : (
+                  onOpen !== undefined && <span className="tt-hint">double-click to open the page</span>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        {/* Hull hover (inside a community's tinted area, between nodes): name the community
+            the click would isolate - same pointer-following tooltip, node variant wins. */}
+        {hover === null && hullHover !== null && (
+          <div className="graph-tooltip" ref={tooltipRef}>
+            <strong>{clusterLabels?.get(hullHover) ?? 'community'}</strong>
+            <span>
+              {clusterSets?.get(hullHover)?.size ?? 0} pages
+              {onClusterClick !== undefined ? ' · click to isolate' : ''}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

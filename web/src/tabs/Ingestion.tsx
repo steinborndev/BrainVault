@@ -248,16 +248,6 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
   return (
     <div className="inbox">
       <div className="ws-bar">
-        <div className="hist-search">
-          <Icon name="search" />
-          <input
-            type="search"
-            placeholder="Search by file name or URL…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search the inbox by file name or URL"
-          />
-        </div>
         <span className="scopeline">
           Showing{' '}
           <strong>
@@ -290,6 +280,22 @@ export function Ingestion({ statusFilter = '' }: { statusFilter?: string }): Rea
       </div>
 
       <aside className="gpanel" aria-label="Inbox filters">
+        {/* Search at the top of the panel (2026-08-26): it narrows the same list the
+            sections below narrow, so it belongs with them. The bar above keeps what is
+            about the screen rather than the list - what is in scope, and the two actions. */}
+        <div className="gp-sec gp-find">
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              placeholder="Search by file name or URL…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search the inbox by file name or URL"
+            />
+          </div>
+        </div>
+
         <div className="gp-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">State</span>

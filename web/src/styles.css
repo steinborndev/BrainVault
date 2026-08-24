@@ -1314,24 +1314,6 @@ button.spill-link:hover {
 }
 
 /* ---- Batch group in the queue ---- */
-.hist-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-  color: var(--text-faint);
-}
-.hist-search input {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  outline: none;
-  width: 150px;
-  font-size: 13px;
-}
 .chip .chip-n {
   font-size: 11px;
   color: var(--text-faint);
@@ -3190,6 +3172,18 @@ details.hot-cache[open] summary {
   font-variant-numeric: tabular-nums;
   color: var(--text-faint);
 }
+/* The panel's search section, at the very top: one field, no eyebrow - what it does is
+   the placeholder's job, and a heading here would only push the first real filter down. */
+.gp-find {
+  padding: 10px 12px;
+}
+.gp-find .gp-search {
+  height: 30px;
+  margin-bottom: 0;
+}
+.gp-find .gp-search input {
+  font-size: 13px;
+}
 .gp-search {
   display: flex;
   align-items: center;
@@ -3569,8 +3563,14 @@ details.hot-cache[open] summary {
   line-height: 1.4;
   color: var(--warn);
 }
+/* The graph panel: a header row (`.graph-controls`) over the drawing (`.graph-canvas-area`),
+   one card, one border. The bar used to float over the canvas as its own bordered box -
+   a box in a box, with the graph still drawing full-height underneath it, so the top of
+   the drawing was permanently hidden behind the bar. */
 .graph-canvas-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
   /* Takes the height the stage has left, rather than computing it from a viewport
      minus a constant. The constant was the toolbar tiers the view panel replaced; any
      such number is wrong the moment the chrome above the canvas changes, and it was
@@ -3581,6 +3581,45 @@ details.hot-cache[open] summary {
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg-elev);
+}
+/* The panel's header row: in the flow above the drawing, divided from it by one rule -
+   not a floating box with a border of its own. */
+.graph-controls {
+  flex: none;
+  /* Positioned so it wins over the drawing below it: the search dropdown hangs out of the
+     bar into the canvas area, and the area is itself positioned and later in the DOM. */
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.graph-controls .scopeline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-controls .btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.graph-controls .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The drawing's own box: it takes the height the header leaves, and it is what the canvas
+   measures itself against (GraphCanvas sizes the canvas from its PARENT) and what every
+   corner overlay - legend, trail, tooltip, status - positions against. */
+.graph-canvas-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .graph-canvas {
   display: block;
@@ -3771,8 +3810,14 @@ details.hot-cache[open] summary {
   border-radius: 3px;
   flex: none;
 }
+/* Mirrors the ramp in GraphCanvas, which starts a touch off the neutral floor (t = 0.1)
+   so the least-linked pages still read as pages rather than as background. */
 .lens-legend .ll-authority {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--accent));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)) 90%, var(--accent)),
+    var(--accent)
+  );
 }
 .lens-legend .ll-recency {
   background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--ok));
@@ -4141,37 +4186,6 @@ details.hot-cache[open] summary {
 
 /* The graph's width is handled by the shell now: the Graph screen renders in a .lane.wide
    (1620px) while text screens keep the 1180px reading lane. */
-
-.graph-controls {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  right: 10px;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
-  backdrop-filter: blur(8px);
-}
-.graph-controls .scopeline {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.graph-controls .btn {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  padding: 3px 10px;
-}
-.graph-controls .btn.active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
 
 /* Frontmatter shown as properties, the way Obsidian does - not as prose. */
 .page-meta {
@@ -5012,12 +5026,6 @@ kbd {
   flex-wrap: wrap;
   gap: 5px;
 }
-.lib-search input {
-  width: 200px;
-}
-.ws-bar .hist-search input {
-  width: 210px;
-}
 .dtable {
   width: 100%;
   border-collapse: collapse;
@@ -5118,7 +5126,7 @@ kbd {
 }
 
 /* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
-.hist-search:focus-within,
+.gp-search:focus-within,
 .graph-search:focus-within,
 .db-panel .p-search:focus-within {
   border-color: var(--accent);

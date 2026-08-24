@@ -156,45 +156,32 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
 
   return (
     <div className="library">
-      {/* The toolbar spans BOTH columns (2026-08-25). It used to live inside the right
-          column, which pushed the table down by its own height while the filter panel
-          started at the top - so the two never lined up. Above the workspace it belongs to
-          the whole screen, which is what it always described. */}
-      <div className="ws-bar">
-        <div className="hist-search lib-search">
-          <Icon name="search" />
-          <input
-            type="search"
-            placeholder="Filter by title, tag or domain…"
-            aria-label="Filter pages by title, tag or domain"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setLimit(PAGE_SIZE)
-            }}
-          />
-        </div>
-        <span className="scopeline">
-          Showing <strong>{shown.length} of {nodes?.length ?? 0}</strong> pages
-          {type !== null || domain !== null || subset !== 'all' || query.trim() !== ''
-            ? ` - ${[
-                subset !== 'all' ? SUBSETS.find((x) => x.key === subset)!.label.toLowerCase() : '',
-                type !== null ? bucketLabel(type).toLowerCase() : '',
-                domain !== null ? `in ${domain === 'none' ? 'no domain' : domain}` : '',
-                query.trim() !== '' ? `matching “${query.trim()}”` : '',
-              ]
-                .filter(Boolean)
-                .join(', ')}`
-            : ' - the whole vault'}
-          , {sortHint}.
-        </span>
-      </div>
+      {/* The same standing panel as the graph, and the ONLY chrome this screen has
+          (2026-08-26): the bar that used to sit above both columns held a search box and a
+          sentence restating what the panel and the table foot already say, so the screen
+          started one row lower than the graph and switching between them jumped. The
+          search moved in here, at the top, above what it narrows.
 
-      {/* The same standing panel as the graph, carrying the same two scope filters in
-          the same order - page types, then domains - so a filter learned in one screen
-          behaves the same in the other. What is left above the table belongs to the
-          table: how much of it is in view, and the one tool that narrows it. */}
+          Order follows how the list is read: find it, then say what kind of page it is,
+          which subset and in what order - and domains last, because that is the section
+          that grows with the vault and it takes the leftover height. */}
       <aside className="gpanel" aria-label="Library filters">
+        <div className="gp-sec gp-find">
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              placeholder="Filter by title, tag or domain…"
+              aria-label="Filter pages by title, tag or domain"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setLimit(PAGE_SIZE)
+              }}
+            />
+          </div>
+        </div>
+
         <div className="gp-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">Page types</span>
@@ -218,49 +205,6 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                 </button>
               )
             })}
-          </div>
-        </div>
-
-        <div className="gp-sec grow">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Domains</span>
-            <span className="spacer" />
-            {domain !== null ? (
-              <button className="btn ghost" onClick={() => setDomain(null)} title="Show all domains">
-                <Icon name="x" /> Clear
-              </button>
-            ) : (
-              <span className="gp-state">showing all</span>
-            )}
-          </div>
-          <div className="gp-search">
-            <Icon name="search" />
-            <input
-              type="search"
-              value={domFilter}
-              placeholder="Filter domains…"
-              onChange={(e) => setDomFilter(e.target.value)}
-              aria-label="Filter the domain list"
-            />
-          </div>
-          <div className="domlist">
-            {domainRows.map(([d, count]) => {
-              const key = d === '' ? 'none' : d
-              const active = domain === key
-              return (
-                <button
-                  key={key}
-                  className={`domrow${active ? ' active' : ''}${domain !== null && !active ? ' dimmed' : ''}`}
-                  aria-pressed={active}
-                  onClick={() => setDomain(active ? null : key)}
-                >
-                  <span className="dot" style={{ background: d === '' ? 'var(--muted)' : domainColor(d) }} aria-hidden />
-                  <span className="nm">{d === '' ? 'no domain' : d}</span>
-                  <span className="n">{count}</span>
-                </button>
-              )
-            })}
-            {domainRows.length === 0 && <div className="gp-none">No domain matches that.</div>}
           </div>
         </div>
 
@@ -313,6 +257,49 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             ))}
           </div>
           <div className="pillhint">{sortHint}</div>
+        </div>
+
+        <div className="gp-sec grow">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Domains</span>
+            <span className="spacer" />
+            {domain !== null ? (
+              <button className="btn ghost" onClick={() => setDomain(null)} title="Show all domains">
+                <Icon name="x" /> Clear
+              </button>
+            ) : (
+              <span className="gp-state">showing all</span>
+            )}
+          </div>
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={domFilter}
+              placeholder="Filter domains…"
+              onChange={(e) => setDomFilter(e.target.value)}
+              aria-label="Filter the domain list"
+            />
+          </div>
+          <div className="domlist">
+            {domainRows.map(([d, count]) => {
+              const key = d === '' ? 'none' : d
+              const active = domain === key
+              return (
+                <button
+                  key={key}
+                  className={`domrow${active ? ' active' : ''}${domain !== null && !active ? ' dimmed' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => setDomain(active ? null : key)}
+                >
+                  <span className="dot" style={{ background: d === '' ? 'var(--muted)' : domainColor(d) }} aria-hidden />
+                  <span className="nm">{d === '' ? 'no domain' : d}</span>
+                  <span className="n">{count}</span>
+                </button>
+              )
+            })}
+            {domainRows.length === 0 && <div className="gp-none">No domain matches that.</div>}
+          </div>
         </div>
       </aside>
 
