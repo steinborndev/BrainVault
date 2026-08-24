@@ -25,6 +25,7 @@ import { Markdown } from '../components/Markdown.tsx'
 import { PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
 import { JobLog } from '../components/JobLog.tsx'
+import { RunProgress } from '../components/RunProgress.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { navigate } from '../lib/router.ts'
@@ -104,6 +105,12 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const profileKeyRef = useRef('broad')
   const [lastTopic, setLastTopic] = useState('')
   const [lastProfile, setLastProfile] = useState<string | null>(null)
+  // The lens and start time of the run being VIEWED - the progress block needs the fetch cap
+  // (its only honest denominator) and a clock, and both belong to the run, not the composer.
+  const [runProfileKey, setRunProfileKey] = useState<string>('broad')
+  const [runStartedAt, setRunStartedAt] = useState<string | null>(null)
+  const runProfile = profiles.find((p) => p.key === runProfileKey)
+  const runTargetTitle = `Research: ${lastTopic}${runProfile?.titleSuffix ?? ''}`
   const research = useMaintenanceRun(() => api.research(topicRef.current, profileKeyRef.current))
   // The last settled research run, restart-proof (maintenance_state) - the rail shows it
   // even after a reload, when the client-side run state is gone.
@@ -172,6 +179,8 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
       profileKeyRef.current = profileKey
       setLastTopic(text)
       setLastProfile(profileKey === 'broad' ? null : selectedProfile?.label ?? null)
+      setRunProfileKey(profileKey)
+      setRunStartedAt(new Date().toISOString())
       setDraft('')
       setView('run')
       research.start()
@@ -277,6 +286,9 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               result={research.result}
               topic={lastTopic}
               lensLabel={lastProfile}
+              profile={runProfile}
+              startedAt={runStartedAt}
+              overlap={{ targetTitle: runTargetTitle }}
               lastState={lastResearchState}
               vaultName={vaultName}
               authMode={authMode}
@@ -424,6 +436,9 @@ function RunView({
   result,
   topic,
   lensLabel,
+  profile,
+  startedAt,
+  overlap,
   lastState,
   vaultName,
   authMode,
@@ -435,6 +450,11 @@ function RunView({
   result: ReturnType<typeof useMaintenanceRun>['result']
   topic: string
   lensLabel: string | null
+  /** The lens, for its fetch cap - the one honest denominator in the progress block. */
+  profile: ResearchProfile | undefined
+  startedAt: string | null
+  /** Existing pages this topic overlaps, so a long run says up front what it will not duplicate. */
+  overlap: { targetTitle: string }
   lastState: { ok: boolean; pages: number; finishedAt: string; error: string | null } | undefined
   vaultName: string
   authMode: AuthMode
@@ -462,9 +482,34 @@ function RunView({
           Back to conversation
         </button>
       </div>
+      {clientRun && running && (
+        <div className="run-target">
+          <span className="rt-k">Files as</span>
+          <span className="rt-v mono-meta">{overlap.targetTitle}</span>
+          <span className="rt-k">Commit</span>
+          <span className="rt-v">
+            one commit when the run settles - revertable from the inbox like any other.
+          </span>
+        </div>
+      )}
       {clientRun ? (
         <>
-          {running && <JobLog jobId="maintenance:research" seed={false} />}
+          {/* What it is doing and what is left, instead of a scrolling wall of tool calls.
+              The log is still one click away for when the summary is not enough. */}
+          {(running || result !== undefined) && (
+            <RunProgress
+              channel="maintenance:research"
+              startedAt={startedAt}
+              profile={profile}
+              running={running}
+            />
+          )}
+          {running && (
+            <details className="logbox">
+              <summary>Show the raw agent log</summary>
+              <JobLog jobId="maintenance:research" seed={false} />
+            </details>
+          )}
           {error !== null && (
             <div className="toast err">
               {error}{' '}
