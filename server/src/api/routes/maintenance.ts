@@ -16,6 +16,7 @@ import type { MaintenanceStateStore } from '../../db/maintenance-state.js'
 import {
   DomainRegistryMissingError,
   LintReportMissingError,
+  LintScanMissingError,
   type RepairTask,
   type TagFixAction,
 } from '../../pipeline/maintenance.js'
@@ -59,6 +60,23 @@ export function registerMaintenanceRoute(
       return reply.code(202).send(maintenance.startLintFix())
     } catch (err) {
       if (err instanceof LintReportMissingError) {
+        return reply.code(409).send({ error: err.message })
+      }
+      throw err
+    }
+  })
+
+  /**
+   * Render the report from a scan a previous run already produced - the cheap half of a
+   * lint, without repeating the expensive half. 409 when there is nothing newer than the
+   * current report to render: the artifact is what bounds the run.
+   */
+  app.post('/api/v1/maintenance/lint-report', async (_req, reply) => {
+    if (credentialMissing(reply)) return reply
+    try {
+      return reply.code(202).send(maintenance.startLintReport())
+    } catch (err) {
+      if (err instanceof LintScanMissingError) {
         return reply.code(409).send({ error: err.message })
       }
       throw err

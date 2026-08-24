@@ -83,6 +83,17 @@ export class DomainRegistryMissingError extends Error {
 }
 
 /** Thrown by `startLintFix` when the vault has no lint report to fix against → HTTP 409. */
+/**
+ * Where a lint run parks machine-readable findings. Pinned by the service (not by the
+ * skill) so `startLintReport` knows where to look, and under `.vault-meta/` because that is
+ * the derived-artifact area the vault already keeps out of its git history.
+ */
+export const LINT_SCAN_PATH = '.vault-meta/lint-scan.json'
+
+export class LintScanMissingError extends Error {
+  override readonly name = 'LintScanMissingError'
+}
+
 export class LintReportMissingError extends Error {
   override readonly name = 'LintReportMissingError'
 }
@@ -234,22 +245,85 @@ export class MaintenanceRunner {
     return this.auth
   }
 
-  /** Starts a lint run in the background; returns its tracked run immediately. */
+  /**
+   * Starts a lint run in the background; returns its tracked run immediately.
+   *
+   * The prompt is written around what a lint at this vault's size actually does. At ~500
+   * pages the agent walked the wiki with Read/Grep and wrote the report directly. Past ~750
+   * it reaches for a scanner instead - a sound instinct, and the earlier wording did not
+   * forbid it because "use only the read-based checks" was attached to the semantic-tiling
+   * sentence and read as scoped to it. What went wrong was the step AFTER: a run wrote a
+   * 254-line scanner and a 472 KB JSON dump, then ended its turn without rendering the
+   * report, because rendering meant reading that dump back into context.
+   *
+   * So the scripting path is now explicit and steered rather than discouraged: script the
+   * scan if you like, but the SCRIPT emits the finished report. That removes the read-back
+   * entirely instead of asking the agent to be careful about it. Intermediate machine
+   * output has a pinned home (LINT_SCAN_PATH) that is excluded from vault history and that
+   * `startLintReport` can render from if a run still stops half way.
+   */
   startLint(): MaintenanceRun {
-    // Be explicit: run the skill, WRITE the report file (the dashboard reads it back), and
-    // report-only — never auto-fix, so a lint can't silently rewrite content pages.
     return this.start(
       'lint',
-      'Use the wiki-lint skill to health-check the entire wiki and WRITE the full report to ' +
-        'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD). Report only — do NOT auto-fix or ' +
-        'modify any existing wiki page. Keep the standard report sections (Orphan Pages, Dead Links, ' +
-        'Missing Pages, Frontmatter Gaps, Stale Claims, Cross-Reference Gaps). ' +
+      'Use the wiki-lint skill to health-check the entire wiki.\n\n' +
+        'THE DELIVERABLE is the report file at wiki/meta/lint-report-<today>.md (date as ' +
+        'YYYY-MM-DD). The run is not complete until that file exists. Keep the skill\'s ' +
+        'standard sections (Orphan Pages, Dead Links, Missing Pages, Frontmatter Gaps, ' +
+        'Stale Claims, Cross-Reference Gaps).\n\n' +
+        'The wiki is large, so scanning it with a script is fine and usually better than ' +
+        'reading page by page. If you do write a scanner:\n' +
+        `- have it WRITE THE REPORT ITSELF, or emit a small aggregate (counts plus the top ` +
+        `findings per section) at ${LINT_SCAN_PATH} and render the report from that.\n` +
+        '- never dump the full findings to a file and then read that file back to write the ' +
+        'report: that is how a run ends up having done all the work and produced no report.\n' +
+        `- keep scratch out of the wiki. ${LINT_SCAN_PATH} is the one intermediate path; it ` +
+        'is kept out of vault git history. Do not leave other scratch files behind.\n\n' +
+        'Report only - do NOT auto-fix, and do not modify any EXISTING wiki page. Writing ' +
+        'the new report file is expected and is not a modification.\n' +
         // Belt-and-braces with the hard kill (F1): the DragonScale Mechanism 3 "semantic tiling"
         // path runs embeddings via a long bash call. The runner will now group-kill a stuck run,
-        // but the report only needs the read-based checks, so still skip the heavy embedding pass.
-        'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass — ' +
-        'use only the read-based checks (Read/Grep/Glob).',
+        // but the report only needs the structural checks, so still skip the heavy embedding pass.
+        'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass.',
       'ingest',
+    )
+  }
+
+  /**
+   * Renders the report from a scan a previous run already produced - the cheap half of a
+   * lint, without repeating the expensive half.
+   *
+   * This exists because the two phases fail independently. Scanning 750 pages costs minutes
+   * and dollars; rendering the result costs a fraction of that. When a run leaves a fresh
+   * scan artifact and no report, re-running the whole lint throws away work that is sitting
+   * right there and still correct.
+   *
+   * Throws when there is nothing fresher than the newest report to render - same shape as
+   * `startLintFix`: the artifact is what BOUNDS the run, so its absence is a 409, not a
+   * prompt that invites the agent to improvise.
+   */
+  startLintReport(): MaintenanceRun {
+    const scan = this.latestLintScan()
+    if (!scan) {
+      throw new LintScanMissingError(
+        'no lint scan to render - nothing under .vault-meta/ holds findings newer than the ' +
+          'newest report. Run a lint instead.',
+      )
+    }
+    return this.start(
+      'lint',
+      `A previous lint run scanned the wiki and left its findings at ${scan.path}, but never ` +
+        'wrote the report. Render the report from that file - do NOT re-scan the wiki.\n\n' +
+        `1. Inspect ${scan.path} enough to learn its shape (its top-level keys and the shape ` +
+        'of one entry per key). It may be large: sample it, do not read it whole.\n' +
+        '2. Write a short script that reads it and emits the report to ' +
+        'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD), with the skill\'s standard ' +
+        'sections (Orphan Pages, Dead Links, Missing Pages, Frontmatter Gaps, Stale Claims, ' +
+        'Cross-Reference Gaps) plus a Summary with the page and issue counts.\n' +
+        '3. Where a section has more than 30 findings, list the first 30 and state the total ' +
+        'for the rest. The report is for a person to read.\n\n' +
+        'Do not modify any existing wiki page, and leave no scratch files behind.',
+      'ingest',
+      { commitMessage: 'maintenance: lint report (rendered from an existing scan)' },
     )
   }
 
@@ -884,6 +958,48 @@ export class MaintenanceRunner {
       label,
       path: pageIndex.get(label.toLowerCase()) ?? null,
     }))
+  }
+
+  /**
+   * The newest lint scan artifact worth rendering: a `.vault-meta/lint*scan*.json` that is
+   * NEWER than the newest report. The age comparison is the whole point - a scan older than
+   * the report has already been rendered, and offering to render it again would produce a
+   * report that goes backwards.
+   *
+   * The name match is loose on purpose. `LINT_SCAN_PATH` is what the prompt asks for, but a
+   * run that predates that instruction picked its own name, and those findings are just as
+   * renderable. Anything matching the shape counts; the newest wins.
+   */
+  private latestLintScan(): { path: string; mtimeMs: number } | undefined {
+    const metaDir = path.join(this.vaultRoot, '.vault-meta')
+    let names: string[]
+    try {
+      names = fs.readdirSync(metaDir).filter((f) => /^lint[-_].*scan.*\.json$/i.test(f))
+    } catch {
+      return undefined
+    }
+    let newest: { path: string; mtimeMs: number } | undefined
+    for (const name of names) {
+      try {
+        const mtimeMs = fs.statSync(path.join(metaDir, name)).mtimeMs
+        if (newest === undefined || mtimeMs > newest.mtimeMs) {
+          newest = { path: path.posix.join('.vault-meta', name), mtimeMs }
+        }
+      } catch {
+        /* vanished between readdir and stat */
+      }
+    }
+    if (newest === undefined) return undefined
+    const report = this.readLatestLintReport()
+    if (report !== undefined) {
+      try {
+        const reportMs = fs.statSync(path.join(this.vaultRoot, report.path)).mtimeMs
+        if (reportMs >= newest.mtimeMs) return undefined
+      } catch {
+        /* report listed but unreadable - treat the scan as renderable */
+      }
+    }
+    return newest
   }
 
   /**

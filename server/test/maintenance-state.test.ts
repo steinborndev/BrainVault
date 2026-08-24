@@ -183,6 +183,55 @@ describe('MaintenanceRunner state persistence', () => {
     await waitSettled(runner, run.id)
   })
 
+  it('rendering refuses when there is no scan to render from', async () => {
+    // Same shape as lint-fix without a report: the artifact is what BOUNDS the run, so its
+    // absence is a refusal, not a prompt that invites the agent to re-scan on its own.
+    const runner = makeRunner(new MemoryMaintenanceStateStore(), true)
+    expect(() => runner.startLintReport()).toThrow(/no lint scan/i)
+  })
+
+  it('rendering refuses when the newest report is already newer than the scan', async () => {
+    // Otherwise the offer would stand forever after a successful lint, and taking it would
+    // produce a report built from findings older than the one already in the vault.
+    fs.mkdirSync(path.join(vaultRoot, '.vault-meta'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, '.vault-meta', 'lint-scan.json'), '{}')
+    const report = path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-08-25.md')
+    fs.writeFileSync(report, '# report\n')
+    const later = new Date(Date.now() + 60_000)
+    fs.utimesSync(report, later, later)
+
+    const runner = makeRunner(new MemoryMaintenanceStateStore(), true)
+    expect(() => runner.startLintReport()).toThrow(/no lint scan/i)
+  })
+
+  it('rendering starts from a scan a run left behind, whatever it named it', async () => {
+    // The scan that prompted this feature was named by the agent, before the service pinned
+    // a path. Those findings are just as renderable.
+    fs.mkdirSync(path.join(vaultRoot, '.vault-meta'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, '.vault-meta', 'lint_scan_out.json'), '{"dead_links":[]}')
+
+    const store = new MemoryMaintenanceStateStore()
+    const runner = new MaintenanceRunner({
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      events: new EventBus(),
+      commitMutex: new Mutex(),
+      runAgent: async () => {
+        fs.writeFileSync(
+          path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-08-25.md'),
+          '# Lint report\n\n## Dead Links\n\n- none\n',
+        )
+        return okResult('rendered')
+      },
+      commit: async () => ({ committed: true, hash: 'abc12345', committedPages: [] }),
+      stateStore: store,
+    })
+    const run = runner.startLintReport()
+    expect(run.kind).toBe('lint')
+    await waitSettled(runner, run.id)
+    expect(runner.getRun(run.id)?.status).toBe('done')
+  })
+
   it('a throwing store never breaks the settle itself', async () => {
     const store: MemoryMaintenanceStateStore = new (class extends MemoryMaintenanceStateStore {
       override record(): void {
