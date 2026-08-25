@@ -13,6 +13,7 @@ import type { AppContext } from '../server.js'
 import type { GraphBuilder } from '../../pipeline/graph.js'
 import type { DismissalStore } from '../../db/domain-dismissals.js'
 import type { MaintenanceStateStore } from '../../db/maintenance-state.js'
+import type { AgentRunStore } from '../../db/agent-runs.js'
 import {
   DomainRegistryMissingError,
   LintReportMissingError,
@@ -35,6 +36,7 @@ export function registerMaintenanceRoute(
   graph?: GraphBuilder,
   dismissals?: DismissalStore,
   state?: MaintenanceStateStore,
+  runs?: AgentRunStore,
 ): void {
   const { maintenance } = ctx
 
@@ -288,6 +290,20 @@ export function registerMaintenanceRoute(
   // Recent runs, newest first — lets the UI restore state after a reload.
   app.get('/api/v1/maintenance/runs', async (_req, reply) => {
     return reply.send({ runs: maintenance.listRuns() })
+  })
+
+  /**
+   * The persistent run log (schema v12), newest first. `?kind=research` is what the Research
+   * screen asks for; without it the caller gets every kind.
+   *
+   * Distinct from `/maintenance/runs`, which is the in-memory registry of runs the process
+   * still holds - that one answers "what is happening now", this one "what has happened".
+   */
+  app.get('/api/v1/maintenance/history', async (req, reply) => {
+    const { kind, limit } = req.query as { kind?: string; limit?: string }
+    const parsed = limit === undefined ? NaN : Number.parseInt(limit, 10)
+    const capped = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 500) : 100
+    return reply.send({ runs: runs?.list({ ...(kind !== undefined ? { kind } : {}), limit: capped }) ?? [] })
   })
 
   // Per-kind last-settle state (SPEC.md §12.7 Stufe b) — restart-proof "zuletzt erledigt"

@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { buildResearchRuns, splitResearchTitle, targetTitle } from '../src/lib/researchRuns.ts'
-import type { GraphNode, MaintenanceAreaState, MaintenanceRun, ResearchProfile } from '../src/api/types.ts'
+import type {
+  AgentRunRecord,
+  GraphNode,
+  MaintenanceAreaState,
+  MaintenanceRun,
+  ResearchProfile,
+} from '../src/api/types.ts'
 
 const PROFILES: ResearchProfile[] = [
   { key: 'broad', label: 'Broad sweep', blurb: '', sources: [], fetchEstimate: '30-45', titleSuffix: '' },
@@ -159,5 +165,111 @@ describe('targetTitle', () => {
     expect(targetTitle('Batteries', PROFILES[1])).toBe('Research: Batteries - State of the Art')
     expect(targetTitle('Batteries', PROFILES[0])).toBe('Research: Batteries')
     expect(targetTitle('Batteries', undefined)).toBe('Research: Batteries')
+  })
+})
+
+const history = (over: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
+  id: 'hist-1',
+  kind: 'research',
+  label: 'Topic',
+  profileKey: 'broad',
+  ok: true,
+  pages: ['wiki/questions/Research: Topic.md'],
+  tokensIn: 1000,
+  tokensOut: 200,
+  costUsd: 2.4,
+  error: null,
+  startedAt: '2026-08-20T09:40:00.000Z',
+  finishedAt: '2026-08-20T10:00:00.000Z',
+  ...over,
+})
+
+describe('buildResearchRuns with the persistent run log', () => {
+  it('lists a recorded run with the facts only the log keeps', () => {
+    const entries = buildResearchRuns({
+      history: [history()],
+      runs: [],
+      lastRuns: [],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({
+      topic: 'Topic',
+      profileKey: 'broad',
+      costUsd: 2.4,
+      startedAt: '2026-08-20T09:40:00.000Z',
+      source: 'history',
+    })
+  })
+
+  it('keeps a failed run that never wrote a page', () => {
+    const entries = buildResearchRuns({
+      history: [history({ id: 'bad', ok: false, pages: [], error: 'usage limit reached' })],
+      runs: [],
+      lastRuns: [],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries[0]).toMatchObject({ status: 'failed', error: 'usage limit reached' })
+  })
+
+  it('does not list the same run twice when the registry still holds it', () => {
+    const entries = buildResearchRuns({
+      history: [history({ id: 'shared' })],
+      runs: [run({ id: 'shared' })],
+      lastRuns: [],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.source).toBe('history')
+  })
+
+  it('still shows a run that is in flight - the log only has settled ones', () => {
+    const entries = buildResearchRuns({
+      history: [history({ id: 'old' })],
+      runs: [run({ id: 'live', status: 'running', finishedAt: undefined, result: undefined, label: 'Live' })],
+      lastRuns: [],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries.map((e) => e.id)).toEqual(['live', 'old'])
+    expect(entries[0]!.status).toBe('running')
+  })
+
+  it('drops the vault page of a run the log already covers', () => {
+    const entries = buildResearchRuns({
+      history: [history()],
+      runs: [],
+      lastRuns: [],
+      nodes: [node()],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.source).toBe('history')
+  })
+
+  it('keeps pages of runs that predate the log', () => {
+    const entries = buildResearchRuns({
+      history: [history()],
+      runs: [],
+      lastRuns: [],
+      nodes: [node({ path: 'wiki/questions/Research: Older.md', title: 'Research: Older' })],
+      profiles: PROFILES,
+    })
+    expect(entries.map((e) => e.source).sort()).toEqual(['history', 'page'])
+  })
+
+  it('drops a settle row the log already explains', () => {
+    const entries = buildResearchRuns({
+      history: [history({ id: 'run-old', ok: false, pages: [], error: 'boom' })],
+      runs: [],
+      lastRuns: [settle({ runId: 'run-old' })],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.source).toBe('history')
   })
 })

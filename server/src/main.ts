@@ -12,6 +12,7 @@ import { ChatStore } from './db/chat.js'
 import { SettingsStore } from './db/settings.js'
 import { DomainDismissalStore } from './db/domain-dismissals.js'
 import { SqliteMaintenanceStateStore } from './db/maintenance-state.js'
+import { SqliteAgentRunStore } from './db/agent-runs.js'
 import { TelegramDropStore } from './db/telegram-drops.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
@@ -114,6 +115,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Restart-proof per-kind settle state (SPEC.md §12.7 Stufe b): written by the runner,
   // read by the status endpoint the dashboard's "what's due" head polls.
   const maintenanceState = new SqliteMaintenanceStateStore(db)
+  // One row per settled agent run (schema v12) - the run list the Research screen shows,
+  // and the only place a failed run leaves a trace once the in-memory registry evicts it.
+  const agentRuns = new SqliteAgentRunStore(db)
 
   const maintenance = new MaintenanceRunner({
     vaultRoot: config.vaultRoot,
@@ -123,6 +127,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     runRegistry,
     validate,
     stateStore: maintenanceState,
+    runStore: agentRuns,
   })
 
   // The start-time-bound settings folded into the config the watcher and HTTP server see. The
@@ -172,6 +177,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // Persistent, so a rejected domain candidate stays rejected across restarts.
     domainDismissals: new DomainDismissalStore(db),
     maintenanceState,
+    agentRuns,
     telegramDrops,
     graph,
   })

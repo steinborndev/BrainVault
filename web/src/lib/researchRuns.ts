@@ -1,24 +1,30 @@
 /**
  * The research run list (redesign 2026-08-25, second pass).
  *
- * With no run in flight the Research screen used to be empty, because the only run state it
- * knew was the one the current browser session had started. The server keeps its run
- * registry in memory and evicts it, and the restart-proof `maintenance_state` keeps just the
- * last settle per kind - so neither alone is a history.
+ * Since schema v12 the server keeps one row per settled run (`GET /maintenance/history`),
+ * which is the source of record: topic, lens, pages, tokens, cost, duration, and the failed
+ * runs that never wrote a page. Three older sources still contribute, in this order:
  *
- * The vault is: every run files a synthesis page under a deterministic title
- * (`Research: <topic><lens suffix>`), and those pages are in the graph the dashboard already
- * loads, with their mtime. This module merges the three sources into one list:
+ *   history      the persistent run log - everything, for every run since v12 landed
+ *   run record   the in-memory registry, which is the only one that knows about a run
+ *                still IN FLIGHT
+ *   settle state one restart-proof row per kind; a pre-v12 failure can only appear here
+ *   vault page   topic and lens parsed back out of the deterministic
+ *                `Research: <topic><lens suffix>` title, dated by mtime - this is what
+ *                surfaces runs from before the run log existed
  *
- *   run record   topic, lens, status, cost, pages - complete, but only until eviction
- *   settle state one restart-proof record per kind, which is how a FAILED run survives
- *   vault page   topic and lens parsed back out of the title, dated by mtime - permanent
- *
- * A page is dropped when a run record already claims it, so a finished run appears once.
- * Pure functions over plain arrays (no fetching, no `Date.now()`), so the merge is testable.
+ * Each source is dropped where a better one already covers the same run: by id, by claimed
+ * page path, or by topic+lens within an hour of the same settle. Pure functions over plain
+ * arrays (no fetching, no `Date.now()`), so the merge stays testable.
  */
 
-import type { GraphNode, MaintenanceAreaState, MaintenanceRun, ResearchProfile } from '../api/types.ts'
+import type {
+  AgentRunRecord,
+  GraphNode,
+  MaintenanceAreaState,
+  MaintenanceRun,
+  ResearchProfile,
+} from '../api/types.ts'
 
 export interface ResearchRunEntry {
   readonly id: string
@@ -31,8 +37,12 @@ export interface ResearchRunEntry {
   readonly pages: readonly string[]
   readonly costUsd: number | null
   readonly error: string | null
-  /** `run` = a live/tracked run record, `page` = reconstructed from the vault, `state` = a settle record. */
-  readonly source: 'run' | 'page' | 'state'
+  /**
+   * Where the row's facts come from: `history` = the persistent run log, `run` = the
+   * in-memory registry (a run in flight), `state` = a per-kind settle record, `page` =
+   * reconstructed from the synthesis page in the vault (pre-v12 runs).
+   */
+  readonly source: 'history' | 'run' | 'page' | 'state'
   /** The synthesis page, when this entry came from one. */
   readonly pagePath: string | null
 }
@@ -69,6 +79,8 @@ export function splitResearchTitle(
 const normalizeDashes = (s: string): string => s.replace(/[–—]/g, '-')
 
 export interface ResearchRunsInput {
+  /** The persistent run log from `GET /maintenance/history?kind=research` (schema v12). */
+  readonly history?: readonly AgentRunRecord[]
   /** Tracked runs from `GET /maintenance/runs` (all kinds; research is picked out here). */
   readonly runs: readonly MaintenanceRun[]
   /** Restart-proof settle records; only a failed research one adds anything a page cannot. */
@@ -81,12 +93,40 @@ export interface ResearchRunsInput {
 export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] {
   const out: ResearchRunEntry[] = []
   const claimedPages = new Set<string>()
+  const seenIds = new Set<string>()
   const runFingerprints: Array<{ topic: string; profileKey: string | null; at: number }> = []
+
+  for (const h of input.history ?? []) {
+    if (h.kind !== 'research') continue
+    seenIds.add(h.id)
+    for (const p of h.pages) claimedPages.add(p)
+    runFingerprints.push({
+      topic: (h.label ?? '').trim().toLowerCase(),
+      profileKey: h.profileKey,
+      at: Date.parse(h.finishedAt),
+    })
+    out.push({
+      id: h.id,
+      topic: h.label ?? 'Research run',
+      profileKey: h.profileKey,
+      status: h.ok ? 'done' : 'failed',
+      startedAt: h.startedAt,
+      finishedAt: h.finishedAt,
+      pages: h.pages,
+      costUsd: h.costUsd,
+      error: h.error,
+      source: 'history',
+      pagePath: null,
+    })
+  }
 
   for (const r of input.runs) {
     if (r.kind !== 'research') continue
+    // The run log already carries every settled run; the registry only adds what is live.
+    if (seenIds.has(r.id)) continue
     const status: ResearchRunEntry['status'] =
       r.status === 'running' ? 'running' : r.status === 'error' || r.result?.ok === false ? 'failed' : 'done'
+    seenIds.add(r.id)
     const pages = r.result?.pages ?? []
     for (const p of pages) claimedPages.add(p)
     const finishedAt = r.finishedAt ?? null
@@ -144,7 +184,7 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
   // record is the only trace it ever happened, so it earns a row of its own.
   for (const a of input.lastRuns) {
     if (a.kind !== 'research' || a.ok) continue
-    if (out.some((e) => e.id === a.runId)) continue
+    if (seenIds.has(a.runId) || out.some((e) => e.id === a.runId)) continue
     out.push({
       id: `state:${a.runId}`,
       topic: 'Research run',

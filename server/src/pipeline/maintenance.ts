@@ -36,6 +36,7 @@ import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
+import type { AgentRunStore } from '../db/agent-runs.js'
 import { Mutex } from '../util/mutex.js'
 
 /**
@@ -132,6 +133,12 @@ export interface MaintenanceRunnerOptions {
    * behaves exactly as before (in-memory run history only).
    */
   readonly stateStore?: MaintenanceStateStore
+  /**
+   * Persistent per-RUN history (schema v12). `stateStore` keeps one row per kind, which is
+   * the right shape for "what's due" and the wrong one for a run list - a research run's
+   * topic, lens, cost and duration need a row of their own or they die with the process.
+   */
+  readonly runStore?: AgentRunStore
 }
 
 export interface MaintenanceResult {
@@ -208,6 +215,7 @@ export class MaintenanceRunner {
   private readonly validate: Validator | undefined
   private readonly buildIndex: RetrieveIndexBuilder
   private readonly stateStore: MaintenanceStateStore | undefined
+  private readonly runStore: AgentRunStore | undefined
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
   /**
@@ -237,6 +245,7 @@ export class MaintenanceRunner {
     this.validate = opts.validate
     this.buildIndex = opts.buildIndex ?? buildRetrieveIndex
     this.stateStore = opts.stateStore
+    this.runStore = opts.runStore
   }
 
   /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
@@ -794,6 +803,30 @@ export class MaintenanceRunner {
         /* swallowed — operational bookkeeping only */
       }
     }
+    // The run's own row (schema v12): everything the per-kind state deliberately drops -
+    // what it was about, which lens, what it cost, how long it took. Same discipline as
+    // above: bookkeeping may never corrupt the settle.
+    if (this.runStore !== undefined) {
+      try {
+        this.runStore.record({
+          id,
+          kind: prev.kind,
+          label: prev.label ?? null,
+          profileKey: prev.profileKey ?? null,
+          ok: status === 'done',
+          pages: patch.result?.pages ?? [],
+          tokensIn: patch.result?.usage.tokensIn ?? null,
+          tokensOut: patch.result?.usage.tokensOut ?? null,
+          costUsd: patch.result?.usage.costUsd ?? null,
+          error: patch.error ?? patch.result?.error ?? null,
+          startedAt: prev.startedAt,
+          finishedAt: settled.finishedAt ?? new Date().toISOString(),
+        })
+      } catch {
+        /* swallowed - operational bookkeeping only */
+      }
+    }
+
     const cb = this.settledCallbacks.get(id)
     if (cb !== undefined) {
       this.settledCallbacks.delete(id)

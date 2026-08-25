@@ -354,6 +354,32 @@ export interface MaintenanceAreaState {
   finishedAt: string
 }
 
+/**
+ * One settled agent run from the persistent run log (`GET /maintenance/history`, schema v12).
+ * The in-memory registry answers "what is running"; this answers "what has run" - with the
+ * facts the per-kind settle record drops: topic, lens, cost, tokens and duration, and the
+ * failed runs that never wrote a page.
+ */
+export interface AgentRunRecord {
+  id: string
+  kind: string
+  /** A research topic; null for kinds whose name already says what they did. */
+  label: string | null
+  profileKey: string | null
+  ok: boolean
+  pages: string[]
+  tokensIn: number | null
+  tokensOut: number | null
+  costUsd: number | null
+  error: string | null
+  startedAt: string
+  finishedAt: string
+}
+
+export interface AgentRunHistoryResponse {
+  runs: AgentRunRecord[]
+}
+
 export interface MaintenanceStateResponse {
   areas: MaintenanceAreaState[]
 }

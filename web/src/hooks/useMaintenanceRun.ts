@@ -55,6 +55,9 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
     if (settled) {
       qc.invalidateQueries({ queryKey: ['stats'] })
       qc.invalidateQueries({ queryKey: ['maintenance-state'] })
+      // The run just wrote its own row in the persistent log (schema v12) - the research
+      // run list reads from there.
+      qc.invalidateQueries({ queryKey: ['maintenance-history'] })
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['domains'] })
       qc.invalidateQueries({ queryKey: ['domain-candidates'] })

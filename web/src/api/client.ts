@@ -17,6 +17,7 @@ import type {
   MaintenanceRun,
   MaintenanceRunsResponse,
   MaintenanceStateResponse,
+  AgentRunHistoryResponse,
   RevertResponse,
   RetrieveIndexStatus,
   RepairTask,
@@ -243,6 +244,15 @@ export const api = {
     fetch(`${BASE}/maintenance/runs`).then(json<MaintenanceRunsResponse>),
 
   /** Per-kind last-settle state (SPEC §12.7 Stufe b) - feeds the status head's "last run" facts. */
+  /** The persistent run log (schema v12). `kind` narrows it, e.g. to research runs. */
+  maintenanceHistory: (params: { kind?: string; limit?: number } = {}): Promise<AgentRunHistoryResponse> => {
+    const q = new URLSearchParams()
+    if (params.kind !== undefined) q.set('kind', params.kind)
+    if (params.limit !== undefined) q.set('limit', String(params.limit))
+    const suffix = q.toString() === '' ? '' : `?${q.toString()}`
+    return fetch(`${BASE}/maintenance/history${suffix}`).then(json<AgentRunHistoryResponse>)
+  },
+
   maintenanceState: (): Promise<MaintenanceStateResponse> =>
     fetch(`${BASE}/maintenance/state`).then(json<MaintenanceStateResponse>),
 

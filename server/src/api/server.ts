@@ -37,6 +37,7 @@ import { registerGraphRoute } from './routes/graph.js'
 import { registerDomainsRoute } from './routes/domains.js'
 import { MemoryDismissalStore, type DismissalStore } from '../db/domain-dismissals.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
+import type { AgentRunStore } from '../db/agent-runs.js'
 
 export interface AppContext {
   readonly config: Config
@@ -64,6 +65,8 @@ export interface AppContext {
   readonly domainDismissals?: DismissalStore
   /** Per-kind maintenance settle state (SPEC.md §12.7 Stufe b); omitted → empty state list. */
   readonly maintenanceState?: MaintenanceStateStore
+  /** Persistent per-run history (schema v12); omitted → the history endpoint answers empty. */
+  readonly agentRuns?: AgentRunStore
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
   /** Env-file path the credential endpoint writes. Defaults to DEFAULT_ENV_FILE; tests inject. */
@@ -109,7 +112,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   // per-file cache makes all three cheap).
   const graphBuilder = ctx.graph ?? new GraphBuilder(ctx.config.vaultRoot)
   const dismissals = ctx.domainDismissals ?? new MemoryDismissalStore()
-  registerMaintenanceRoute(app, ctx, graphBuilder, dismissals, ctx.maintenanceState)
+  registerMaintenanceRoute(app, ctx, graphBuilder, dismissals, ctx.maintenanceState, ctx.agentRuns)
   registerPagesRoute(app, ctx, graphBuilder)
   registerGraphRoute(app, ctx, graphBuilder)
   registerDomainsRoute(app, ctx, graphBuilder, dismissals)

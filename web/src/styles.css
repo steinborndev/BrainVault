@@ -5693,3 +5693,146 @@ kbd {
   background: var(--ok-bg);
   color: var(--ok);
 }
+
+/* ── Fixes 2026-08-25 (second pass, round two) ─────────────────────────────── */
+
+/* Home's activity table used the default `auto` layout, so one long file name or a row of
+   page chips widened the whole table past its box and the screen scrolled sideways. Fixed
+   columns cannot be pushed: the event column takes what is left and its content clips. */
+.box-body > .dtable {
+  table-layout: fixed;
+}
+.inbox-table th:nth-child(1) { width: 44%; }
+.inbox-table th:nth-child(2) { width: 13%; }
+.inbox-table th:nth-child(3) { width: 8%; }
+.inbox-table th:nth-child(4) { width: 8%; }
+.inbox-table th:nth-child(5) { width: 9%; }
+.inbox-table th:nth-child(6) { width: 18%; }
+.box-body > .dtable td {
+  overflow: hidden;
+}
+/* The name may take the whole column now - the fixed width is the limit, not a magic px. */
+.box-body > .dtable .hrow-name .nm {
+  max-width: none;
+}
+.rowpages {
+  overflow: hidden;
+}
+
+/* The research run table shares the fixed layout; its columns are its own. */
+.runs-table th:nth-child(1) { width: 42%; }
+.runs-table th:nth-child(2) { width: 18%; }
+.runs-table th:nth-child(3) { width: 10%; }
+.runs-table th:nth-child(4) { width: 12%; }
+.runs-table th:nth-child(5) { width: 18%; }
+
+/* The graph's control bar: the search field is the tallest control in it, so everything
+   beside it takes the same box height instead of sitting a few pixels short. */
+.graph-controls .btn {
+  height: var(--control-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+.graph-controls .graph-search {
+  height: var(--control-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.graph-controls .shortcut-wrap {
+  align-items: center;
+}
+
+/* Ingests per day: bars, because a count per day is discrete. The shared Sparkline is a
+   fixed viewBox stretched to card width, which fattened its stroke and lost the days. */
+.daybars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.db-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 68px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--border);
+}
+.db-col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.db-bar {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.db-bar.zero {
+  background: var(--border-strong);
+}
+.db-bar.last {
+  background: var(--accent);
+}
+.db-axis {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.db-axis .db-max {
+  color: var(--text-dim);
+}
+
+/* A subcard whose body IS a table: the table brings its own row padding. */
+.sc-body.flush {
+  padding: 0;
+}
+.sc-body.flush .dtable td,
+.sc-body.flush .dtable th {
+  padding-left: 13px;
+  padding-right: 13px;
+}
+.runtable {
+  table-layout: fixed;
+}
+.runtable th:nth-child(1) { width: 46%; }
+.runtable th:nth-child(2) { width: 14%; }
+.runtable th:nth-child(3) { width: 12%; }
+.runtable th:nth-child(4) { width: 12%; }
+.runtable th:nth-child(5) { width: 16%; }
+.runtable tbody tr {
+  cursor: default;
+}
+.runtable .rt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Vault stats: the figures stay on screen and the domain list scrolls on its own, rather
+   than the whole pane scrolling and taking the numbers with it. */
+.box-body:has(> .sys-pane.fill) {
+  overflow: hidden;
+}
+.sys-pane.fill {
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 14px;
+}
+.sys-pane.fill > .subcard.grow {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 150px;
+}
+.sys-pane.fill > .subcard.grow > .sc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}

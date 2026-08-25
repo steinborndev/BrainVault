@@ -25,7 +25,6 @@ import type { AuthMode, Stats } from '../api/types.ts'
 import { Maintenance } from './Maintenance.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { GrowthChart } from '../components/GrowthChart.tsx'
-import { Sparkline } from '../components/Sparkline.tsx'
 import { Cost, CostFootnote, isEstimate } from '../components/Cost.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { Tip } from '../components/Tip.tsx'
@@ -111,6 +110,11 @@ export function System({ section = '' }: { section?: string }): React.ReactEleme
                 aria-current={active === s.id ? 'true' : undefined}
                 onClick={() => setActive(s.id)}
               >
+                <span
+                  className="dot"
+                  style={{ background: active === s.id ? 'var(--accent)' : 'var(--muted)' }}
+                  aria-hidden
+                />
                 <span className="nm">{s.label}</span>
                 {badgeFor(s.id)}
               </button>
@@ -301,7 +305,7 @@ function UsageSection(): React.ReactElement {
             <span className="badge">{s.kpis7d.ingests} in 7 d</span>
           </div>
           <div className="sc-body">
-            <Sparkline values={dense(s.kpisDaily, 'done', 14)} />
+            <DayBars values={dense(s.kpisDaily, 'done', 14)} />
             <div className="sc-meta">
               <span>{s.kpis7d.failures} failed</span>
               <span>{s.kpis7d.duplicates} duplicates</span>
@@ -348,23 +352,36 @@ function UsageSection(): React.ReactElement {
         <div className="sc-head">
           <h3 className="sc-title">Most expensive runs · last 7 days</h3>
         </div>
-        <div className="sc-body">
+        <div className="sc-body flush">
           {biggest.length === 0 ? (
             <div className="empty">No priced runs in this window.</div>
           ) : (
-            <div className="kvlist">
-              {biggest.map((i) => (
-                <div key={i.id} className="kv">
-                  <span className="k" title={i.label}>
-                    {i.label}
-                  </span>
-                  <span className="v">
-                    <Cost value={i.costUsd} authMode={authMode} /> · {tokens(i.tokensIn + i.tokensOut)} tok ·{' '}
-                    {timeAgo(i.whenIso)}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <table className="dtable runtable">
+              <thead>
+                <tr>
+                  <th>Run</th>
+                  <th>Channel</th>
+                  <th className="num">Tokens</th>
+                  <th className="num">Cost</th>
+                  <th className="num">When</th>
+                </tr>
+              </thead>
+              <tbody>
+                {biggest.map((i) => (
+                  <tr key={i.id}>
+                    <td className="rt-name" title={i.label}>
+                      {i.label}
+                    </td>
+                    <td className="dimc">{i.channel}</td>
+                    <td className="num">{tokens(i.tokensIn + i.tokensOut)}</td>
+                    <td className="num">
+                      <Cost value={i.costUsd} authMode={authMode} />
+                    </td>
+                    <td className="num faintc">{timeAgo(i.whenIso)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </div>
       </section>
@@ -402,7 +419,9 @@ function VaultStatsSection(): React.ReactElement {
   const grew = s.pages.total - weekAgo
 
   return (
-    <div className="sys-pane">
+    // `fill`: the figures above stay on screen and the domain list takes the leftover
+    // height and scrolls inside itself, instead of the whole pane scrolling as one.
+    <div className="sys-pane fill">
       <div className="facts">
         <Fact k="Pages" v={String(s.pages.total)} sub={`${grew >= 0 ? '+' : ''}${grew} in 7 d`} />
         <Fact k="Links" v={graph.data !== undefined ? String(graph.data.edges.length) : '…'} />
@@ -517,7 +536,7 @@ function VaultStatsSection(): React.ReactElement {
         </section>
       </div>
 
-      <section className="subcard">
+      <section className="subcard grow">
         <div className="sc-head">
           <h3 className="sc-title">Domains</h3>
           <span className="spacer" />
@@ -546,6 +565,39 @@ function VaultStatsSection(): React.ReactElement {
           )}
         </div>
       </section>
+    </div>
+  )
+}
+
+/**
+ * A count per day as bars - discrete counts, not a continuous series, so the day boundaries
+ * have to survive the drawing. Plain elements rather than a stretched SVG: the shared
+ * Sparkline is a fixed 74x26 viewBox, and at card width its stroke scaled up with it.
+ */
+function DayBars({ values }: { values: number[] }): React.ReactElement {
+  const max = Math.max(1, ...values)
+  const today = new Date()
+  const label = (i: number): string => {
+    const d = new Date(today.getTime() - (values.length - 1 - i) * 24 * 60 * 60 * 1000)
+    return d.toISOString().slice(5, 10)
+  }
+  return (
+    <div className="daybars">
+      <div className="db-plot" role="img" aria-label={`Ingests per day over the last ${values.length} days`}>
+        {values.map((v, i) => (
+          <span key={i} className="db-col" title={`${label(i)}: ${v}`}>
+            <span
+              className={`db-bar${v === 0 ? ' zero' : ''}${i === values.length - 1 ? ' last' : ''}`}
+              style={{ height: `${Math.max(v === 0 ? 2 : 6, Math.round((v / max) * 100))}%` }}
+            />
+          </span>
+        ))}
+      </div>
+      <div className="db-axis">
+        <span>{label(0)}</span>
+        <span className="db-max">peak {max}</span>
+        <span>{label(values.length - 1)}</span>
+      </div>
     </div>
   )
 }

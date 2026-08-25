@@ -578,11 +578,32 @@ collected and simply never added up anywhere.
       lost its wide-card and collapsed variants (it lives in a 252px column now), and 143
       CSS rules whose classes no longer appear anywhere were removed (~18 KB).
 
-- [ ] OPEN: research run history is still reconstructed rather than recorded. A persistent
-      `agent_runs` table (operational state, SPEC §8) would keep cost, duration and failed
-      runs across restarts; today a settled run keeps its cost only until the in-memory
-      registry evicts it, after which the vault page carries topic, lens and date but no
-      cost.
+- [x] DONE (2026-08-25, round two): the run history is recorded, not reconstructed.
+      Migration v12 adds `agent_runs` (one row per settled run: kind, label, lens, ok, pages,
+      tokens, cost, error, started/finished), written by the runner's `settle()` behind the
+      same swallow-errors discipline as the per-kind state, pruned to the newest 1000.
+      `GET /maintenance/history?kind=&limit=` serves it. The client merge now prefers the log
+      and keeps the older sources for what only they know: the in-memory registry for a run
+      still IN FLIGHT, the settle record for a pre-v12 failure, and the synthesis pages in
+      the vault for every run that predates the table. Verified against the live service: an
+      index rebuild wrote its row and came back out of the endpoint.
 - [ ] OPEN: SPEC.md §6 still describes five tabs (Overview, Ingestion, Query/Chat, Vault,
       Maintenance) and was deliberately not edited. The amendment now has two structure
       changes to fold in (the 2026-08-23 sidebar shell and this pass).
+
+### Round two fixes (2026-08-25)
+
+- [x] Home scrolled sideways: the activity table used the default `auto` layout, so one long
+      file name or a row of page chips widened it past its box. Fixed column widths plus
+      `overflow: hidden` on the cells - the event column takes what is left and clips.
+- [x] The graph bar's Shortcuts and Fullscreen buttons sat a few pixels short of the search
+      field beside them. Every control in `.graph-controls` is now one `--control-h` box.
+- [x] The System control column showed one letter per section: `.domrow` is a three-column
+      grid (dot | name | count) and those rows had no dot, so the label landed in the 9px
+      column. They carry a state dot now, like every other row in that panel.
+- [x] Usage: the ingests series was the shared Sparkline (a 74x26 viewBox) stretched to card
+      width, which scaled its stroke up with it. A count per day is discrete, so it is bars
+      now, with the date span and the peak labelled. The most expensive runs became a real
+      table with columns instead of one packed line per row.
+- [x] Vault stats: only the domain list scrolls - the figures, growth and index cards stay on
+      screen instead of scrolling away with it.

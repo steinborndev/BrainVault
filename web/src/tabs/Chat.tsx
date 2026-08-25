@@ -32,7 +32,7 @@ import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { navigate } from '../lib/router.ts'
 import { chatStream } from '../lib/chatStream.ts'
-import { timeAgo, tokens } from '../lib/format.ts'
+import { duration, timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { buildResearchRuns, targetTitle, type ResearchRunEntry } from '../lib/researchRuns.ts'
 
@@ -107,18 +107,23 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const selectedProfile = profiles.find((p) => p.key === profileKey)
 
   // The run list: tracked runs + the synthesis pages that outlive them + failed settles.
+  const historyQ = useQuery({
+    queryKey: ['maintenance-history', 'research'],
+    queryFn: () => api.maintenanceHistory({ kind: 'research', limit: 100 }),
+  })
   const runsQ = useQuery({ queryKey: ['maintenance-runs'], queryFn: api.maintenanceRuns })
   const stateQ = useQuery({ queryKey: ['maintenance-state'], queryFn: api.maintenanceState })
   const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const entries = useMemo(
     () =>
       buildResearchRuns({
+        history: historyQ.data?.runs ?? [],
         runs: runsQ.data?.runs ?? [],
         lastRuns: stateQ.data?.areas ?? [],
         nodes: graphQ.data?.nodes ?? [],
         profiles,
       }),
-    [runsQ.data, stateQ.data, graphQ.data, profiles],
+    [historyQ.data, runsQ.data, stateQ.data, graphQ.data, profiles],
   )
   const liveEntry = entries.find((e) => e.status === 'running')
 
@@ -537,7 +542,7 @@ function StartView({
           page.
         </div>
       ) : (
-        <table className="dtable">
+        <table className="dtable runs-table">
           <thead>
             <tr>
               <th>Topic</th>
@@ -740,6 +745,10 @@ function RunDetail({
           <span className="v">{timeAgo(entry.finishedAt)}</span>
         </div>
         <div className="fact">
+          <span className="k">Took</span>
+          <span className="v">{duration(entry.startedAt, entry.finishedAt)}</span>
+        </div>
+        <div className="fact">
           <span className="k">Cost</span>
           <span className="v">
             {entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
@@ -766,10 +775,12 @@ function RunDetail({
 
       <p className="tab-hint">
         {entry.source === 'page'
-          ? 'Reconstructed from the synthesis page in the vault: the service keeps no per-run record beyond the ones still in memory, so cost and duration are not available for this one.'
+          ? 'Reconstructed from the synthesis page in the vault - this run predates the run log, so its cost and duration were never recorded.'
           : entry.source === 'state'
             ? 'From the restart-proof settle record - the run wrote no page.'
-            : 'From the run record the service still holds in memory.'}
+            : entry.source === 'run'
+              ? 'From the run record the service still holds in memory.'
+              : 'From the run log - recorded when the run settled, and kept across restarts.'}
       </p>
     </div>
   )
