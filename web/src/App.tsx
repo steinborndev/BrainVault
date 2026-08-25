@@ -184,10 +184,8 @@ export function App(): React.ReactElement {
     <div className="app">
       <div className="main">
         <header className="topbar">
-          <button className="brand" onClick={() => navigate('/')} title="BrainVault home">
-            <Icon name="logo" />
-            <span className="name">BrainVault</span>
-          </button>
+          {/* No brand mark here for now - a rebranding is pending, and the Home tab is the
+              way home in the meantime. */}
           {/* Navigation, not a tab widget: each entry is a route, and the screens are not
               tabpanels - so `aria-current`, the same contract the sidebar had. */}
           <nav className="tabs" aria-label="Primary">

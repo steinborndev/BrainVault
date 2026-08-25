@@ -163,28 +163,6 @@ button {
    were already looking at; five screens fit across the top, and every workspace gets that
    width back. The bar sits on the sidebar ground, the active tab is painted in the screen
    ground and hangs 1px into the bottom border, so it reads as the surface you are on. ── */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex: none;
-  padding: 0 10px 0 2px;
-  border: 0;
-  background: none;
-  color: var(--text);
-}
-.brand svg {
-  width: 24px;
-  height: 24px;
-  flex: none;
-}
-.brand .name {
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 14.5px;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
-}
 /* No overflow container here: the active tab deliberately overlaps the header's bottom
    border, and a scroll container would clip exactly that. */
 .tabs {
@@ -315,37 +293,13 @@ button {
   height: 52px;
   flex: 0 0 52px;
   display: flex;
-  /* The tabs align to the bottom edge; brand and status centre themselves inside their
-     own boxes, so the row still has one baseline. */
+  /* The tabs align to the bottom edge; the status controls centre themselves inside their
+     own box, so the row still has one baseline. */
   align-items: stretch;
   gap: 12px;
   padding: 14px 16px 0;
   border-bottom: 1px solid var(--border);
   background: var(--bg-side);
-}
-.topbar .whereami {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  margin: 0;
-  border: 0;
-  background: none;
-  padding: 0;
-}
-.topbar .whereami .where {
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 15px;
-  white-space: nowrap;
-  color: var(--text);
-}
-.topbar .whereami .sub {
-  color: var(--text-faint);
-  font-size: 12.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 .screens {
   flex: 1;
@@ -5877,4 +5831,18 @@ kbd {
    research violet, because nothing here has side effects. */
 .planline .pl-lens.ask {
   color: var(--accent);
+}
+
+/* The run list is the one section that grows without bound as runs accumulate: it gets a
+   ceiling and scrolls inside it, so the conversations below it stay reachable without
+   scrolling the whole control column. */
+.gp-sec.runs-sec {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 42vh;
+}
+.gp-sec.runs-sec > .domlist {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }

@@ -272,7 +272,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
         </div>
 
-        <div className="gp-sec grow">
+        <div className="gp-sec grow runs-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">Runs</span>
             <span className="spacer" />

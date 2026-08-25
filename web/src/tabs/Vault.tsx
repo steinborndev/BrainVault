@@ -1045,7 +1045,6 @@ function GraphView({
                 )}
               </span>
               <span className="spacer" />
-              {searchOverlay}
               <Shortcuts rows={GRAPH_SHORTCUTS} />
               <button
                 className="btn ghost"
@@ -1054,6 +1053,9 @@ function GraphView({
               >
                 <Icon name={fullscreen ? 'shrink' : 'expand'} /> {fullscreen ? 'Exit' : 'Fullscreen'}
               </button>
+              {/* Last in the row: search is the control you come back to, and its result
+                  list drops out of the field - at the end of the bar it has room to. */}
+              {searchOverlay}
             </>
           }
           onSelect={(n) =>
