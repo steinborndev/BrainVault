@@ -3980,9 +3980,6 @@ details.hot-cache[open] summary {
   background: var(--bg);
   margin-bottom: 13px;
 }
-@keyframes prog-spin {
-  to { transform: rotate(360deg); }
-}
 .prog-step.done .prog-mark {
   background: var(--ok-bg);
   border-color: var(--ok);
