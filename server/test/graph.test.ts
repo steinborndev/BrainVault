@@ -254,6 +254,22 @@ describe('GraphBuilder', () => {
     expect(g.gaps).toHaveLength(0) // ...but a missing image is not a page to write
   })
 
+  it('never lets plugin-shipped doc pages nominate gaps', () => {
+    // claude-obsidian ships wiki/references/* carrying `related:` links into its own docs
+    // that a Generic-mode vault has no page for. Those gaps are upstream's, they name
+    // nothing the user collects, and upstream-guard forbids agent runs from editing the
+    // pages anyway - a backlog entry for them is work nobody can do. (No git in the temp
+    // vault, so protectedWikiPages falls back to the static upstream list.)
+    page(
+      'wiki/references/transport-fallback.md',
+      '---\ntype: reference\n---\nrelated: [[wiki-cli]] and [[mcp-setup]]',
+    )
+    page('wiki/concepts/A.md', '---\ntype: concept\n---\nwants [[Osmosis]]')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(3) // upstream's dangling links are still dangling
+    expect(g.gaps.map((x) => x.title)).toEqual(['Osmosis']) // but never a backlog entry
+  })
+
   it('resolves links via frontmatter title and aliases when the basename differs', () => {
     // Filenames drop filesystem-hostile characters that links keep: the vault files
     // "…work?" as "…work.md" with the `?` preserved only in `title:`.

@@ -14,6 +14,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseWikilinkRefs, type WikilinkRef } from './citations.js'
+import { pluginDocPages } from './upstream-guard.js'
 
 /**
  * How a page participates in the vault (SPEC §12.4): `knowledge` is what the vault exists
@@ -55,6 +56,12 @@ export interface GraphNode {
  * dangling links while reporting on them rather than wanting the page written, so one lint
  * report would otherwise inflate every gap and mint pure-noise entries. Embeds (`![[…]]`)
  * are excluded for the same reason: a missing image is a broken picture, not a page to write.
+ *
+ * So are the plugin-shipped doc pages under `wiki/` (upstream-guard's `protectedWikiPages`).
+ * claude-obsidian ships them with `related:` links into its own docs that a Generic-mode
+ * vault has no page for; the gaps they name are upstream's, they describe nothing the user
+ * collects, and agent runs are forbidden from editing those pages anyway - so a backlog
+ * entry for them is work nobody can do.
  */
 export interface GraphGap {
   /** The missing page's name, cased as first written in a wikilink. */
@@ -301,7 +308,9 @@ export class GraphBuilder {
       }
     }
 
-    // Page kinds, needed before the link loop: artifact pages don't nominate gaps.
+    // Page kinds, needed before the link loop: artifact pages don't nominate gaps. Neither
+    // do the plugin's own doc pages (memoized - the derivation shells out to git).
+    const pluginDocs = pluginDocPages(this.vaultRoot)
     const kinds: NodeKind[] = files.map((f) => {
       const entry = this.cache.get(f.abs)
       return classifyKind(entry?.fmType ?? null, entry?.domain ?? null, f.type, f.title)
@@ -329,9 +338,10 @@ export class GraphBuilder {
           if (assetKeys.has(wikiRel)) continue // an existing canvas/base — resolved, no node
           unresolved++
           // Path-qualified stragglers (`[[notes/Foo]]`, `.raw/…`) stay out of the gap list:
-          // they are navigation or staging references, not missing CONTENT pages. Embeds and
-          // artifact sources count as unresolved but never as gap referrers (see GraphGap).
-          if (!target.includes('/') && !embed && kinds[from] !== 'artifact') {
+          // they are navigation or staging references, not missing CONTENT pages. Embeds,
+          // artifact sources and plugin docs count as unresolved but never nominate a gap
+          // (see GraphGap).
+          if (!target.includes('/') && !embed && kinds[from] !== 'artifact' && !pluginDocs.has(f.rel)) {
             const gap = gapByKey.get(lower)
             if (gap === undefined) gapByKey.set(lower, { title: target, refBy: new Set([from]) })
             else gap.refBy.add(from)

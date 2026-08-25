@@ -120,7 +120,10 @@ export function Vault({ path }: { path: string }): React.ReactElement {
 
   const [pathname, search] = path.split('?') as [string, string | undefined]
   const page = pageFromPath(pathname)
-  const focus = new URLSearchParams(search ?? '').get('focus')
+  const params = new URLSearchParams(search ?? '')
+  const focus = params.get('focus')
+  // `?gaps=1` arrives from Home's Gaps card: open the graph with the gaps overlay already on.
+  const openGaps = params.get('gaps') === '1'
 
   if (graphQ.isLoading) return <div className="empty">Loading graph…</div>
   if (graphQ.isError || !graphQ.data) {
@@ -135,7 +138,7 @@ export function Vault({ path }: { path: string }): React.ReactElement {
   }
 
   if (page !== null) return <PageView graph={graphQ.data} path={page} />
-  return <GraphView graph={graphQ.data} focusPath={focus} />
+  return <GraphView graph={graphQ.data} focusPath={focus} openGaps={openGaps} />
 }
 
 // ---------------------------------------------------------------------------- graph view
@@ -371,7 +374,15 @@ function useDebounced<T>(value: T, delay: number): T {
   return settled
 }
 
-function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
+function GraphView({
+  graph,
+  focusPath,
+  openGaps,
+}: {
+  graph: VaultGraph
+  focusPath: string | null
+  openGaps: boolean
+}): React.ReactElement {
   // `input` is what the field shows; `query` is what the graph reacts to. Without the delay
   // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera - typing a
   // six-letter word moved the view six times.
@@ -438,6 +449,22 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * restoring a session into a chromeless screen is disorienting.
    */
   const [fullscreen, setFullscreen] = useState(false)
+
+  /**
+   * `?gaps=1` (Home's Gaps card) lands here with the gaps overlay on. It is a one-shot
+   * COMMAND, not view state, so the param is consumed and dropped from the URL right away.
+   * That matters twice: the screens stay mounted behind [hidden], so seeding useState would
+   * only ever fire on the app's first visit to the graph - and without dropping the param,
+   * a second click from Home would pass the identical path string, this effect would not
+   * re-run, and the toggle would stay wherever the user last left it.
+   */
+  useEffect(() => {
+    if (!openGaps) return
+    setShowGaps(true)
+    navigate(focusPath === null ? '/graph' : `/graph?focus=${encodeURIComponent(focusPath)}`, {
+      replace: true,
+    })
+  }, [openGaps, focusPath])
 
   // Write-through into the module-scope memory: every committed render snapshots the view
   // state, so the next mount (returning from an article) restores exactly this view.

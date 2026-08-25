@@ -441,7 +441,9 @@ function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }
         <div className="sub">{stats.kpis7d.failures > 0 ? 'retry from the inbox' : 'nothing failed this week'}</div>
         <div className="goto">{stats.kpis7d.failures > 0 ? 'Show failed jobs' : 'Open the inbox'}</div>
       </button>
-      <button className="stat card statlink" onClick={() => navigate('/graph')}>
+      {/* `?gaps=1` opens the graph with the gaps overlay already on - the card promises to
+          SHOW them, so landing on a graph that hides them behind a toggle breaks the promise. */}
+      <button className="stat card statlink" onClick={() => navigate('/graph?gaps=1')}>
         <div className="label">Gaps</div>
         <div className="value">{gapCount ?? '…'}</div>
         <div className="sub">unresolved link targets</div>
