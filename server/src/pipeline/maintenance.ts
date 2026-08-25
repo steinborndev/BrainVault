@@ -78,6 +78,73 @@ export type TagFixAction =
   | { readonly kind: 'drop'; readonly tag: string }
   | { readonly kind: 'merge'; readonly from: string; readonly to: string }
 
+/**
+ * Domain keys that are ALSO a legitimate content tag, so a page carrying both is not
+ * repeating itself.
+ *
+ * `meta` says what a page IS - vault machinery: an index, a report, a fold - which is a fact
+ * about the page and not only about the shelf it sits on. Every other domain key in `tags:`
+ * is pure repetition of the `domain:` field.
+ *
+ * Kept in step with `DOMAIN_TAGS_THAT_STAY` in web/src/lib/tagReport.ts, which must not flag
+ * as redundant what this prompt deliberately leaves in place.
+ */
+export const DOMAIN_TAGS_THAT_STAY: readonly string[] = ['meta']
+
+/**
+ * The domain backfill's instructions (SPEC.md §12.4 Stufe 2).
+ *
+ * Frontmatter-only by construction, which is what makes it cheap and safe: the vault's
+ * semantic-tiling cache hashes page BODIES, so a backfill does not invalidate it.
+ *
+ * The domain lives in `domain:` and NOWHERE else. This prompt used to say the opposite - it
+ * required the domain key to be mirrored into `tags:` - and that closed a loop with the
+ * dashboard's tag hygiene, which correctly reads such a tag as repeating the field and
+ * offers to drop it: backfill sets the tag, tag repair removes it, the next backfill sets it
+ * again. Every new domain produced a due tag repair within minutes of being filled. The
+ * mirroring was also never a vault rule (the registry calls its tag lists "guidance for
+ * classification") and 94.7% of pages never carried it, so removing the tag - rather than
+ * silencing the report - is what matches both the rules and the vault as it stands.
+ *
+ * Exported for the test that keeps the instruction from coming back.
+ */
+export function domainBackfillPrompt(domainKeys: readonly string[]): string {
+  const keys = domainKeys.join(', ')
+  const keep = DOMAIN_TAGS_THAT_STAY.map((t) => `\`${t}\``).join(', ')
+  return (
+    `Read ${DOMAIN_REGISTRY_PATH} — it is the closed list of allowed domains. Then go through ` +
+    'EVERY markdown page under wiki/ (all subdirectories, all page types: concepts, entities, ' +
+    'sources, references, comparisons, questions, folds, meta, and the pages directly in wiki/) ' +
+    'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
+    `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
+    'Rules:\n' +
+    `- A page that already has a REAL domain from the list keeps it. A page whose current ` +
+    'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
+    '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
+    `- A page carrying \`${UNASSIGNED}\` is NOT settled: re-classify it against the list above — ` +
+    'a domain added after the last backfill may fit it now. It keeps ' +
+    `\`${UNASSIGNED}\` only when still no listed domain fits.\n` +
+    `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
+    `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
+    '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
+    'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
+    '- The domain belongs in the `domain:` field and NOWHERE else. A tag that merely names a ' +
+    'domain key repeats what the field already says, so while you are in a page\'s ' +
+    'frontmatter, REMOVE any tag equal to a domain key: the page\'s own domain, the domain it ' +
+    `used to carry if you re-file it, and \`${UNASSIGNED}\`. The only exception is ${keep}, ` +
+    'which is a real content tag as well as a domain key — leave it exactly as you find it, ' +
+    'on every page.\n' +
+    '- Beyond `domain:` and those redundant tags, change nothing: leave every other tag, all ' +
+    'other frontmatter fields, page bodies, titles, and wikilinks untouched. Do not create, ' +
+    'delete, rename or merge any page.\n' +
+    `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
+    'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
+    'Work through the pages systematically so none is skipped. When done, report the total ' +
+    'number of pages touched and a per-domain count, plus the list of pages you left as ' +
+    `\`${UNASSIGNED}\` and why.`
+  )
+}
+
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
   override readonly name = 'DomainRegistryMissingError'
@@ -564,41 +631,9 @@ export class MaintenanceRunner {
         `no domain registry at ${DOMAIN_REGISTRY_PATH} — install it (scripts/install-domain-registry.sh) before running a backfill`,
       )
     }
-    const keys = registry.domains.map((d) => d.key).join(', ')
-    return this.start(
-      'domain-backfill',
-      `Read ${DOMAIN_REGISTRY_PATH} — it is the closed list of allowed domains. Then go through ` +
-        'EVERY markdown page under wiki/ (all subdirectories, all page types: concepts, entities, ' +
-        'sources, references, comparisons, questions, folds, meta, and the pages directly in wiki/) ' +
-        'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
-        `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
-        'Rules:\n' +
-        `- A page that already has a REAL domain from the list keeps it. A page whose current ` +
-        'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
-        '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
-        `- A page carrying \`${UNASSIGNED}\` is NOT settled: re-classify it against the list above — ` +
-        'a domain added after the last backfill may fit it now. It keeps ' +
-        `\`${UNASSIGNED}\` only when still no listed domain fits.\n` +
-        `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
-        `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
-        '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
-        'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
-        '- Frontmatter edits are limited to the `domain:` field and the domain tag mirrored into ' +
-        'the `tags:` list — and the two must be CONSISTENT on every page, not only on pages you ' +
-        `re-file: a page whose \`domain:\` is a real listed key must not carry a stale ` +
-        `\`${UNASSIGNED}\` tag. Remove it and make sure the current domain key is present as a ` +
-        'tag. When you re-file a page, also drop the tag mirroring its previous domain key. ' +
-        `Pages whose domain is \`${UNASSIGNED}\` keep the \`${UNASSIGNED}\` tag. Leave every ` +
-        'other tag, all other frontmatter fields, page bodies, titles, and wikilinks untouched. ' +
-        'Do not create, delete, rename or merge any page.\n' +
-        `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
-        'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
-        'Work through the pages systematically so none is skipped. When done, report the total ' +
-        'number of pages touched and a per-domain count, plus the list of pages you left as ' +
-        `\`${UNASSIGNED}\` and why.`,
-      'ingest',
-      { commitMessage: 'maintenance: domain backfill' },
-    )
+    return this.start('domain-backfill', domainBackfillPrompt(registry.domains.map((d) => d.key)), 'ingest', {
+      commitMessage: 'maintenance: domain backfill',
+    })
   }
 
   /**

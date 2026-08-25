@@ -130,8 +130,12 @@ tags to any page:
   and prefer an existing tag over a new spelling of the same idea. Never introduce a
   variant (singular/plural, hyphenation, near-synonym) of an existing tag.
 - Never tag a page with its own domain, the domain's name in other words, or a synonym of
-  it — the \`domain:\` field already carries that. (One exception: the domain key mirrored
-  into \`tags:\` where the vault's domain rules explicitly require it.)
+  it — the \`domain:\` field already carries that, and the graph, the library and every
+  domain filter read the FIELD, never the tags. The one exception is \`meta\`, which names
+  what a page is (vault machinery: an index, a report, a fold) as well as being a domain
+  key. There is no other exception: a rule that let the domain key be "mirrored into
+  \`tags:\`" used to stand here, and it closed a loop with the tag-hygiene report, which
+  reads exactly such a tag as redundant and offers to drop it.
 - Do not tag what the frontmatter already says elsewhere: no type-mirroring tags beyond the
   structural ones the vault prescribes (a page with \`type: entity\` needs no extra
   #organization tag to say so).

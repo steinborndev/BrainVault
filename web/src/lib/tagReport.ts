@@ -66,6 +66,19 @@ const ECHO_DOMAIN_COVERAGE = 0.8
 const ECHO_TAG_CONCENTRATION = 0.9
 /** Domains smaller than this can't meaningfully be "echoed". */
 const MIN_ECHO_DOMAIN_SIZE = 5
+/**
+ * Domain keys that are ALSO a legitimate content tag, so a page carrying both is not
+ * repeating itself and the echo rule must stay quiet about the pair.
+ *
+ * `meta` says what a page IS - vault machinery: an index, a report, a fold - which is a fact
+ * about the page and not only about the shelf it sits on. Every other domain key in `tags:`
+ * is pure repetition of the `domain:` field.
+ *
+ * Kept in step with `DOMAIN_TAGS_THAT_STAY` in server/src/pipeline/maintenance.ts: what the
+ * backfill deliberately leaves in place must not be reported here as redundant, or the two
+ * would pull against each other on every run.
+ */
+const DOMAIN_TAGS_THAT_STAY: ReadonlySet<string> = new Set(['meta'])
 
 /** Word split for the variant comparison: separators and case are never meaningful. */
 const words = (t: string): string[] => t.toLowerCase().split(/[-_\s]+/).filter(Boolean)
@@ -223,6 +236,9 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
     const dSize = domainSize.get(domain)!
     const tCount = tagCount.get(tag)!
     if (dSize < MIN_ECHO_DOMAIN_SIZE) continue
+    // A tag that IS its domain key is normally the purest echo there is - but for the few
+    // keys that double as a content tag, the pair is intentional and stays.
+    if (tag === domain && DOMAIN_TAGS_THAT_STAY.has(tag)) continue
     if (inDomain / dSize >= ECHO_DOMAIN_COVERAGE && inDomain / tCount >= ECHO_TAG_CONCENTRATION) {
       domainEchoes.push({ tag, domain, tagCount: tCount, domainSize: dSize, inDomain })
     }
