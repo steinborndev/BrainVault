@@ -1,16 +1,21 @@
 /**
- * The ingestion entry point (SPEC.md §6.2, redesign 2026-08): drag-and-drop files, browse,
- * or paste a URL / note (multi-line, with an optional title). Multiple files in one drop go
- * up as a batch (the server groups them). The channels line makes the other two intake
- * paths visible right where intake happens: the watch folder and the Telegram bot used to
- * be discoverable only through a popover hover.
+ * The ingestion entry point (SPEC.md §6.2, redesign 2026-08-25 second pass): drag-and-drop
+ * files, browse, or paste a URL / note (multi-line, with an optional title). Multiple files
+ * in one drop go up as a batch (the server groups them).
+ *
+ * It lives in Home's control column now - dropping a file is a control, and it belongs where
+ * every other control on every other screen is. That is also why the wide card variant and
+ * its collapsed one-row state are gone: at column width there is nothing to collapse, and
+ * the surface no longer competes with the activity stream for the top of the screen.
+ *
+ * The channel dots stay: the watch folder and the Telegram bot are the other two ways in,
+ * and they used to be discoverable only through a popover hover.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type EnqueueResult } from '../api/client.ts'
 import { Icon } from './Icon.tsx'
-import { navigate } from '../lib/router.ts'
 
 type Toast = { kind: 'ok' | 'err'; text: string } | null
 
@@ -29,22 +34,13 @@ function looksLikeUrl(value: string): boolean {
   return !value.includes('\n') && /^https?:\/\/\S+$/i.test(value.trim())
 }
 
-export function Dropzone({ compact = false }: { compact?: boolean }): React.ReactElement {
+export function Dropzone(): React.ReactElement {
   const qc = useQueryClient()
   const [over, setOver] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
   const [text, setText] = useState('')
   const [title, setTitle] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
-
-  // `compact` = the queue is busy, so the intake surface stands down to one row and
-  // the screen's attention goes to the work in flight. Opening it by hand wins until
-  // the queue drains, so a deliberate click is never undone by a job finishing.
-  const [pinned, setPinned] = useState(false)
-  const collapsed = compact && !pinned
-  useEffect(() => {
-    if (!compact) setPinned(false)
-  }, [compact])
 
   // Success toasts dismiss themselves; errors stay until the next action replaces them.
   useEffect(() => {
@@ -123,139 +119,87 @@ export function Dropzone({ compact = false }: { compact?: boolean }): React.Reac
   const maxMb = maxBytes !== undefined ? Math.round(maxBytes / 1024 / 1024) : undefined
   const isNote = text.trim() !== '' && !looksLikeUrl(text)
 
-  // Collapsed: one row. It still takes a drop (that is the point - the fast path must
-  // not need a click first), and one click brings the full card back.
-  if (collapsed) {
-    return (
-      <div className="section">
-        <div
-          className={`card intake-collapsed${over ? ' over' : ''}`}
-          onDragOver={(e) => {
-            e.preventDefault()
-            setOver(true)
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={onDrop}
-        >
-          <button className="ic-open" onClick={() => setPinned(true)}>
-            <Icon name="upload" />
-            <span className="ic-text">{busy ? 'Uploading…' : 'Drop files, paste a link, or write a note'}</span>
-            <span className="spacer" />
-            <span className="ic-cta">Add to vault</span>
-          </button>
-        </div>
-        {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
-      </div>
-    )
-  }
-
-  // One compact card, two equal entry paths: files (drop/click) left, link/note right,
-  // with the channels line underneath spanning both.
   return (
-    <div className="section">
-      <div className={`card intake${over ? ' over' : ''}`}>
-        {compact && (
-          <button className="intake-collapse" onClick={() => setPinned(false)} title="Collapse - the queue is busy anyway">
-            <Icon name="x" /> Collapse
-          </button>
-        )}
-        <div
-          className="dropzone"
-          onDragOver={(e) => {
+    <div className="intake-panel">
+      <div
+        className={`dropzone slim${over ? ' over' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={onDrop}
+        onClick={() => fileInput.current?.click()}
+        onKeyDown={(e) => {
+          // role="button" promises keyboard activation - deliver it (Enter/Space open the picker).
+          if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            setOver(true)
+            fileInput.current?.click()
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label="Choose files or drag them here"
+      >
+        <Icon name="upload" />
+        <span className="dz-t">{busy ? 'Uploading…' : 'Drop files here'}</span>
+        <span className="dz-s">or click to choose{maxMb !== undefined ? ` · max ${maxMb} MB` : ''}</span>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            takeFiles(Array.from(e.target.files ?? []))
+            e.target.value = ''
           }}
-          onDragLeave={() => setOver(false)}
-          onDrop={onDrop}
-          onClick={() => fileInput.current?.click()}
-          onKeyDown={(e) => {
-            // role="button" promises keyboard activation - deliver it (Enter/Space open the picker).
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              fileInput.current?.click()
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="Choose files or drag them here"
+        />
+      </div>
+
+      <textarea
+        className="intake-note"
+        rows={2}
+        placeholder="https://… or a quick note"
+        aria-label="Paste a link or write a note"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter submits a URL; notes are multi-line, so they submit via the button
+          // (or Ctrl+Enter, the common composer convention).
+          if (e.key === 'Enter' && (looksLikeUrl(text) || e.ctrlKey) && text.trim()) {
+            e.preventDefault()
+            submit.mutate({ value: text, noteTitle: title })
+          }
+        }}
+      />
+      {isNote && (
+        <input
+          type="text"
+          className="intake-title"
+          placeholder="Title (optional)"
+          aria-label="Note title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      )}
+
+      <div className="ip-actions">
+        <button
+          className="btn primary sm"
+          disabled={!text.trim() || busy}
+          onClick={() => submit.mutate({ value: text, noteTitle: title })}
         >
-          <div className="icon">
-            <Icon name="upload" />
-          </div>
-          <h3>{busy ? 'Uploading…' : 'Drop files here, or anywhere'}</h3>
-          <p>PDF, Office, images, text - multiple files become one batch.</p>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              takeFiles(Array.from(e.target.files ?? []))
-              e.target.value = ''
-            }}
-          />
-        </div>
-
-        <div className="intake-side">
-          <label className="intake-label" htmlFor="intake-note">
-            Or paste a link / note
-          </label>
-          <textarea
-            id="intake-note"
-            className="intake-note"
-            rows={2}
-            placeholder="https://… or a quick note"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter submits a URL; notes are multi-line, so they submit via the button
-              // (or Ctrl+Enter, the common composer convention).
-              if (e.key === 'Enter' && (looksLikeUrl(text) || e.ctrlKey) && text.trim()) {
-                e.preventDefault()
-                submit.mutate({ value: text, noteTitle: title })
-              }
-            }}
-          />
-          {isNote && (
-            <input
-              type="text"
-              className="intake-title"
-              placeholder="Title (optional)"
-              aria-label="Note title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          )}
-          <div className="url-row">
-            <span className="intake-cap">
-              {maxMb !== undefined ? `Max ${maxMb} MB per file · ` : ''}archives are not extracted
-            </span>
-            <span className="spacer" />
-            <button
-              className="btn primary"
-              disabled={!text.trim() || busy}
-              onClick={() => submit.mutate({ value: text, noteTitle: title })}
-            >
-              {isNote ? 'Add note' : 'Add'}
-            </button>
-          </div>
-        </div>
-
-        <div className="channels">
-          <span className="ch">
-            <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
-            {stats.data?.watcher.active === true ? 'Watching' : 'Watcher off:'}{' '}
-            <code title={stats.data?.watcher.folder}>{stats.data?.watcher.folder ?? '…'}</code>
-          </span>
-          <span className="ch">
-            <span className={`d ${telegram.data?.configured === true ? 'ok' : 'dim'}`} />
-            Telegram bot {telegram.data?.configured === true ? 'on' : 'off'}
-          </span>
-          <span className="spacer" />
-          <button className="linkish" onClick={() => navigate('/settings')}>
-            Channel settings
-          </button>
-        </div>
+          {isNote ? 'Add note' : 'Add link'}
+        </button>
+        <span className="spacer" />
+        <span className="ch" title={stats.data?.watcher.folder}>
+          <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
+          watcher
+        </span>
+        <span className="ch">
+          <span className={`d ${telegram.data?.configured === true ? 'ok' : ''}`} />
+          bot
+        </span>
       </div>
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

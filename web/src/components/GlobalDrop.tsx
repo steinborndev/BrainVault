@@ -64,7 +64,7 @@ export function GlobalDrop(): React.ReactElement | null {
             kind: 'done',
             message: `${queued} queued${dupes > 0 ? ` · ${dupes} duplicate${dupes > 1 ? 's' : ''} skipped` : ''}${res.batchId !== undefined ? ' · as a batch' : ''}`,
           })
-          navigate('/inbox')
+          navigate('/')
           window.setTimeout(() => setState({ kind: 'idle' }), 2200)
         })
         .catch((err: Error) => {

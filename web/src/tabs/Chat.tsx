@@ -1,15 +1,17 @@
 /**
- * Research screen (SPEC.md §6.3, redesign 2026-08). Two lanes in one rail: conversations
- * (the read-only query runner, answers with citation chips) and research runs (the
- * web-enabled autoresearch, SPEC §6.4) - the run block used to render inside whatever
- * session thread happened to be open, implying a relationship that never existed. A run now
- * has its own view; starting one switches to it, and the last settled run stays reachable
- * after a reload via the restart-proof maintenance state.
+ * Research (SPEC.md §6.3/§6.4, redesign 2026-08-25 second pass) - the screen where you go
+ * and find something out, in the same workspace shape as every other screen.
  *
- * The composer keeps its two modes with the violet side-effect signaling, but the research
- * plan collapses to ONE line (lens · deterministic title · fetch cap · 1 commit) with the
- * lens picker in a popover - the old hint + chip row + 4-row plan stacked ~300px of chrome
- * before typing.
+ *   LEFT   the lens as a standing control (four profiles, a closed set - it used to take
+ *          "change lens" plus a scrolling popover to pick one), then the runs, then the
+ *          conversations. The lens greys out in Ask mode, because a lens shapes a research
+ *          run only: it picks the sources, the fetch budget and the title the run files as.
+ *   RIGHT  the composer at the top, and below it whatever you are looking at: the run
+ *          history with the vault's own research backlog (the screen is never empty now), a
+ *          single run, or a conversation.
+ *
+ * Research is the default mode: it is the reason this screen exists, and asking the vault is
+ * the cheaper follow-up rather than the entry point.
  *
  * `/query` is still request/response - the ANSWER of record arrives with the HTTP reply -
  * but the text streams live meanwhile (chatStream). First questions stream too: the client
@@ -17,12 +19,12 @@
  * exists once the reply lands.
  */
 
-import { useState, useRef, useEffect, useSyncExternalStore } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
 import type { AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
-import { PageLinks } from '../components/PageLink.tsx'
+import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
 import { JobLog } from '../components/JobLog.tsx'
 import { RunProgress } from '../components/RunProgress.tsx'
@@ -32,21 +34,28 @@ import { navigate } from '../lib/router.ts'
 import { chatStream } from '../lib/chatStream.ts'
 import { timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
+import { buildResearchRuns, targetTitle, type ResearchRunEntry } from '../lib/researchRuns.ts'
 
-type ComposerMode = 'ask' | 'research'
-type View = 'thread' | 'run'
+type ComposerMode = 'research' | 'ask'
 
-/**
- * `researchPrefill` seeds the composer in Research mode from elsewhere in the app - the
- * graph's knowledge-gap button, Home's most-wanted list and the palette navigate here with
- * a CLEAN topic (the page name, so lens title suffixes stay intact). Consumed once.
- */
+type View =
+  | { kind: 'start' }
+  /** The run this browser just started (or any run still in flight). */
+  | { kind: 'live' }
+  | { kind: 'run'; id: string }
+  | { kind: 'thread'; id: string | null }
+
+/** How many gaps the research backlog offers at once. */
+const BACKLOG_SIZE = 6
+
 export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): React.ReactElement {
   const qc = useQueryClient()
-  const [activeId, setActiveId] = useState<string | null>(null)
+  const [mode, setMode] = useState<ComposerMode>('research')
   const [draft, setDraft] = useState('')
-  const [mode, setMode] = useState<ComposerMode>('ask')
-  const [view, setView] = useState<View>('thread')
+  const [profileKey, setProfileKey] = useState('broad')
+  const [view, setView] = useState<View>({ kind: 'start' })
+  const [activeId, setActiveId] = useState<string | null>(null)
+
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
   const authMode: AuthMode = stats.data?.authMode ?? 'oauth'
@@ -78,6 +87,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
       chatStream.clear(streamKey)
       if (requestIdRef.current !== '') chatStream.clear(requestIdRef.current)
       setActiveId(res.sessionId)
+      setView({ kind: 'thread', id: res.sessionId })
       qc.invalidateQueries({ queryKey: ['sessions'] })
       qc.invalidateQueries({ queryKey: ['session', res.sessionId] })
     },
@@ -87,70 +97,64 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
       // Give the typed question back instead of forcing a retype - but never clobber
       // something the user already started writing while the query was in flight.
       setDraft((current) => (current.trim() === '' ? question : current))
-      // The failed question and the server's error message land in the session as
-      // persisted rows too - refresh so the sidebar shows the session it created.
       qc.invalidateQueries({ queryKey: ['sessions'] })
     },
   })
 
-  // Research lenses ("Achse A"): the closed profile list for the composer picker.
+  // Research lenses ("Achse A"): the closed profile list the control column offers.
   const profilesQ = useQuery({ queryKey: ['research-profiles'], queryFn: api.researchProfiles })
-  const profiles = profilesQ.data?.profiles ?? []
-  const [profileKey, setProfileKey] = useState<string>('broad')
+  const profiles = useMemo(() => profilesQ.data?.profiles ?? [], [profilesQ.data])
   const selectedProfile = profiles.find((p) => p.key === profileKey)
 
+  // The run list: tracked runs + the synthesis pages that outlive them + failed settles.
+  const runsQ = useQuery({ queryKey: ['maintenance-runs'], queryFn: api.maintenanceRuns })
+  const stateQ = useQuery({ queryKey: ['maintenance-state'], queryFn: api.maintenanceState })
+  const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  const entries = useMemo(
+    () =>
+      buildResearchRuns({
+        runs: runsQ.data?.runs ?? [],
+        lastRuns: stateQ.data?.areas ?? [],
+        nodes: graphQ.data?.nodes ?? [],
+        profiles,
+      }),
+    [runsQ.data, stateQ.data, graphQ.data, profiles],
+  )
+  const liveEntry = entries.find((e) => e.status === 'running')
+
   // Autoresearch: topic + lens live in refs because useMaintenanceRun's starter is read at
-  // click time; `lastTopic`/`lastProfile` are what the run view displays.
+  // click time.
   const topicRef = useRef('')
   const profileKeyRef = useRef('broad')
   const [lastTopic, setLastTopic] = useState('')
-  const [lastProfile, setLastProfile] = useState<string | null>(null)
-  // The lens and start time of the run being VIEWED - the progress block needs the fetch cap
-  // (its only honest denominator) and a clock, and both belong to the run, not the composer.
-  const [runProfileKey, setRunProfileKey] = useState<string>('broad')
+  const [runProfileKey, setRunProfileKey] = useState('broad')
   const [runStartedAt, setRunStartedAt] = useState<string | null>(null)
-  const runProfile = profiles.find((p) => p.key === runProfileKey)
-  const runTargetTitle = `Research: ${lastTopic}${runProfile?.titleSuffix ?? ''}`
   const research = useMaintenanceRun(() => api.research(topicRef.current, profileKeyRef.current))
-  // The last settled research run, restart-proof (maintenance_state) - the rail shows it
-  // even after a reload, when the client-side run state is gone.
-  const maintState = useQuery({ queryKey: ['maintenance-state'], queryFn: api.maintenanceState })
-  const lastResearchState = maintState.data?.areas.find((a) => a.kind === 'research')
-  const clientRunVisible = research.running || research.result !== undefined || research.error !== null
+  const runProfile = profiles.find((p) => p.key === runProfileKey)
 
-  const threadRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // Follow a thread as it grows, and while an answer streams - but never yank the view back
+  // down when the reader scrolled up to re-read something.
   useEffect(() => {
-    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
-  }, [messages.length, ask.isPending])
-  // Follow the stream while the reader is pinned to the bottom - but never yank the view
-  // back down when they scrolled up to re-read something.
+    if (view.kind !== 'thread') return
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
+  }, [messages.length, ask.isPending, view.kind])
   useEffect(() => {
-    const el = threadRef.current
+    const el = bodyRef.current
     if (el === null || streamed === '') return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     if (nearBottom) el.scrollTo({ top: el.scrollHeight })
   }, [streamed])
 
-  // The composer grows with its content (capped), and gets focus whenever the screen
-  // becomes visible - screens stay mounted, so plain autoFocus would only ever fire once
-  // at app start, usually while this screen is hidden.
-  const composerRef = useRef<HTMLTextAreaElement>(null)
+  // The composer grows with its content (capped).
   useEffect(() => {
     const ta = composerRef.current
     if (!ta) return
     ta.style.height = 'auto'
-    ta.style.height = `${Math.min(200, ta.scrollHeight)}px`
+    ta.style.height = `${Math.min(160, ta.scrollHeight)}px`
   }, [draft])
-  const rootRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = rootRef.current
-    if (!el) return
-    const io = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) composerRef.current?.focus()
-    })
-    io.observe(el)
-    return () => io.disconnect()
-  }, [])
 
   // A gap's "Research" landed us here with a topic: arm Research mode, drop it into the
   // composer for review (not auto-sent - the user confirms), then strip the query param so
@@ -159,7 +163,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     if (researchPrefill === '') return
     setDraft(researchPrefill)
     setMode('research')
-    setView('thread')
+    setView({ kind: 'start' })
     composerRef.current?.focus()
     navigate('/research', { replace: true })
   }, [researchPrefill])
@@ -170,229 +174,187 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     if (mode === 'ask') {
       if (ask.isPending) return
       requestIdRef.current = activeId === null ? crypto.randomUUID() : ''
-      setView('thread')
+      setView({ kind: 'thread', id: activeId })
       setDraft('')
       ask.mutate(text)
-    } else {
-      if (research.running) return
-      topicRef.current = text
-      profileKeyRef.current = profileKey
-      setLastTopic(text)
-      setLastProfile(profileKey === 'broad' ? null : selectedProfile?.label ?? null)
-      setRunProfileKey(profileKey)
-      setRunStartedAt(new Date().toISOString())
-      setDraft('')
-      setView('run')
-      research.start()
+      return
     }
+    if (research.running) return
+    topicRef.current = text
+    profileKeyRef.current = profileKey
+    setLastTopic(text)
+    setRunProfileKey(profileKey)
+    setRunStartedAt(new Date().toISOString())
+    setDraft('')
+    setView({ kind: 'live' })
+    research.start()
   }
 
   // "Save to vault" (SPEC.md §6.3): a write-enabled agent run that resumes this chat's SDK
   // session and triggers the vault's /save flow. Async like the maintenance runs.
   const save = useMaintenanceRun(() => api.saveSession(activeId as string))
-  // A session must have answered at least once before there is anything to save.
   const canSave = activeId !== null && messages.some((m) => m.role === 'assistant')
 
-  const selectSession = (id: string | null): void => {
+  const openThread = (id: string | null): void => {
     setActiveId(id)
-    setView('thread')
-    // The save outcome belongs to the previous session - don't caption the new thread with it.
+    setMode('ask')
+    setView({ kind: 'thread', id })
     ask.reset()
     save.reset()
+    composerRef.current?.focus()
   }
 
-  const sendLabel = mode === 'ask' ? (ask.isPending ? 'Asking…' : 'Send') : research.running ? 'Researching…' : 'Research'
-  const busy = mode === 'ask' ? ask.isPending : research.running
+  const openEntry = (entry: ResearchRunEntry): void => {
+    setView(entry.status === 'running' ? { kind: 'live' } : { kind: 'run', id: entry.id })
+  }
 
-  // With nothing in the thread, the composer centers in the viewport (with the hint above
-  // it) instead of hugging the bottom of an empty column; it docks down once content exists.
-  const threadEmpty = view === 'thread' && messages.length === 0 && !ask.isPending && !ask.isError
+  const startAbout = (topic: string): void => {
+    setMode('research')
+    setDraft(topic)
+    composerRef.current?.focus()
+  }
+
+  const lensDisabled = mode === 'ask'
+  const busy = mode === 'ask' ? ask.isPending : research.running
+  const sendLabel = mode === 'ask' ? (ask.isPending ? 'Asking…' : 'Ask') : research.running ? 'Running…' : 'Start run'
+  const gaps = graphQ.data?.gaps ?? []
 
   return (
-    <div className="research-layout" ref={rootRef}>
-      <aside className="sess-side">
-        <div className="rail-label">
-          Conversations
-          <span className="spacer" />
-          <button className="linkish rail-new" onClick={() => selectSession(null)}>
-            + New
-          </button>
-        </div>
-        <div className="sess-list">
-          {sessions.map((s) => (
-            <SessionRow
-              key={s.id}
-              session={s}
-              active={view === 'thread' && s.id === activeId}
-              onSelect={() => selectSession(s.id)}
-              onRenamed={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
-              onDeleted={() => {
-                if (s.id === activeId) selectSession(null)
-                qc.invalidateQueries({ queryKey: ['sessions'] })
-              }}
-            />
-          ))}
-        </div>
-        {(clientRunVisible || lastResearchState !== undefined) && (
-          <div className="rail-runs">
-            <div className="rail-label">Research runs</div>
-            {clientRunVisible && (
-              <button className={`sess run-item${view === 'run' ? ' active' : ''}`} onClick={() => setView('run')}>
-                <span className="sess-main">
-                  <span className="st">
-                    {research.running && <span className="pulse-dot" aria-hidden />} {lastTopic || 'Research run'}
-                  </span>
-                  <span className="sm">
-                    {research.running ? (
-                      <span className="run-state running">running</span>
-                    ) : research.error !== null ? (
-                      <span className="run-state failed">failed</span>
-                    ) : (
-                      <>
-                        <span className="run-state done">done</span>
-                        {research.result !== undefined && research.result.pages.length > 0 && (
-                          <span>+{research.result.pages.length} pages</span>
-                        )}
-                      </>
-                    )}
-                  </span>
-                </span>
-              </button>
-            )}
-            {!clientRunVisible && lastResearchState !== undefined && (
-              <button className={`sess run-item${view === 'run' ? ' active' : ''}`} onClick={() => setView('run')}>
-                <span className="sess-main">
-                  <span className="st">Last research run</span>
-                  <span className="sm">
-                    <span className={`run-state ${lastResearchState.ok ? 'done' : 'failed'}`}>
-                      {lastResearchState.ok ? 'done' : 'failed'}
-                    </span>
-                    {lastResearchState.pages > 0 && <span>+{lastResearchState.pages} pages</span>}
-                    <span>{timeAgo(lastResearchState.finishedAt)}</span>
-                  </span>
-                </span>
-              </button>
-            )}
+    <div className="workspace">
+      <aside className="gpanel" aria-label="Research controls">
+        <div className={`gp-sec${lensDisabled ? ' off' : ''}`} aria-disabled={lensDisabled}>
+          <div className="gp-head">
+            <span className="gp-eyebrow">Lens</span>
+            <span className="spacer" />
+            <span className="gp-state">{lensDisabled ? 'not used' : (selectedProfile?.label ?? '…')}</span>
           </div>
-        )}
+          <div className="lenslist" role="radiogroup" aria-label="Research lens">
+            {profiles.map((p) => (
+              <button
+                key={p.key}
+                className="lensopt"
+                role="radio"
+                aria-checked={p.key === profileKey}
+                disabled={lensDisabled}
+                tabIndex={lensDisabled ? -1 : 0}
+                onClick={() => setProfileKey(p.key)}
+              >
+                <span className="radio" aria-hidden />
+                <span>
+                  <span className="lname">
+                    {p.label}
+                    {p.badge !== undefined && <span className="badge">{p.badge}</span>}
+                  </span>
+                  <span className="ldesc">{p.blurb}</span>
+                </span>
+              </button>
+            ))}
+            {profiles.length === 0 && <div className="gp-none">Loading lenses…</div>}
+          </div>
+          <div className="pillhint wrap">
+            {lensDisabled ? (
+              <>
+                A lens shapes a research run only.{' '}
+                <button className="linkish" onClick={() => setMode('research')}>
+                  Switch to Research
+                </button>
+              </>
+            ) : selectedProfile !== undefined ? (
+              <>
+                up to {selectedProfile.fetchEstimate} fetches · sources: {selectedProfile.sources.join(', ')}
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="gp-sec grow">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Runs</span>
+            <span className="spacer" />
+            <span className="gp-state">{entries.length}</span>
+          </div>
+          <div className="domlist">
+            {entries.map((e) => {
+              const on =
+                (view.kind === 'run' && view.id === e.id) || (view.kind === 'live' && e.status === 'running')
+              return (
+                <button
+                  key={e.id}
+                  className={`runrow${on ? ' active' : ''}`}
+                  aria-pressed={on}
+                  onClick={() => openEntry(e)}
+                >
+                  <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
+                  <span className="rr-body">
+                    <span className="rr-t" title={e.topic}>
+                      {e.topic}
+                    </span>
+                    <span className="rr-m">
+                      {e.profileKey !== null && e.profileKey !== 'broad' && (
+                        <span>{profiles.find((p) => p.key === e.profileKey)?.label ?? e.profileKey}</span>
+                      )}
+                      <span>{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</span>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+            {entries.length === 0 && <div className="gp-none">No research run yet.</div>}
+          </div>
+        </div>
+
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Conversations</span>
+            <span className="spacer" />
+            <button className="linkish" onClick={() => openThread(null)}>
+              + New
+            </button>
+          </div>
+          <div className="sess-list">
+            {sessions.map((s) => (
+              <SessionRow
+                key={s.id}
+                session={s}
+                active={view.kind === 'thread' && s.id === activeId}
+                onSelect={() => openThread(s.id)}
+                onRenamed={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
+                onDeleted={() => {
+                  if (s.id === activeId) openThread(null)
+                  qc.invalidateQueries({ queryKey: ['sessions'] })
+                }}
+              />
+            ))}
+            {sessions.length === 0 && <div className="gp-none">No conversation yet.</div>}
+          </div>
+        </div>
       </aside>
 
-      <div className={`chat${threadEmpty ? ' empty-thread' : ''}`}>
-        {view === 'run' ? (
-          <div className="chat-thread run-view" ref={threadRef}>
-            <RunView
-              running={research.running}
-              error={research.error}
-              result={research.result}
-              topic={lastTopic}
-              lensLabel={lastProfile}
-              profile={runProfile}
-              startedAt={runStartedAt}
-              overlap={{ targetTitle: runTargetTitle }}
-              lastState={lastResearchState}
-              vaultName={vaultName}
-              authMode={authMode}
-              onRetry={research.start}
-              onBack={() => setView('thread')}
-            />
-          </div>
-        ) : (
-          <div className="chat-thread" ref={threadRef}>
-            {threadEmpty && (
-              <div className="chat-empty">
-                <div className="icon">
-                  <Icon name="chat" />
-                </div>
-                <p>Ask the vault anything - answers cite the underlying wiki pages as clickable chips.</p>
-                <p className="dim">
-                  Or switch the composer to <strong>Research</strong> to explore a topic on the web and turn it
-                  into new vault pages.
-                </p>
-              </div>
-            )}
-
-            {messages.map((m) => (
-              <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
-            ))}
-
-            {ask.isPending && (
-              <>
-                <div className="bubble user">
-                  <div className="bubble-body">{ask.variables}</div>
-                </div>
-                <div className="bubble assistant">
-                  {streamed === '' ? (
-                    <div className="bubble-body typing">thinking…</div>
-                  ) : (
-                    // Plain text while streaming, not Markdown: the buffer is mid-sentence by
-                    // definition, and half-parsed markup would flicker as it completes. The
-                    // finished message renders as Markdown with citations a moment later.
-                    <div className="bubble-body streaming">{streamed}</div>
-                  )}
-                </div>
-              </>
-            )}
-            {ask.isError && (
-              <div className="bubble system">
-                <div className="bubble-body">Error: {(ask.error as Error).message}</div>
-              </div>
-            )}
-
-            {/* Save-to-vault lives at the END of the thread - next to the result it saves. */}
-            {canSave && (
-              <div className="savebar">
-                <button className="btn" disabled={save.running} onClick={save.start}>
-                  {save.running ? 'Saving…' : 'Save conversation to vault'}
-                </button>
-                <span className="dim">creates/updates wiki pages from this thread - one git commit</span>
-              </div>
-            )}
-            {save.running && <JobLog jobId="maintenance:save" seed={false} />}
-            {save.error && <div className="toast err">{save.error}</div>}
-            {save.result?.ok && (
-              <div className="toast ok">
-                Session saved
-                {save.result.pages.length > 0 ? (
-                  <PageLinks vaultName={vaultName} paths={save.result.pages} />
-                ) : (
-                  <> - no new pages.</>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
+      <div className="box">
         <div className={`composer${mode === 'research' ? ' research-mode' : ''}`}>
-          {mode === 'research' && (
-            <>
-              <div className="comp-hint">
-                <strong>Research mode</strong> - searches the web and <strong>writes new vault pages</strong>. Not a
-                chat turn.
-              </div>
-              {selectedProfile !== undefined && (
-                <PlanLine profile={selectedProfile} profiles={profiles} topic={draft} onSelect={setProfileKey} />
-              )}
-            </>
-          )}
+          <div className="comp-modes" role="radiogroup" aria-label="Mode">
+            <button
+              className="viewpill rs"
+              role="radio"
+              aria-checked={mode === 'research'}
+              onClick={() => setMode('research')}
+              title="Research a topic on the web and create new vault pages"
+            >
+              Research the web
+            </button>
+            <button
+              className="viewpill"
+              role="radio"
+              aria-checked={mode === 'ask'}
+              onClick={() => setMode('ask')}
+              title="Ask the vault (read-only)"
+            >
+              Ask the vault
+            </button>
+            <span className="spacer" />
+            {mode === 'research' && <span className="faintc">web access on · writes pages</span>}
+          </div>
           <div className="comp-main">
-            <div className="composer-modes" role="group" aria-label="Composer mode">
-              <button
-                className={`chip${mode === 'ask' ? ' active' : ''}`}
-                aria-pressed={mode === 'ask'}
-                onClick={() => setMode('ask')}
-                title="Ask the vault (read-only)"
-              >
-                Ask
-              </button>
-              <button
-                className={`chip${mode === 'research' ? ' active research-on' : ''}`}
-                aria-pressed={mode === 'research'}
-                onClick={() => setMode('research')}
-                title="Research a topic on the web and create new vault pages"
-              >
-                Research
-              </button>
-            </div>
             <textarea
               ref={composerRef}
               value={draft}
@@ -404,9 +366,9 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 }
               }}
               placeholder={
-                mode === 'ask'
-                  ? 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
-                  : 'Topic to research on the web - creates new vault pages…'
+                mode === 'research'
+                  ? 'Name a topic - the run reads the web and files one synthesis page…'
+                  : 'Ask the vault… (Enter to send, Shift+Enter for a new line)'
               }
               rows={1}
             />
@@ -418,6 +380,126 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               {sendLabel}
             </button>
           </div>
+          {mode === 'research' && selectedProfile !== undefined && (
+            <div className="planline">
+              <span className="pl-lens">{selectedProfile.label}</span>
+              <span className="pl-sep">·</span>
+              <span className="pl-k">files as</span>
+              <span className="pl-title" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
+                {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+              </span>
+              <span className="pl-sep">·</span>
+              <span className="pl-cost">
+                up to <b>{selectedProfile.fetchEstimate}</b> fetches · 1 commit
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div className="box-body" ref={bodyRef}>
+          {view.kind === 'start' && (
+            <StartView
+              entries={entries}
+              profiles={profiles}
+              gaps={gaps.slice(0, BACKLOG_SIZE)}
+              onOpen={openEntry}
+              onResearch={startAbout}
+            />
+          )}
+
+          {view.kind === 'live' && (
+            <LiveRunView
+              entry={liveEntry}
+              topic={liveEntry?.topic ?? lastTopic}
+              profile={runProfile}
+              startedAt={runStartedAt}
+              running={research.running || liveEntry !== undefined}
+              error={research.error}
+              result={research.result}
+              vaultName={vaultName}
+              authMode={authMode}
+              onRetry={research.start}
+              onBack={() => setView({ kind: 'start' })}
+            />
+          )}
+
+          {view.kind === 'run' && (
+            <RunDetail
+              entry={entries.find((e) => e.id === view.id)}
+              profiles={profiles}
+              vaultName={vaultName}
+              authMode={authMode}
+              onBack={() => setView({ kind: 'start' })}
+              onRerun={(topic, key) => {
+                setProfileKey(key ?? 'broad')
+                startAbout(topic)
+              }}
+            />
+          )}
+
+          {view.kind === 'thread' && (
+            <div className="thread">
+              {messages.length === 0 && !ask.isPending && !ask.isError && (
+                <div className="chat-empty">
+                  <div className="icon">
+                    <Icon name="chat" />
+                  </div>
+                  <p>Ask the vault anything - answers cite the underlying wiki pages as clickable chips.</p>
+                  <p className="dim">
+                    Read-only: nothing is written, nothing is fetched from the web. Switch the composer to{' '}
+                    <strong>Research the web</strong> for that.
+                  </p>
+                </div>
+              )}
+
+              {messages.map((m) => (
+                <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
+              ))}
+
+              {ask.isPending && (
+                <>
+                  <div className="bubble user">
+                    <div className="bubble-body">{ask.variables}</div>
+                  </div>
+                  <div className="bubble assistant">
+                    {streamed === '' ? (
+                      <div className="bubble-body typing">thinking…</div>
+                    ) : (
+                      // Plain text while streaming, not Markdown: the buffer is mid-sentence by
+                      // definition, and half-parsed markup would flicker as it completes.
+                      <div className="bubble-body streaming">{streamed}</div>
+                    )}
+                  </div>
+                </>
+              )}
+              {ask.isError && (
+                <div className="bubble system">
+                  <div className="bubble-body">Error: {(ask.error as Error).message}</div>
+                </div>
+              )}
+
+              {canSave && (
+                <div className="savebar">
+                  <button className="btn" disabled={save.running} onClick={save.start}>
+                    {save.running ? 'Saving…' : 'Save conversation to vault'}
+                  </button>
+                  <span className="dim">creates/updates wiki pages from this thread - one git commit</span>
+                </div>
+              )}
+              {save.running && <JobLog jobId="maintenance:save" seed={false} />}
+              {save.error && <div className="toast err">{save.error}</div>}
+              {save.result?.ok && (
+                <div className="toast ok">
+                  Session saved
+                  {save.result.pages.length > 0 ? (
+                    <PageLinks vaultName={vaultName} paths={save.result.pages} />
+                  ) : (
+                    <> - no new pages.</>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -425,226 +507,278 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
 }
 
 /**
- * The research run's own view (redesign 2026-08): live log while running, result with pages
- * and cost when settled - no longer squatting inside whichever conversation was open. After
- * a reload only the restart-proof settle facts remain (kind, outcome, page count); the
- * topic and page list live with the run, which the server does not persist yet.
+ * The screen with nothing selected: the run record, then the vault's own backlog. Both are
+ * starting points, which is what an empty research screen was missing.
  */
-function RunView({
+function StartView({
+  entries,
+  profiles,
+  gaps,
+  onOpen,
+  onResearch,
+}: {
+  entries: ResearchRunEntry[]
+  profiles: ResearchProfile[]
+  gaps: Array<{ title: string; refBy: number[] }>
+  onOpen: (e: ResearchRunEntry) => void
+  onResearch: (topic: string) => void
+}): React.ReactElement {
+  const lensLabel = (key: string | null): string =>
+    key === null ? '-' : (profiles.find((p) => p.key === key)?.label ?? key)
+  return (
+    <>
+      <div className="sub-head">
+        <h3 className="sub-title">Runs</h3>
+        <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="empty">
+          No research run yet. Name a topic above, pick a lens on the left, and the run files one synthesis
+          page.
+        </div>
+      ) : (
+        <table className="dtable">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Lens</th>
+              <th className="num">Pages</th>
+              <th className="num">Cost</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr key={e.id} onClick={() => onOpen(e)} tabIndex={0} aria-label={`Open the run about ${e.topic}`}>
+                <td>
+                  <span className="hrow-name">
+                    <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
+                    <span className="nm" title={e.topic}>
+                      {e.topic}
+                    </span>
+                    {e.source === 'page' && (
+                      <span className="badge" title="Reconstructed from the synthesis page in the vault">
+                        from vault
+                      </span>
+                    )}
+                  </span>
+                  {e.error !== null && <span className="rowerr">{e.error}</span>}
+                </td>
+                <td className="dimc">{lensLabel(e.profileKey)}</td>
+                <td className="num dimc">{e.pages.length > 0 ? `+${e.pages.length}` : '-'}</td>
+                <td className="num dimc">{e.costUsd !== null ? `$${e.costUsd.toFixed(2)}` : '-'}</td>
+                <td className="faintc">{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <div className="sub-head">
+        <h3 className="sub-title">Worth a run</h3>
+        <span className="box-sub">missing pages your vault already links to</span>
+      </div>
+      {gaps.length === 0 ? (
+        <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
+      ) : (
+        <div className="backlog">
+          {gaps.map((g) => (
+            <div key={g.title} className="bl-row">
+              <span className="bl-t" title={g.title}>
+                {g.title}
+              </span>
+              <span className="bl-n">{g.refBy.length} links</span>
+              <button className="btn sm research" onClick={() => onResearch(g.title)}>
+                Research
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+/**
+ * The run in flight: what it is doing and what is left, instead of a scrolling wall of tool
+ * calls. The raw log is one click away for when the summary is not enough.
+ */
+function LiveRunView({
+  entry,
+  topic,
+  profile,
+  startedAt,
   running,
   error,
   result,
-  topic,
-  lensLabel,
-  profile,
-  startedAt,
-  overlap,
-  lastState,
   vaultName,
   authMode,
   onRetry,
   onBack,
 }: {
+  entry: ResearchRunEntry | undefined
+  topic: string
+  profile: ResearchProfile | undefined
+  startedAt: string | null
   running: boolean
   error: string | null
   result: ReturnType<typeof useMaintenanceRun>['result']
-  topic: string
-  lensLabel: string | null
-  /** The lens, for its fetch cap - the one honest denominator in the progress block. */
-  profile: ResearchProfile | undefined
-  startedAt: string | null
-  /** Existing pages this topic overlaps, so a long run says up front what it will not duplicate. */
-  overlap: { targetTitle: string }
-  lastState: { ok: boolean; pages: number; finishedAt: string; error: string | null } | undefined
   vaultName: string
   authMode: AuthMode
   onRetry: () => void
   onBack: () => void
 }): React.ReactElement {
-  const clientRun = running || result !== undefined || error !== null
+  const settled = result !== undefined || error !== null
   return (
-    <div className="run-detail">
-      <div className="research-head">
+    <div className="detail-pad">
+      <div className="detail-head">
         <Icon name="flask" />
-        {clientRun ? (
-          <span>
-            Research: <strong>{topic}</strong>
-          </span>
-        ) : (
-          <span>
-            <strong>Last research run</strong>
-            {lastState !== undefined && <span className="dim"> · {timeAgo(lastState.finishedAt)}</span>}
+        <h3 className="detail-title">{topic || 'Research run'}</h3>
+        {profile !== undefined && profile.key !== 'broad' && <span className="lens-tag">{profile.label}</span>}
+        {running && !settled && (
+          <span className="badge ingesting">
+            <span className="pulse-dot" aria-hidden />
+            running
           </span>
         )}
-        {lensLabel !== null && clientRun && <span className="lens-tag">{lensLabel}</span>}
         <span className="spacer" />
         <button className="btn ghost" onClick={onBack}>
-          Back to conversation
+          All runs
         </button>
       </div>
-      {clientRun && running && (
+
+      {!settled && (
         <div className="run-target">
           <span className="rt-k">Files as</span>
-          <span className="rt-v mono-meta">{overlap.targetTitle}</span>
+          <span className="rt-v mono-meta">{targetTitle(topic || 'your topic', profile)}</span>
           <span className="rt-k">Commit</span>
-          <span className="rt-v">
-            one commit when the run settles - revertable from the inbox like any other.
+          <span className="rt-v">one commit when the run settles - revertable from Home like any other.</span>
+        </div>
+      )}
+
+      <RunProgress
+        channel="maintenance:research"
+        startedAt={startedAt ?? entry?.startedAt ?? null}
+        profile={profile}
+        running={running && !settled}
+      />
+
+      {running && !settled && (
+        <details className="logbox">
+          <summary>Show the raw agent log</summary>
+          <JobLog jobId="maintenance:research" seed={false} />
+        </details>
+      )}
+
+      {error !== null && (
+        <div className="toast err">
+          {error}{' '}
+          <button className="btn" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {result?.ok === true && (
+        <div className="toast ok">
+          New/updated pages
+          {result.usage.costUsd > 0 && (
+            <span>
+              {' '}
+              · <Cost value={result.usage.costUsd} authMode={authMode} />
+              {isEstimate(authMode) && <span className="dim"> ({ESTIMATE_LABEL})</span>}
+            </span>
+          )}
+          {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> - no changes.</>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A settled run from the list: its facts, its pages, and the way to run the topic again. */
+function RunDetail({
+  entry,
+  profiles,
+  vaultName,
+  authMode,
+  onBack,
+  onRerun,
+}: {
+  entry: ResearchRunEntry | undefined
+  profiles: ResearchProfile[]
+  vaultName: string
+  authMode: AuthMode
+  onBack: () => void
+  onRerun: (topic: string, profileKey: string | null) => void
+}): React.ReactElement {
+  if (entry === undefined) return <div className="empty">That run is no longer in the list.</div>
+  const profile = profiles.find((p) => p.key === entry.profileKey)
+  return (
+    <div className="detail-pad">
+      <div className="detail-head">
+        <Icon name="flask" />
+        <h3 className="detail-title">{entry.topic}</h3>
+        {profile !== undefined && <span className="lens-tag">{profile.label}</span>}
+        <span className={`badge ${entry.status === 'failed' ? 'failed' : 'ok'}`}>{entry.status}</span>
+        <span className="spacer" />
+        <button className="btn sm" onClick={() => onRerun(entry.topic, entry.profileKey)}>
+          Run again
+        </button>
+        <button className="btn ghost" onClick={onBack}>
+          All runs
+        </button>
+      </div>
+
+      <div className="facts">
+        <div className="fact">
+          <span className="k">Filed as</span>
+          <span className="v mono-meta">{targetTitle(entry.topic, profile)}</span>
+        </div>
+        <div className="fact">
+          <span className="k">When</span>
+          <span className="v">{timeAgo(entry.finishedAt)}</span>
+        </div>
+        <div className="fact">
+          <span className="k">Cost</span>
+          <span className="v">
+            {entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
+          </span>
+        </div>
+        <div className="fact">
+          <span className="k">Pages</span>
+          <span className="v">{entry.pages.length}</span>
+        </div>
+      </div>
+
+      {entry.error !== null && <div className="toast err">{entry.error}</div>}
+
+      {entry.pages.length > 0 && (
+        <div>
+          <h4 className="section-title">Pages</h4>
+          <span className="pages">
+            {entry.pages.map((p) => (
+              <PageLink key={p} vaultName={vaultName} path={p} />
+            ))}
           </span>
         </div>
       )}
-      {clientRun ? (
-        <>
-          {/* What it is doing and what is left, instead of a scrolling wall of tool calls.
-              The log is still one click away for when the summary is not enough. */}
-          {(running || result !== undefined) && (
-            <RunProgress
-              channel="maintenance:research"
-              startedAt={startedAt}
-              profile={profile}
-              running={running}
-            />
-          )}
-          {running && (
-            <details className="logbox">
-              <summary>Show the raw agent log</summary>
-              <JobLog jobId="maintenance:research" seed={false} />
-            </details>
-          )}
-          {error !== null && (
-            <div className="toast err">
-              {error}{' '}
-              <button className="btn" onClick={onRetry}>
-                Retry
-              </button>
-            </div>
-          )}
-          {result?.ok === true && (
-            <div className="toast ok">
-              New/updated pages
-              {result.usage.costUsd > 0 && (
-                <span>
-                  {' '}
-                  · <Cost value={result.usage.costUsd} authMode={authMode} />
-                  {isEstimate(authMode) && <span className="dim"> ({ESTIMATE_LABEL})</span>}
-                </span>
-              )}
-              {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> - no changes.</>}
-            </div>
-          )}
-        </>
-      ) : lastState !== undefined ? (
-        <div className="run-facts">
-          <span className={`run-state ${lastState.ok ? 'done' : 'failed'}`}>{lastState.ok ? 'done' : 'failed'}</span>
-          {lastState.pages > 0 && (
-            <span>
-              {lastState.pages} page{lastState.pages > 1 ? 's' : ''} created or updated
-            </span>
-          )}
-          {lastState.error !== null && <span className="dim">{lastState.error}</span>}
-          <p className="tab-hint">
-            The pages of this run are in the Home activity stream and the vault; per-run detail beyond this
-            settle record is not persisted yet.
-          </p>
-        </div>
-      ) : (
-        <div className="empty">No research run yet.</div>
-      )}
+
+      <p className="tab-hint">
+        {entry.source === 'page'
+          ? 'Reconstructed from the synthesis page in the vault: the service keeps no per-run record beyond the ones still in memory, so cost and duration are not available for this one.'
+          : entry.source === 'state'
+            ? 'From the restart-proof settle record - the run wrote no page.'
+            : 'From the run record the service still holds in memory.'}
+      </p>
     </div>
   )
 }
 
 /**
- * The run plan as ONE line (redesign 2026-08): lens, the deterministic synthesis-page title
- * the service pins (topic + the lens's `titleSuffix`), the fetch cap and the single commit -
- * always visible while typing. The lens picker (with blurbs and source preferences, the
- * consent detail) opens as a popover instead of permanently stacking above the input.
- */
-function PlanLine({
-  profile,
-  profiles,
-  topic,
-  onSelect,
-}: {
-  profile: ResearchProfile
-  profiles: ResearchProfile[]
-  topic: string
-  onSelect: (key: string) => void
-}): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const wrapRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent): void => {
-      if (wrapRef.current !== null && !wrapRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('pointerdown', onDown)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('pointerdown', onDown)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  const shownTopic = topic.trim() || 'your topic'
-  const targetTitle = `Research: ${shownTopic}${profile.titleSuffix}`
-
-  return (
-    <div className="planline-wrap" ref={wrapRef}>
-      <div className="planline">
-        <span className="pl-lens">{profile.label}</span>
-        <span className="pl-sep">·</span>
-        <span className="pl-k">files as</span>
-        <span className="pl-title" title={targetTitle}>
-          {targetTitle}
-        </span>
-        <span className="pl-sep">·</span>
-        <span className="pl-cost">
-          up to <b>{profile.fetchEstimate}</b> fetches · 1 commit
-        </span>
-        <span className="spacer" />
-        <button className="linkish pl-change" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)}>
-          Change lens <Icon name="chevron" />
-        </button>
-      </div>
-      {open && (
-        <div className="lens-pop" role="menu" aria-label="Research lens">
-          {profiles.map((p) => (
-            <button
-              key={p.key}
-              role="menuitemradio"
-              aria-checked={p.key === profile.key}
-              className={`lens-opt${p.key === profile.key ? ' on' : ''}`}
-              onClick={() => {
-                onSelect(p.key)
-                setOpen(false)
-              }}
-            >
-              <span className="lo-head">
-                {p.label}
-                {p.badge !== undefined && <span className="badge">{p.badge}</span>}
-              </span>
-              <span className="lo-blurb">{p.blurb}</span>
-              <span className="lo-sources">
-                {p.sources.map((s) => (
-                  <span key={s} className="srcpill">
-                    {s}
-                  </span>
-                ))}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/**
- * One session as a sidebar row: title + meta (message count, last activity), with rename
- * (inline input - no `window.prompt`, blocked/ugly in installed PWAs) and a two-step delete.
+ * One session as a control-column row: title + meta (message count, last activity), with
+ * rename (inline input - no `window.prompt`, blocked/ugly in installed PWAs) and a two-step
+ * delete.
  */
 function SessionRow({
   session,
@@ -663,9 +797,12 @@ function SessionRow({
   const [title, setTitle] = useState('')
   const [confirming, setConfirming] = useState(false)
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => () => {
-    if (confirmTimer.current) clearTimeout(confirmTimer.current)
-  }, [])
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current)
+    },
+    [],
+  )
 
   const commitRename = async (): Promise<void> => {
     setEditing(false)

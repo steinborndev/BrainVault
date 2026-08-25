@@ -104,7 +104,8 @@
 }
 
 /* A class-level `display` beats the UA rule for [hidden], and nearly every control
-   here sets one - so `hidden={…}` in JSX would silently render anyway. Restate it
+   here sets one - so `hidden={…}
+` in JSX would silently render anyway. Restate it
    with the weight it needs, once, for the whole sheet. */
 [hidden] {
   display: none !important;
@@ -157,117 +158,151 @@ button {
   overflow: hidden;
 }
 
-.side {
-  width: 216px;
-  flex: 0 0 216px;
-  background: var(--bg-side);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  padding: 14px 10px 12px;
-  overflow-y: auto;
-}
-.side-brand {
+/* ── Navigation: browser-style tabs in the header row (redesign 2026-08-25, second
+   pass). It was a 216px sidebar while the header row spent itself naming the screen you
+   were already looking at; five screens fit across the top, and every workspace gets that
+   width back. The bar sits on the sidebar ground, the active tab is painted in the screen
+   ground and hangs 1px into the bottom border, so it reads as the surface you are on. ── */
+.brand {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 2px 10px 10px;
+  flex: none;
+  padding: 0 10px 0 2px;
   border: 0;
   background: none;
   color: var(--text);
-  text-align: left;
 }
-.side-brand svg {
-  width: 26px;
-  height: 26px;
+.brand svg {
+  width: 24px;
+  height: 24px;
   flex: none;
 }
-.side-brand .name {
+.brand .name {
   font-family: var(--display);
   font-weight: 600;
-  font-size: 15.5px;
+  font-size: 14.5px;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
-.navgroup {
-  margin-top: 14px;
-}
-.navgroup.first {
-  margin-top: 4px;
-}
-.navgroup .glabel {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  padding: 0 10px 6px;
-}
-.navitem {
+/* No overflow container here: the active tab deliberately overlaps the header's bottom
+   border, and a scroll container would clip exactly that. */
+.tabs {
   display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.tab {
+  position: relative;
+  top: 1px;
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 7px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
   background: none;
   color: var(--text-dim);
   font: inherit;
   font-size: 13.5px;
   font-weight: 500;
-  text-align: left;
+  white-space: nowrap;
 }
-.navitem svg {
+.tab svg {
   width: 16px;
   height: 16px;
   flex: none;
-  opacity: 0.85;
+  opacity: 0.8;
 }
-.navitem:hover {
+.tab:hover {
   background: var(--bg-elev-2);
   color: var(--text);
 }
-.navitem[aria-current='page'] {
-  background: var(--bg-elev);
+.tab[aria-current='page'] {
+  background: var(--bg);
+  border-color: var(--border);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--border);
+  font-family: var(--display);
+  font-weight: 600;
 }
-.navitem[aria-current='page'] svg {
+.tab[aria-current='page'] svg {
   color: var(--accent);
   opacity: 1;
 }
-.navitem .tab-badge {
-  margin-left: auto;
+.tab[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
 }
-.navitem .tab-badge.due {
+/* Erases the header's bottom border under the active tab. */
+.tab[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bg);
+}
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+}
+.tab-badge.due {
   background: var(--warn-bg);
   color: var(--warn);
 }
-.side-foot {
-  margin-top: auto;
-  padding: 10px 10px 2px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.tab-badge.research {
+  background: color-mix(in srgb, var(--research) 16%, transparent);
+  color: var(--research);
 }
-.side-foot .row {
+.topright {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
+  flex: none;
+}
+.tstat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-faint);
-  padding: 2px 0;
+  white-space: nowrap;
 }
-.side-foot .d {
+.tstat .d {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  flex: none;
+  background: var(--muted);
 }
-.side-foot .d.ok { background: var(--ok); }
-.side-foot .d.warn { background: var(--warn); }
-.side-foot .d.acc { background: var(--accent); }
+.tstat .d.ok { background: var(--ok); }
+.tstat .d.warn { background: var(--warn); }
+.tstat .d.acc { background: var(--accent); }
+/* The status figures are the first thing to go when the row gets tight - the tabs and the
+   live pill are load-bearing, these are ambient. */
+@media (max-width: 1240px) {
+  .tstat { display: none; }
+}
 
 .main {
   flex: 1;
@@ -280,12 +315,13 @@ button {
   height: 52px;
   flex: 0 0 52px;
   display: flex;
-  /* Every child is --control-h tall and centered: one row, one height, one baseline. */
-  align-items: center;
+  /* The tabs align to the bottom edge; brand and status centre themselves inside their
+     own boxes, so the row still has one baseline. */
+  align-items: stretch;
   gap: 12px;
-  padding: 0 16px 0 22px;
+  padding: 14px 16px 0;
   border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--bg-side);
 }
 .topbar .whereami {
   display: flex;
@@ -311,36 +347,6 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* The global-search trigger: reads as an input, acts as a button (opens the palette). */
-.searchbtn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 240px;
-  height: var(--control-h);
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  border-radius: var(--radius-sm);
-  padding: 0 10px;
-  color: var(--text-faint);
-  font-size: 13px;
-  line-height: 1;
-}
-.searchbtn:hover {
-  border-color: var(--border-strong);
-  color: var(--text-dim);
-}
-.searchbtn svg {
-  width: 14px;
-  height: 14px;
-  flex: none;
-}
-.searchbtn kbd {
-  margin-left: auto;
-  line-height: 1.5;
-}
-
 .screens {
   flex: 1;
   min-height: 0;
@@ -365,7 +371,7 @@ button {
   margin: 0 auto;
 }
 .lane.wide {
-  max-width: 1620px;
+  max-width: 1800px;
 }
 /* Inside a flush screen the lane has to pass the height through, or the workspace grid
    below it falls back to content height and pushes the canvas off-screen. */
@@ -746,14 +752,6 @@ button {
 .grid.three {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
-
-/* Overview layout: a 12-col grid so the growth chart gets real width (7/5 + 6/6) instead of
-   the old three-across grid that left the fourth card orphaned in row two. */
-.ov-grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(12, 1fr);
-}
 .ov-grid .col-7 { grid-column: span 7; }
 .ov-grid .col-6 { grid-column: span 6; }
 .ov-grid .col-5 { grid-column: span 5; }
@@ -761,29 +759,6 @@ button {
   .ov-grid .col-7,
   .ov-grid .col-6,
   .ov-grid .col-5 { grid-column: span 12; }
-}
-
-/* ---- Status strip (Overview) - the states that can go wrong, as pills ---- */
-.status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-.spill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-}
-.spill strong {
-  color: var(--text);
-  font-weight: 600;
 }
 .spill.warn {
   border-color: var(--warn);
@@ -798,15 +773,6 @@ button {
 .spill .d.ok { background: var(--ok); }
 .spill .d.warn { background: var(--warn); }
 .spill .d.dim { background: var(--muted); }
-/* A spill that navigates (the maintenance badge) - same look, button semantics. */
-button.spill-link {
-  font-family: inherit;
-  cursor: pointer;
-}
-button.spill-link:hover {
-  border-color: var(--accent);
-}
-
 /* ---- Pages-by-type bars ---- */
 .tbars {
   display: flex;
@@ -1007,69 +973,9 @@ button.spill-link:hover {
   opacity: 0.5;
   cursor: default;
 }
-
-/* ---- Intake card: dropzone + link/note in one compact card ---- */
-/* Collapsed intake (Home, while the queue is busy): one row that still takes a
-   drop. The full card is one click away and stays open until the queue drains. */
-.intake-collapsed {
-  padding: 0;
-  overflow: hidden;
-  border-color: var(--border-strong);
-}
 .intake-collapsed.over {
   border-color: var(--gold);
   background: var(--gold-bg);
-}
-.ic-open {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  padding: 13px 15px;
-  background: transparent;
-  border: 0;
-  color: var(--text-dim);
-  text-align: left;
-  font-size: 13.5px;
-  transition: background 0.12s, color 0.12s;
-}
-.ic-open:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.ic-open svg {
-  color: var(--gold);
-  flex: none;
-}
-.ic-cta {
-  display: inline-flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 12px;
-  border-radius: var(--radius-sm);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-/* The way back to the collapsed row, offered only while there is a reason for it. */
-.intake-collapse {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elev-2);
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-.intake-collapse:hover {
-  color: var(--text);
 }
 .intake {
   position: relative;
@@ -1138,13 +1044,6 @@ button.spill-link:hover {
   font-size: 17px;
   opacity: 1;
 }
-.intake-side {
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  justify-content: center;
-}
 /* Two visible lines is plenty for a URL or a one-line note; it grows on focus for longer
    ones. The old fixed height set the whole intake band's height for the rare case. */
 .intake-note {
@@ -1160,35 +1059,6 @@ button.spill-link:hover {
 .home > .section {
   margin-bottom: 0;
 }
-.intake-label {
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-faint);
-}
-.intake-cap {
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-.url-row {
-  display: flex;
-  gap: 8px;
-}
-.url-row input {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  padding: 8px 12px;
-  font-size: 14px;
-}
-.url-row input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
 .toast {
   margin-top: 12px;
   padding: 10px 14px;
@@ -1203,19 +1073,6 @@ button.spill-link:hover {
 .job {
   padding: 12px 14px;
 }
-.job-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.job-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
 .job-meta {
   display: flex;
   gap: 12px;
@@ -1223,11 +1080,6 @@ button.spill-link:hover {
   font-size: 12px;
   color: var(--text-dim);
   margin-top: 6px;
-}
-.job-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
 }
 .job-error {
   margin-top: 8px;
@@ -1239,15 +1091,6 @@ button.spill-link:hover {
   font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* ---- Phase stepper (active jobs) ---- */
-.stepper {
-  display: flex;
-  align-items: center;
-  margin: 10px 0 2px;
-  flex-wrap: wrap;
-  row-gap: 6px;
 }
 .step {
   display: flex;
@@ -1296,12 +1139,6 @@ button.spill-link:hover {
 }
 @media (prefers-reduced-motion: reduce) {
   .step.now .sdot i { animation: none; }
-}
-.stepline {
-  flex: 0 0 28px;
-  height: 2px;
-  background: var(--border-strong);
-  margin: 0 8px;
 }
 .stepline.done {
   background: var(--ok);
@@ -1567,15 +1404,6 @@ details.hot-cache summary::marker {
 details.hot-cache[open] summary {
   margin-bottom: 10px;
 }
-.hc-meta {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
 .md h1, .md h2, .md h3 { margin: 14px 0 6px; line-height: 1.25; }
 .md h1 { font-size: 20px; }
 .md h2 { font-size: 17px; }
@@ -1590,23 +1418,6 @@ details.hot-cache[open] summary {
   border-radius: 4px;
 }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
-
-/* ---- Chat / Research ---- */
-/* Sidebar (sessions) + a full-height thread column: the thread owns the scrolling, the
-   composer is always visible at the bottom, nothing floats in the middle of the viewport.
-   175px ≈ topbar + content padding. */
-/* A workspace like the graph and the library (2026-08-25): it takes the height the screen
-   has and its columns scroll inside themselves. The `calc(100vh - 110px)` this replaces was
-   the same wrong-by-construction constant the graph already had removed - any such number
-   is a guess about chrome that changes the moment the chrome does. */
-.research-layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: 12px;
-  height: 100%;
-  min-height: 0;
-  padding: 12px 14px;
-}
 .chat {
   display: flex;
   flex-direction: column;
@@ -1615,18 +1426,6 @@ details.hot-cache[open] summary {
   margin: 0 auto;
   width: 100%;
   min-height: 0;
-}
-
-/* Session sidebar: a list with title + meta scales past the handful of sessions the old
-   horizontal chip strip could hold; rename/delete live on the row (revealed on hover). */
-.sess-side {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-.sess-new {
-  justify-content: center;
 }
 .sess-list {
   flex: 1;
@@ -1701,16 +1500,6 @@ details.hot-cache[open] summary {
 }
 .session-act:hover {
   color: var(--err);
-}
-
-.chat-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
 }
 .chat-empty {
   margin: auto;
@@ -1865,30 +1654,11 @@ details.hot-cache[open] summary {
 .composer.research-mode:focus-within {
   border-color: var(--research);
 }
-.comp-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--research) 9%, transparent);
-  border-radius: var(--radius) var(--radius) 0 0;
-}
-.comp-hint strong:first-child {
-  color: var(--research);
-}
 .comp-main {
   display: flex;
   align-items: flex-end;
   gap: 8px;
   padding: 8px;
-}
-.composer-modes {
-  display: flex;
-  gap: 4px;
-  padding-bottom: 5px;
 }
 .chip.research-on {
   background: color-mix(in srgb, var(--research) 16%, transparent);
@@ -1898,35 +1668,6 @@ details.hot-cache[open] summary {
 .btn.primary.research {
   background: var(--research);
   border-color: var(--research);
-}
-
-/* ---- Research lens picker + run-plan preview (Achse A) ---- */
-.lens-wrap {
-  display: flex;
-  flex-direction: column;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--research) 4%, transparent);
-}
-.lens-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px 2px;
-}
-.lens-label {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-}
-.lens-chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: thin;
 }
 .lens {
   flex-shrink: 0;
@@ -1964,32 +1705,6 @@ details.hot-cache[open] summary {
   background: color-mix(in srgb, var(--research) 22%, transparent);
   color: var(--research);
 }
-.runplan {
-  margin: 4px 12px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  font-size: 12.5px;
-  overflow: hidden;
-}
-.rp-row {
-  display: flex;
-  gap: 10px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.rp-row:last-child {
-  border-bottom: none;
-}
-.rp-k {
-  flex-shrink: 0;
-  width: 74px;
-  color: var(--text-faint);
-}
-.rp-v {
-  min-width: 0;
-  color: var(--text-dim);
-}
 .rp-v .target {
   font-family: var(--mono);
   font-size: 12px;
@@ -1998,19 +1713,6 @@ details.hot-cache[open] summary {
   padding: 1px 6px;
   border-radius: 5px;
   word-break: break-word;
-}
-.srcpill {
-  display: inline-block;
-  margin: 0 5px 4px 0;
-  padding: 2px 8px;
-  font-size: 11.5px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.rp-cost b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
 }
 /* The lens tag echoed in a running/finished research block's header. */
 .research-head .lens-tag {
@@ -2480,12 +2182,6 @@ details.hot-cache[open] summary {
 .stub h2 {
   margin: 12px 0 6px;
 }
-.skeleton {
-  background: linear-gradient(90deg, var(--bg-elev) 25%, var(--bg-elev-2) 37%, var(--bg-elev) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.4s ease infinite;
-  border-radius: var(--radius-sm);
-}
 @keyframes shimmer {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
@@ -2644,21 +2340,7 @@ details.hot-cache[open] summary {
   cursor: help;
 }
 /* Small screens: the session sidebar becomes a horizontal strip above the thread. */
-@media (max-width: 860px) {
-  .research-layout {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .sess-side {
-    height: auto;
-    min-height: 0;
-    flex-direction: row;
-    align-items: center;
-  }
-  .sess-new {
-    flex-shrink: 0;
-  }
-  .sess-list {
+@media (max-width: 860px) {  .sess-list {
     flex-direction: row;
     overflow-y: visible;
     overflow-x: auto;
@@ -2672,41 +2354,6 @@ details.hot-cache[open] summary {
   .sess-main .sm {
     display: none;
   }
-}
-
-/* Autoresearch block inside the chat thread (not a bubble - it writes vault pages). */
-.research-block {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elev);
-  padding: 10px 14px;
-}
-.research-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.research-head svg {
-  flex-shrink: 0;
-}
-.research-head strong {
-  color: var(--text);
-}
-
-.budget-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--bg-elev-2);
-  overflow: hidden;
-  margin-top: 4px;
-}
-.budget-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 999px;
-  transition: width 0.3s ease;
 }
 .budget-fill.over { background: var(--warn); }
 
@@ -2854,12 +2501,6 @@ details.hot-cache[open] summary {
 }
 .gp-state {
   font-size: 11px;
-  color: var(--text-faint);
-}
-.gp-note {
-  margin: -4px 0 9px;
-  font-size: 11.5px;
-  line-height: 1.5;
   color: var(--text-faint);
 }
 .gp-none {
@@ -3240,79 +2881,20 @@ details.hot-cache[open] summary {
 .vault-graph.fullscreen .graph-workspace {
   grid-template-columns: minmax(0, 1fr);
 }
-.fsbar {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  z-index: 5;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-}
-
 @media (max-width: 1100px) {
   .graph-workspace {
     grid-template-columns: 208px minmax(0, 1fr);
   }
 }
 
-
 /* Generic dropdown (e.g. the page-type filters above the graph). */
 .dropdown {
   position: relative;
-}
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  padding: 6px;
-}
-.dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text);
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.dropdown-item:hover {
-  background: var(--bg-elev-2);
 }
 .dropdown-item .count {
   margin-left: auto;
   color: var(--text-faint);
   font-size: 12px;
-}
-.dropdown-item input {
-  accent-color: var(--accent);
-}
-.dropdown-item em {
-  font-style: normal;
-  color: var(--text-dim);
-}
-.dropdown-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 2px;
 }
 .graph-search {
   position: relative;
@@ -3426,13 +3008,6 @@ details.hot-cache[open] summary {
   font-size: 14px;
   text-align: center;
 }
-/* Graph stats live in the toolbar row, not a lost mini-footer under the canvas. */
-.vtool-stats {
-  font-size: 12px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
 /* Focus mode: one row, one segmented control for the neighborhood depth. Card-framed so
    it reads as a sibling of the domain band, not a loose text line (mockup 2026-07-21). */
 .focusbar {
@@ -3685,7 +3260,6 @@ details.hot-cache[open] summary {
   min-width: 0;
 }
 
-
 /* Breadcrumb trail of visited pages, bottom-left of the canvas - its slot alone now that
    the tooltip follows the pointer; the zoom controls live up top. */
 .graph-trail {
@@ -3724,34 +3298,6 @@ details.hot-cache[open] summary {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-
-/* Lens dropdown: each option is a two-line radio (name + what it encodes). */
-.lens-menu {
-  min-width: 240px;
-}
-.lens-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  align-items: flex-start;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.lens-item:hover:not(:disabled) {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.lens-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 .lens-item.sel {
   color: var(--text);
 }
@@ -3760,15 +3306,6 @@ details.hot-cache[open] summary {
   margin-left: 6px;
   color: var(--accent);
 }
-.lens-name {
-  font-size: 13px;
-  font-weight: 500;
-}
-.lens-desc {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
 /* Metric-lens legend, bottom-right of the canvas. */
 .lens-legend {
   position: absolute;
@@ -5004,9 +4541,6 @@ kbd {
   min-height: 0;
   overflow-y: auto;
 }
-.inbox-main .tscroll > table {
-  width: 100%;
-}
 /* The header has to stay put while the body scrolls under it. */
 .lib-main thead th,
 .inbox-main thead th {
@@ -5118,13 +4652,6 @@ kbd {
   color: var(--text-faint);
   font-size: 12.5px;
 }
-
-/* Settings screen: one readable column, not the old narrow maintenance side column. */
-.settings-lane {
-  max-width: 760px;
-  margin: 0 auto;
-}
-
 /* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
 .gp-search:focus-within,
 .graph-search:focus-within,
@@ -5301,38 +4828,6 @@ kbd {
   padding: 7px 12px;
   font-size: 13px;
 }
-.url-row {
-  align-items: center;
-}
-
-/* ---- Home (redesign 2026-08): NOW band, stat doors, one activity stream ---- */
-.nowband {
-  border-left: 3px solid var(--gold);
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  padding: 15px 18px;
-}
-.now-cell {
-  flex: 1;
-  min-width: 0;
-}
-.now-cell + .now-cell {
-  border-left: 1px solid var(--border);
-  padding-left: 20px;
-  margin-left: 20px;
-}
-.now-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin-bottom: 7px;
-}
 .pulse-dot {
   width: 6px;
   height: 6px;
@@ -5343,43 +4838,6 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .pulse-dot { animation: none; }
 }
-.now-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 13.5px;
-  font-weight: 600;
-  min-width: 0;
-}
-.now-main .dim-strong {
-  color: var(--text-dim);
-}
-.now-main .ok-strong {
-  color: var(--ok);
-}
-.now-job {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-  text-align: left;
-}
-.now-sub {
-  color: var(--text-faint);
-  font-size: 12px;
-  margin-top: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.now-channels {
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-dim);
-}
 .now-channels .d,
 .now-cell .d {
   width: 7px;
@@ -5389,29 +4847,6 @@ kbd {
 }
 .now-channels .d.ok { background: var(--ok); }
 .now-channels .d.warn { background: var(--warn); }
-
-/* Stat tiles as buttons: same look, plus a reveal-on-hover destination line. */
-.statlink {
-  text-align: left;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-  transition: border-color 0.12s;
-}
-.statlink:hover {
-  border-color: var(--accent);
-}
-.statlink .goto {
-  color: var(--accent);
-  font-size: 11.5px;
-  font-weight: 500;
-  opacity: 0;
-  transition: opacity 0.12s;
-}
-.statlink:hover .goto,
-.statlink:focus-visible .goto {
-  opacity: 1;
-}
 .statlink:hover .sub,
 .statlink:focus-visible .sub {
   opacity: 0;
@@ -5431,29 +4866,11 @@ kbd {
   min-height: 0;
   padding: 14px 18px 16px;
 }
-.home-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 12px;
-  min-height: 0;
-}
 .home-grid > .feed {
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-}
-.home-grid .feed-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-.home-side {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  overflow-y: auto;
 }
 @media (max-width: 1100px) {
   /* Stacked, there is no rail to match - let the screen scroll as a document again. */
@@ -5461,29 +4878,9 @@ kbd {
     grid-template-rows: none;
     height: auto;
     overflow-y: auto;
-  }
-  .home-grid { grid-template-columns: 1fr; }
-  .home-grid > .feed { overflow: visible; }
-  .home-grid .feed-scroll { overflow: visible; }
-  .home-side { overflow: visible; }
-}
-
-/* The activity stream: ingests, maintenance and edits as one event type. */
-.feed-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 13px 17px 9px;
-  flex-wrap: wrap;
-}
+  }  .home-grid > .feed { overflow: visible; }}
 .feed-head .section-title {
   margin: 0;
-}
-.feed-item {
-  display: flex;
-  gap: 12px;
-  padding: 11px 17px;
-  border-top: 1px solid var(--border);
 }
 .feed-item.clickable {
   cursor: pointer;
@@ -5491,39 +4888,12 @@ kbd {
 .feed-item.clickable:hover {
   background: color-mix(in srgb, var(--bg-elev-2) 55%, transparent);
 }
-.fico {
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border-radius: var(--radius-sm);
-  display: grid;
-  place-items: center;
-  margin-top: 1px;
-  background: var(--bg-elev-2);
-  color: var(--text-dim);
-}
-.fico svg {
-  width: 15px;
-  height: 15px;
-}
 .fico.ingest { background: var(--busy-bg); color: var(--busy); }
 .fico.failed { background: var(--err-bg); color: var(--err); }
 .fico.maintenance { background: var(--ok-bg); color: var(--ok); }
 .fico.edit { background: var(--gold-bg); color: var(--gold); }
 .fico.busy { background: var(--busy-bg); color: var(--busy); }
 .fico.queued { background: var(--muted-bg); color: var(--muted); }
-
-/* An idle In-flight card should not hold a screenful of nothing: the head shrinks and
-   the empty line sits right under it. It stays on screen rather than disappearing -
-   it is the anchor the next job appears in, and a card that comes and goes would
-   shift everything below it on every drop. */
-.inflight {
-  overflow: hidden;
-}
-.inflight .feed-head {
-  padding-bottom: 9px;
-  border-bottom: 1px solid var(--border);
-}
 /* Idle is ONE line, not a card with an empty state inside it - about 70px of the height
    budget, and it says the same thing. */
 .inflight.idle {
@@ -5547,61 +4917,6 @@ kbd {
   background: var(--muted-bg);
   color: var(--text-dim);
 }
-
-/* In flight (Home): the Inbox's running + queued rows, folded in. Lighter than the
-   Inbox's JobCard on purpose - Home answers "is it moving?", the Inbox answers
-   "what exactly happened". */
-.flight-rows {
-  display: grid;
-}
-.frow {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 11px;
-  align-items: center;
-  width: 100%;
-  padding: 10px 15px;
-  border: 0;
-  border-top: 1px solid var(--border);
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  transition: background 0.12s;
-}
-.frow:first-child {
-  border-top: 0;
-}
-/* The middle cell must be shrinkable or the long names never ellipsize. */
-.frow > .fbody {
-  min-width: 0;
-}
-.frow .fname {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.frow .fname .ft {
-  font-size: 13.5px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fright {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-/* "Open run" / "Open job": present but quiet until the row is under the pointer. */
-.fgo {
-  font-size: 11.5px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.frow:hover .fgo {
-  color: var(--accent);
-}
 .fico.research,
 .feed-item .fico.research {
   background: color-mix(in srgb, var(--research) 18%, transparent);
@@ -5609,16 +4924,6 @@ kbd {
 }
 .minibar.research i {
   background: var(--research);
-}
-.frow:hover {
-  background: var(--bg-elev-2);
-}
-.fname {
-  font-size: 13.5px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 /* The pipeline as three ticks: enough to see movement, not enough to need a legend. */
 .fsteps {
@@ -5648,119 +4953,24 @@ kbd {
     animation: none;
   }
 }
-
-/* One plain-language line of state above the tiles - it carries the health summary
-   the old NOW band spent a whole cell on. */
-.stateline {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex-wrap: wrap;
-  color: var(--text-dim);
-  font-size: 12px;
-  padding: 0 2px;
-}
-.stateline .sl-sep {
-  width: 1px;
-  height: 11px;
-  background: var(--border-strong);
-}
 .stateline .linkish {
   color: var(--text-dim);
 }
 .stateline .linkish:hover {
   color: var(--accent);
 }
-.stateline .okish {
-  color: var(--ok);
-}
 .stateline .warnish {
   color: var(--warn);
-}
-.stateline strong {
-  color: var(--text);
-  font-weight: 600;
-}
-.ok-strong {
-  color: var(--ok);
-  font-weight: 500;
-}
-.fbody {
-  flex: 1;
-  min-width: 0;
-  display: block;
-}
-.fline {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.fline .ft {
-  font-weight: 500;
-  font-size: 13.5px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fline .fwhen {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  white-space: nowrap;
-}
-.fmeta {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  color: var(--text-faint);
-  font-size: 12px;
-  margin-top: 2px;
 }
 .fmeta .mono-meta {
   font-family: var(--mono);
   font-size: 11px;
 }
-.fpages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 7px;
-}
-.feed-foot {
-  padding: 10px 17px;
-  border-top: 1px solid var(--border);
-  font-size: 12.5px;
-}
-
 /* Most wanted pages: the gap backlog with a research handoff. */
 .wanted {
   display: flex;
   flex-direction: column;
   gap: 9px;
-}
-.wrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 12.5px;
-  min-width: 0;
-}
-.wrow .wn {
-  color: var(--gold);
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 11.5px;
-  width: 14px;
-  flex: none;
-}
-.wrow .wt {
-  font-weight: 500;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .wrow .wc {
   color: var(--text-faint);
@@ -5777,14 +4987,20 @@ kbd {
 }
 
 /* ---- Health screen (redesign 2026-08): status + run history side by side ---- */
+/* Two columns only when the run-history card is actually rendered - inside the System
+   screen the last-settle rows live in the control column, and the head then takes the
+   full width rather than leaving a 320px hole. */
 .health-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
+.health-grid:has(> .run-history) {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
 @media (max-width: 1100px) {
-  .health-grid { grid-template-columns: 1fr; }
+  .health-grid, .health-grid:has(> .run-history) { grid-template-columns: 1fr; }
 }
 .health-grid .maint-status {
   margin-bottom: 0;
@@ -5849,33 +5065,6 @@ kbd {
   padding: 10px 12px;
   background: var(--bg);
 }
-
-/* ---- Research rail: two lanes (conversations + research runs) ---- */
-.rail-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  padding: 2px 4px;
-}
-.rail-new {
-  font-size: 12px;
-  text-decoration: none;
-}
-.rail-new:hover {
-  text-decoration: underline;
-}
-.rail-runs {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 .sess.run-item {
   border: 1px solid transparent;
   background: none;
@@ -5893,41 +5082,9 @@ kbd {
   align-items: center;
   gap: 6px;
 }
-.run-state {
-  font-size: 10.5px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 1px 7px;
-}
 .run-state.running { color: var(--research); background: color-mix(in srgb, var(--research) 16%, transparent); }
 .run-state.done { color: var(--ok); background: var(--ok-bg); }
 .run-state.failed { color: var(--err); background: var(--err-bg); }
-
-/* The run's own view inside the thread column. */
-.run-view {
-  gap: 10px;
-}
-.run-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.run-detail .research-head {
-  padding: 2px 0;
-}
-.run-facts {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-
-/* ---- The research plan as one line + lens popover (was a ~300px chrome tower) ---- */
-.planline-wrap {
-  position: relative;
-}
 .planline {
   display: flex;
   align-items: center;
@@ -5979,50 +5136,8 @@ kbd {
   align-items: center;
   gap: 3px;
 }
-.lens-pop {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  right: 8px;
-  z-index: 40;
-  width: min(360px, 92vw);
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  /* Never grow into the topbar: the picker scrolls once the lens list gets long. */
-  max-height: min(52vh, 420px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.lens-opt {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  text-align: left;
-  border: 0;
-  background: none;
-  color: var(--text);
-  font: inherit;
-  padding: 9px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-.lens-opt:hover {
-  background: var(--bg-elev-2);
-}
 .lens-opt.on {
   background: color-mix(in srgb, var(--research) 12%, transparent);
-}
-.lens-opt .lo-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 600;
 }
 .lens-opt .lo-head .badge {
   font-size: 9.5px;
@@ -6036,16 +5151,6 @@ kbd {
 .lens-opt .lo-head .badge::before {
   display: none;
 }
-.lens-opt .lo-blurb {
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.lens-opt .lo-sources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
 /* Unsaved-editor badge in the page head - the draft guard's visible half. */
 .dirty-badge {
   display: inline-flex;
@@ -6062,4 +5167,529 @@ kbd {
 .dirty-badge svg {
   width: 13px;
   height: 13px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Workspaces (redesign 2026-08-25, second pass)
+
+   One shape for every screen: a control column of --gpanel-w and one content box
+   beside it, both starting on the same line. No screen has a bar spanning both
+   columns any more, so switching screens never shifts the content edge.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.workspace {
+  display: grid;
+  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+/* The content box: head, a body that scrolls inside itself, an optional foot. */
+.box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.box-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.box-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+}
+.box-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.box-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.box-body > .dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}
+.box-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+/* A section heading INSIDE the body, for screens that stack two lists (research runs
+   and the backlog) - not a second box, just a labelled break. */
+.sub-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.sub-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ── Home: the glance strip ─────────────────────────────────────────────────
+   Five numbers that are doors. Two of them (spend today, checks due) are figures
+   the service always collected and never showed. */
+.glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+.glance-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 9px 14px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+.glance-tile:last-child {
+  border-right: 0;
+}
+.glance-tile:hover {
+  background: var(--bg-elev-2);
+}
+.glance-tile .k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.glance-tile .v {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.glance-tile .v.warn { color: var(--warn); }
+.glance-tile .v.err { color: var(--err); }
+.glance-tile .s {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* Page chips and the error line under a table row's title. */
+.rowpages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+  padding-left: 15px;
+}
+.rowerr {
+  display: block;
+  margin-top: 3px;
+  padding-left: 15px;
+  font-size: 11.5px;
+  color: var(--err);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Home: intake in the control column ────────────────────────────────────── */
+.intake-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dropzone.slim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 10px;
+  border: 1.5px dashed var(--border-strong);
+  border-right: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  text-align: center;
+}
+.dropzone.slim:hover,
+.dropzone.slim.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone.slim svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.dropzone.slim .dz-t {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dropzone.slim .dz-s {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.intake-panel .intake-note {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+}
+.ip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.ip-actions .ch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ip-actions .ch .d {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.ip-actions .ch .d.ok { background: var(--ok); }
+.ip-actions .ch .d.warn { background: var(--warn); }
+
+/* ── Research: the run list in the control column ──────────────────────────── */
+.runrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  text-align: left;
+}
+.runrow:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.runrow.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--text);
+}
+.runrow .hrow-dot {
+  margin-top: 5px;
+}
+.runrow .rr-body {
+  min-width: 0;
+  flex: 1;
+}
+.runrow .rr-t {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.runrow .rr-m {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+/* A greyed-out control section: the lens has no effect while asking the vault. */
+.gp-sec.off {
+  opacity: 0.5;
+}
+.gp-sec.off .lensopt {
+  pointer-events: none;
+}
+.gp-sec.off .pillhint .linkish {
+  pointer-events: auto;
+}
+
+/* ── Research: the composer sits at the TOP of the box now ─────────────────── */
+.box > .composer {
+  flex: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 10px 14px 11px;
+  gap: 2px;
+}
+.box > .composer.research-mode {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--research) 8%, var(--bg-elev)), var(--bg-elev));
+}
+.box > .composer:focus-within {
+  border-color: var(--border);
+  border-bottom-color: var(--accent);
+}
+.box > .composer.research-mode:focus-within {
+  border-bottom-color: var(--research);
+}
+.box > .composer .comp-main {
+  padding: 0;
+}
+.box > .composer textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 10px;
+}
+.box > .composer .planline {
+  margin-top: 9px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.comp-modes {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+.comp-modes .viewpill.rs[aria-checked='true'] {
+  background: color-mix(in srgb, var(--research) 16%, transparent);
+  border-color: var(--research);
+  color: var(--research);
+}
+
+/* Threads and run details live in the same scrolling body. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 100%;
+}
+.detail-pad {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 20px;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.detail-head svg {
+  width: 17px;
+  height: 17px;
+  color: var(--research);
+}
+.detail-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The research backlog: gaps the vault itself is asking for. */
+.backlog {
+  display: flex;
+  flex-direction: column;
+}
+.bl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.bl-row:last-child {
+  border-bottom: 0;
+}
+.bl-t {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bl-n {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── System: sections, facts, subcards ─────────────────────────────────────── */
+.sys-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 22px;
+}
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  padding: 9px 12px;
+  background: var(--bg-elev);
+  border: 0;
+  text-align: left;
+  color: var(--text);
+}
+.fact.linky:hover {
+  background: var(--bg-elev-2);
+}
+.fact .k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.fact .v {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fact .v.warn { color: var(--warn); }
+.fact .v.err { color: var(--err); }
+.fact .s {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.subcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.sc-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-body {
+  padding: 12px 13px;
+}
+.sc-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.kvlist {
+  display: flex;
+  flex-direction: column;
+}
+.kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv .k {
+  color: var(--text-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kv .k.warnish {
+  color: var(--warn);
+}
+.kv .v {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+/* The control column carries counts next to a section name. */
+.domlist .n.warn { color: var(--warn); }
+.domlist .n.ok { color: var(--ok); }
+
+/* State dots the activity table uses that the old inbox never rendered: a run in flight,
+   a queued job, and a hand edit. */
+.hrow-dot.running {
+  background: var(--busy);
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+.hrow-dot.queued { background: var(--warn); }
+.hrow-dot.edit { background: var(--type-meta); }
+.badge.ok {
+  background: var(--ok-bg);
+  color: var(--ok);
 }

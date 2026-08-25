@@ -2102,10 +2102,10 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     ? 'library'
     : origin.startsWith('/research')
       ? 'research'
-      : origin === '/'
-        ? 'home'
-        : origin.startsWith('/inbox')
-          ? 'inbox'
+      : origin.startsWith('/system')
+        ? 'system'
+        : origin === '/'
+          ? 'home'
           : 'graph'
 
   return (

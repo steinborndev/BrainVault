@@ -522,3 +522,67 @@ run's `.raw/` payload stayed untracked, and the job lost its revert anchor.
       dashboard points at it. Deleting one also silently changes what a retry does: with the
       manifest present preprocessing is skipped and reused, without it the source is fetched
       again, which for a signed or expiring URL means the retry cannot work at all.
+
+## Phase 9: second pass - five screens, tabs in the header (2026-08-25)
+
+Scope from the approved clickable mockup ("BrainVault Tab Shell", the B variant of two
+drafts). Four complaints drove it, all of them structural rather than cosmetic:
+
+1. Home and the Inbox described the same events twice, in two different vocabularies.
+2. Home did not use the workspace layout Library and Graph had settled on.
+3. Research had no structure, was empty whenever no run was in flight, and starting a run
+   meant opening a popover and scrolling it to reach the lens.
+4. Health and Settings were two nearly empty screens.
+
+Nothing here needed a server change. Every number the new sections show was already being
+collected and simply never added up anywhere.
+
+- [x] **Shell.** Navigation moves into the header row as browser-style tabs (Home,
+      Research, Graph, Library, System); the 216px sidebar is gone and every workspace is
+      that much wider (`.lane.wide` 1620 → 1800). The active tab is painted in the screen
+      ground and overlaps the header's bottom border, so it reads as the surface you are on.
+      Watcher/page-count move to the right of the tab row; they hide below 1240px.
+- [x] **Routes.** `/`, `/research`, `/graph`, `/library`, `/system`. Legacy prefixes
+      redirect: `/inbox` and `/ingestion` → `/` (with their query string, so
+      `?filter=failed` still lands), `/health`, `/maintenance`, `/wartung`, `/settings` →
+      `/system`. Palette actions follow, plus two deep links (usage, vault stats).
+- [x] **Home = the Inbox, plus intake and five numbers.** One control column (intake,
+      search, kind/state/channel/time filters, queue state) and one table: in-flight rows
+      tinted at the top, settled below. `lib/activity.ts` merges jobs, live runs, per-kind
+      settles and the commits nothing else explains into one model, with the join rules the
+      old feed had (a commit a job claims, or one within 90s of a settle, is not also an
+      edit). Tested.
+- [x] **What Home gave up:** growth chart, pages-by-type, hot-cache line, most-wanted list.
+      The first two are vault statistics (System → Vault stats), the last is a research
+      backlog (Research).
+- [x] **Research.** Lens is a standing radio group in the control column - it greys out in
+      Ask mode, because a lens only shapes a run (sources, fetch budget, title suffix).
+      Research is the default mode. The screen opens on the run history plus the vault's own
+      backlog instead of on nothing.
+- [x] **Run history without a schema change.** `lib/researchRuns.ts` merges three sources:
+      the in-memory run records (complete, but evicted), the restart-proof settle record
+      (which is how a FAILED run survives at all), and the synthesis pages in the graph,
+      whose deterministic `Research: <topic><lens suffix>` titles parse back into topic and
+      lens and are dated by mtime. A page is dropped when a run record already claims it.
+      Tested.
+- [x] **System = Health + Settings**, five sections in the control column: status & checks
+      (the existing maintenance head and tools), usage & cost, vault stats, service &
+      config, integrations. `SettingsEditor` takes a `section` prop; `Maintenance` takes
+      `showRunHistory` (off here - the last-settle rows live in the control column).
+- [x] **Usage & cost** finally shows what the service records: spend today and over 7 days,
+      tokens in/out, the daily budget as a meter, spend per channel and the most expensive
+      runs (`lib/usage.ts`, tested).
+- [x] **Vault stats:** pages, links, orphans, stubs, gaps, unfiled, growth, pages by type,
+      retrieval index, pages outside git, domain split.
+- [x] Dead code out: `tabs/Ingestion.tsx` and `tabs/Settings.tsx` are gone, the Dropzone
+      lost its wide-card and collapsed variants (it lives in a 252px column now), and 143
+      CSS rules whose classes no longer appear anywhere were removed (~18 KB).
+
+- [ ] OPEN: research run history is still reconstructed rather than recorded. A persistent
+      `agent_runs` table (operational state, SPEC §8) would keep cost, duration and failed
+      runs across restarts; today a settled run keeps its cost only until the in-memory
+      registry evicts it, after which the vault page carries topic, lens and date but no
+      cost.
+- [ ] OPEN: SPEC.md §6 still describes five tabs (Overview, Ingestion, Query/Chat, Vault,
+      Maintenance) and was deliberately not edited. The amendment now has two structure
+      changes to fold in (the 2026-08-23 sidebar shell and this pass).

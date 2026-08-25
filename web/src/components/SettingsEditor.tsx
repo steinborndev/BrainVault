@@ -27,7 +27,14 @@ const READ_ONLY_LABELS: Record<string, string> = {
   telegram: 'Telegram bot',
 }
 
-export function SettingsEditor(): React.ReactElement {
+/**
+ * Which half of the settings to render. The System screen shows them as two sections -
+ * `service` is the configuration form plus the read-only environment facts, `integrations`
+ * is the credential and the bot. `all` keeps the original single-column form.
+ */
+export type SettingsSection = 'all' | 'service' | 'integrations'
+
+export function SettingsEditor({ section = 'all' }: { section?: SettingsSection } = {}): React.ReactElement {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const [draft, setDraft] = useState<EffectiveSettings | null>(null)
@@ -98,7 +105,22 @@ export function SettingsEditor(): React.ReactElement {
     </div>
   )
 
-  // The baseline/override explanation lives in the card title's ⓘ tooltip (Maintenance tab).
+  if (section === 'integrations') {
+    return (
+      <div>
+        <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
+        <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+        <div className="settings-ro">
+          <div className="settings-ro-row">
+            <span className="settings-ro-label">Obsidian</span>
+            <code>page links open through the obsidian:// handler</code>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // The baseline/override explanation lives in the section head's ⓘ tooltip.
   return (
     <div>
       <div className="settings-grid">
@@ -207,8 +229,12 @@ export function SettingsEditor(): React.ReactElement {
         The API key itself is never shown or stored - only its source. The bind address is
         deliberately not changeable through the UI.
       </p>
-      <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
-      <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+      {section === 'all' && (
+        <>
+          <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
+          <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+        </>
+      )}
     </div>
   )
 }

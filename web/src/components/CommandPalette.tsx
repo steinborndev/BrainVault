@@ -21,13 +21,13 @@ interface PaletteAction {
 }
 
 const NAV_ACTIONS: PaletteAction[] = [
-  { id: 'home', label: 'Go to Home', icon: 'home', run: () => navigate('/') },
-  { id: 'library', label: 'Go to Library', icon: 'book', run: () => navigate('/library') },
-  { id: 'graph', label: 'Go to Graph', icon: 'graph', run: () => navigate('/graph') },
+  { id: 'home', label: 'Go to Home', hint: 'intake and the activity stream', icon: 'home', run: () => navigate('/') },
   { id: 'research', label: 'Go to Research', icon: 'flask', run: () => navigate('/research') },
-  { id: 'inbox', label: 'Go to Inbox', icon: 'inbox', run: () => navigate('/inbox') },
-  { id: 'health', label: 'Go to Health', icon: 'health', run: () => navigate('/health') },
-  { id: 'settings', label: 'Go to Settings', icon: 'gear', run: () => navigate('/settings') },
+  { id: 'graph', label: 'Go to Graph', icon: 'graph', run: () => navigate('/graph') },
+  { id: 'library', label: 'Go to Library', icon: 'book', run: () => navigate('/library') },
+  { id: 'system', label: 'Go to System', hint: 'checks, usage, vault stats, settings', icon: 'gear', run: () => navigate('/system') },
+  { id: 'usage', label: 'Show usage and cost', icon: 'health', run: () => navigate('/system?section=usage') },
+  { id: 'vaultstats', label: 'Show vault statistics', icon: 'graph', run: () => navigate('/system?section=vault') },
 ]
 
 const PAGE_LIMIT = 9

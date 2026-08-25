@@ -53,7 +53,12 @@ import { runTitle } from '../lib/runLabels.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { pageRoute, navigate } from '../lib/router.ts'
 
-export function Maintenance(): React.ReactElement {
+/**
+ * `showRunHistory` is off when the System screen hosts this: the last-settle rows live in
+ * that screen's control column, next to every other section, and would otherwise be on
+ * screen twice.
+ */
+export function Maintenance({ showRunHistory = true }: { showRunHistory?: boolean }): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
 
@@ -114,7 +119,7 @@ export function Maintenance(): React.ReactElement {
           }
         }}
       />
-      {view === 'overview' && <RunHistory data={statusData} />}
+      {view === 'overview' && showRunHistory && <RunHistory data={statusData} />}
       </div>
       {view !== 'overview' && view !== 'all' && (
         <div className="focus-bar">

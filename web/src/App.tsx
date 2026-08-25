@@ -8,11 +8,9 @@ import { StatusPopover } from './components/StatusPopover.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
 import { Home } from './tabs/Home.tsx'
-import { Ingestion } from './tabs/Ingestion.tsx'
 import { Chat } from './tabs/Chat.tsx'
-import { Maintenance } from './tabs/Maintenance.tsx'
+import { System } from './tabs/System.tsx'
 import { Library } from './tabs/Library.tsx'
-import { Settings } from './tabs/Settings.tsx'
 import { Icon, type IconName } from './components/Icon.tsx'
 import { usePath, navigate, pageFromPath } from './lib/router.ts'
 
@@ -21,44 +19,33 @@ import { usePath, navigate, pageFromPath } from './lib/router.ts'
 const Vault = lazy(() => import('./tabs/Vault.tsx').then((m) => ({ default: m.Vault })))
 
 /**
- * Screen ids of the sidebar shell (redesign 2026-08). Three groups replace the old five
- * flat tabs: Knowledge is what you browse, Work is what you do, System is what you tend
- * and configure. `vault` hosts both the graph and the page view (they share state).
+ * Screens of the shell (redesign 2026-08-25, second pass). Five, down from seven: the Inbox
+ * folded into Home (same table, plus intake and the filters that drive it), and Health +
+ * Settings merged into System. `vault` hosts both the graph and the page view (shared state).
  */
-type ScreenId = 'home' | 'library' | 'vault' | 'research' | 'inbox' | 'health' | 'settings'
+type ScreenId = 'home' | 'research' | 'vault' | 'library' | 'system'
 
-interface NavItem {
+interface TabItem {
   id: ScreenId
   label: string
   icon: IconName
   route: string
 }
 
-const NAV_GROUPS: Array<{ label: string | null; items: NavItem[] }> = [
-  { label: null, items: [{ id: 'home', label: 'Home', icon: 'home', route: '/' }] },
-  {
-    label: 'Knowledge',
-    items: [
-      { id: 'vault', label: 'Graph', icon: 'graph', route: '/graph' },
-      { id: 'library', label: 'Library', icon: 'book', route: '/library' },
-    ],
-  },
-  {
-    label: 'Work',
-    // Inbox first: what arrived and is waiting outranks what you go looking for,
-    // and it is the item that carries a badge.
-    items: [
-      { id: 'inbox', label: 'Inbox', icon: 'inbox', route: '/inbox' },
-      { id: 'research', label: 'Research', icon: 'flask', route: '/research' },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { id: 'health', label: 'Health', icon: 'health', route: '/health' },
-      { id: 'settings', label: 'Settings', icon: 'gear', route: '/settings' },
-    ],
-  },
+/**
+ * Navigation lives in the header row now, as browser-style tabs. It used to be a 216px
+ * sidebar while the header spent a whole row naming the screen you were already on; five
+ * entries fit across the top, and every workspace gets that width back.
+ *
+ * Order follows the day: what arrived (Home), what you go and find out (Research), then the
+ * two ways of browsing what is there, then the machine room.
+ */
+const TABS: TabItem[] = [
+  { id: 'home', label: 'Home', icon: 'home', route: '/' },
+  { id: 'research', label: 'Research', icon: 'flask', route: '/research' },
+  { id: 'vault', label: 'Graph', icon: 'graph', route: '/graph' },
+  { id: 'library', label: 'Library', icon: 'book', route: '/library' },
+  { id: 'system', label: 'System', icon: 'gear', route: '/system' },
 ]
 
 /** Which screen a path belongs to (the vault screen owns /graph and /page/…). */
@@ -68,34 +55,34 @@ function screenForPath(path: string): ScreenId {
   if (pathname.startsWith('/library')) return 'library'
   // `/chat` is the pre-rename route, `/research` the current one.
   if (pathname.startsWith('/research') || pathname.startsWith('/chat')) return 'research'
-  if (pathname.startsWith('/inbox') || pathname.startsWith('/ingestion')) return 'inbox'
-  if (pathname.startsWith('/health') || pathname.startsWith('/maintenance') || pathname.startsWith('/wartung')) return 'health'
-  if (pathname.startsWith('/settings')) return 'settings'
+  if (
+    pathname.startsWith('/system') ||
+    pathname.startsWith('/health') ||
+    pathname.startsWith('/maintenance') ||
+    pathname.startsWith('/wartung') ||
+    pathname.startsWith('/settings')
+  ) {
+    return 'system'
+  }
   return 'home'
 }
 
 /**
  * Old route prefix → its current name; normalized via replaceState so the address bar and
- * history stay clean. Suffixes (page paths, ?focus=) ride along.
+ * history stay clean. Suffixes (page paths, ?filter=) ride along - `/inbox?filter=failed`
+ * becomes `/?filter=failed`, which Home applies exactly as the Inbox did.
  */
 const LEGACY_ROUTES: Array<[string, string]> = [
   ['/vault/page/', '/page/'],
   ['/vault', '/graph'],
-  ['/ingestion', '/inbox'],
-  ['/wartung', '/health'],
-  ['/maintenance', '/health'],
+  ['/ingestion', '/'],
+  ['/inbox', '/'],
+  ['/wartung', '/system'],
+  ['/maintenance', '/system'],
+  ['/health', '/system'],
+  ['/settings', '/system'],
   ['/chat', '/research'],
 ]
-
-const SCREEN_TITLES: Record<ScreenId, string> = {
-  home: 'Home',
-  library: 'Library',
-  vault: 'Graph',
-  research: 'Research',
-  inbox: 'Inbox',
-  health: 'Health',
-  settings: 'Settings',
-}
 
 export function App(): React.ReactElement {
   const path = usePath()
@@ -103,8 +90,8 @@ export function App(): React.ReactElement {
   // One SSE connection for the whole app; drives live invalidation + the connection dot.
   const { connected } = useEvents()
 
-  // Outstanding work for the Inbox badge - running ingests are otherwise invisible
-  // from every other screen. Rides the shared ['stats'] query (SSE keeps it fresh).
+  // Outstanding work for the Home badge - a running ingest is otherwise invisible from
+  // every other screen. Rides the shared ['stats'] query (SSE keeps it fresh).
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const outstanding = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
   const running = (stats.data?.queue.active ?? 0) > 0
@@ -116,13 +103,13 @@ export function App(): React.ReactElement {
   const runs = useActiveRuns()
   const researchRunning = runs.countOf('research')
 
-  // Health badge: due/recommended from the deterministic status model (shared queries).
+  // System badge: due/recommended from the deterministic status model (shared queries).
   const maint = useMaintenanceStatus()
   const healthDue = maint.data?.status.due ?? 0
   const healthRec = maint.data?.status.recommended ?? 0
 
   // First-run setup mode: the server runs without a credential and every agent feature is
-  // off - surface that on every screen, with the path to fix it (Settings).
+  // off - surface that on every screen, with the path to fix it (System → Integrations).
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   const setupMode = health.data ? !health.data.credentialConfigured : false
 
@@ -157,118 +144,102 @@ export function App(): React.ReactElement {
     }
   }, [path])
 
-  // On a page route the vault screen is showing an article, not the canvas - the topbar
-  // must say so rather than claiming "Graph".
   const openPage = pageFromPath(path.split('?')[0]!)
-  const screenTitle = screen === 'vault' && openPage !== null ? 'Page' : SCREEN_TITLES[screen]
+  const query = new URLSearchParams(path.split('?')[1] ?? '')
 
-  // The topbar context line: screen name plus a short state summary where one exists.
-  const crumbSub =
-    openPage !== null && screen === 'vault'
-      ? openPage.replace(/^wiki\//, '').replace(/\.md$/, '')
-      : screen === 'inbox' && outstanding > 0
-      ? `${outstanding} outstanding`
-      : screen === 'research' && researchRunning > 0
-      ? `${researchRunning} run${researchRunning > 1 ? 's' : ''} active`
-      : screen === 'health' && healthDue + healthRec > 0
-        ? [healthDue > 0 ? `${healthDue} due` : '', healthRec > 0 ? `${healthRec} soon` : ''].filter(Boolean).join(' · ')
-        : screen === 'library' && stats.data !== undefined
-          ? `${stats.data.pages.total} pages`
-          : ''
+  const badgeFor = (id: ScreenId): React.ReactElement | null => {
+    if (id === 'home' && outstanding > 0) {
+      return (
+        <span className="tab-badge" aria-label={`${outstanding} jobs outstanding`}>
+          {running && <span className="pulse" aria-hidden />}
+          {outstanding}
+        </span>
+      )
+    }
+    if (id === 'research' && researchRunning > 0) {
+      return (
+        <span
+          className="tab-badge research"
+          aria-label={`${researchRunning} research run${researchRunning > 1 ? 's' : ''} active`}
+        >
+          <span className="pulse" aria-hidden />
+          {researchRunning}
+        </span>
+      )
+    }
+    if (id === 'system' && healthDue + healthRec > 0) {
+      return (
+        <span
+          className={`tab-badge${healthDue > 0 ? ' due' : ''}`}
+          aria-label={`${healthDue + healthRec} maintenance items open`}
+        >
+          {healthDue > 0 ? healthDue : healthRec}
+        </span>
+      )
+    }
+    return null
+  }
 
   return (
     <div className="app">
-      <nav className="side" aria-label="Primary">
-        <button className="side-brand" onClick={() => navigate('/')} title="BrainVault home">
-          <Icon name="logo" />
-          <span className="name">BrainVault</span>
-        </button>
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={group.label ?? 'top'} className={`navgroup${gi === 0 ? ' first' : ''}`}>
-            {group.label !== null && <div className="glabel">{group.label}</div>}
-            {group.items.map((item) => (
-              <button
-                key={item.id}
-                className="navitem"
-                aria-current={screen === item.id ? 'page' : undefined}
-                onClick={() => navigate(item.route)}
-              >
-                <Icon name={item.icon} />
-                {item.label}
-                {item.id === 'inbox' && outstanding > 0 && (
-                  <span className="tab-badge" aria-label={`${outstanding} jobs outstanding`}>
-                    {running && <span className="pulse" aria-hidden />}
-                    {outstanding}
-                  </span>
-                )}
-                {item.id === 'research' && researchRunning > 0 && (
-                  <span
-                    className="tab-badge research"
-                    aria-label={`${researchRunning} research run${researchRunning > 1 ? 's' : ''} active`}
-                  >
-                    <span className="pulse" aria-hidden />
-                    {researchRunning}
-                  </span>
-                )}
-                {item.id === 'health' && healthDue + healthRec > 0 && (
-                  <span
-                    className={`tab-badge${healthDue > 0 ? ' due' : ''}`}
-                    aria-label={`${healthDue + healthRec} maintenance items open`}
-                  >
-                    {healthDue > 0 ? healthDue : healthRec}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        ))}
-        <div className="side-foot">
-          <div className="row">
-            <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
-            Watcher {stats.data?.watcher.active === true ? 'active' : 'inactive'}
-          </div>
-          {stats.data !== undefined && (
-            <div className="row">
-              <span className="d acc" />
-              {stats.data.pages.total} pages
-            </div>
-          )}
-        </div>
-      </nav>
-
       <div className="main">
         <header className="topbar">
-          <h1 className="whereami">
-            <span className="where">{screenTitle}</span>
-            {crumbSub !== '' && <span className="sub">{crumbSub}</span>}
-          </h1>
-          <span className="spacer" />
-          <StatusPopover connected={connected} />
+          <button className="brand" onClick={() => navigate('/')} title="BrainVault home">
+            <Icon name="logo" />
+            <span className="name">BrainVault</span>
+          </button>
+          {/* Navigation, not a tab widget: each entry is a route, and the screens are not
+              tabpanels - so `aria-current`, the same contract the sidebar had. */}
+          <nav className="tabs" aria-label="Primary">
+            {TABS.map((tab) => (
+              <button
+                key={tab.id}
+                className="tab"
+                aria-current={screen === tab.id ? 'page' : undefined}
+                onClick={() => navigate(tab.route)}
+              >
+                <Icon name={tab.icon} />
+                {tab.label}
+                {badgeFor(tab.id)}
+              </button>
+            ))}
+          </nav>
+          <div className="topright">
+            <span className="tstat" title={stats.data?.watcher.folder}>
+              <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
+              Watcher {stats.data?.watcher.active === true ? 'active' : 'off'}
+            </span>
+            {stats.data !== undefined && (
+              <span className="tstat">
+                <span className="d acc" />
+                {stats.data.pages.total} pages
+              </span>
+            )}
+            <StatusPopover connected={connected} />
+          </div>
         </header>
 
         {setupMode && (
           <div className="setup-banner" role="status">
             <strong>Almost there:</strong>&nbsp;no Anthropic credential configured yet - ingestion,
             research and maintenance are paused.
-            <button className="btn primary" onClick={() => navigate('/settings')}>
+            <button className="btn primary" onClick={() => navigate('/system?section=integrations')}>
               Set up now
             </button>
           </div>
         )}
 
         <div className="screens">
-          {/* Home is a workspace now, not a document: it fills the viewport and its one
-              growing row scrolls inside itself, so the screen never scrolls as a whole. */}
+          {/* Every screen is the same workspace shape now: one control column, one content
+              box, no bar spanning both - so switching screens never shifts the edges. */}
           <section className="screen flush" hidden={screen !== 'home'} aria-label="Home">
-            <div className="lane">
-              <Home />
+            <div className="lane wide">
+              <Home statusFilter={screen === 'home' ? (query.get('filter') ?? '') : ''} />
             </div>
           </section>
-          {/* Library is a workspace like the graph: panel plus a table that scrolls
-              inside itself, filling the viewport rather than growing past it. */}
-          <section className="screen flush" hidden={screen !== 'library'} aria-label="Library">
+          <section className="screen flush" hidden={screen !== 'research'} aria-label="Research">
             <div className="lane wide">
-              <Library vaultName={vaultName} />
+              <Chat researchPrefill={screen === 'research' ? (query.get('prefill') ?? '') : ''} />
             </div>
           </section>
           {/* The vault screen hosts two very different things. The graph is a workspace: it
@@ -287,28 +258,14 @@ export function App(): React.ReactElement {
               )}
             </div>
           </section>
-          {/* Research is two columns that each scroll internally - the composer must stay
-              docked at the bottom rather than riding away with the thread. */}
-          <section className="screen flush" hidden={screen !== 'research'} aria-label="Research">
+          <section className="screen flush" hidden={screen !== 'library'} aria-label="Library">
             <div className="lane wide">
-              <Chat researchPrefill={screen === 'research' ? (new URLSearchParams(path.split('?')[1] ?? '').get('prefill') ?? '') : ''} />
+              <Library vaultName={vaultName} />
             </div>
           </section>
-          {/* The inbox is a workspace like the library: panel plus one table that scrolls
-              inside itself, filling the viewport rather than growing past it. */}
-          <section className="screen flush" hidden={screen !== 'inbox'} aria-label="Inbox">
+          <section className="screen flush" hidden={screen !== 'system'} aria-label="System">
             <div className="lane wide">
-              <Ingestion statusFilter={screen === 'inbox' ? (new URLSearchParams(path.split('?')[1] ?? '').get('filter') ?? '') : ''} />
-            </div>
-          </section>
-          <section className="screen" hidden={screen !== 'health'} aria-label="Health">
-            <div className="lane">
-              <Maintenance />
-            </div>
-          </section>
-          <section className="screen" hidden={screen !== 'settings'} aria-label="Settings">
-            <div className="lane">
-              <Settings />
+              <System section={screen === 'system' ? (query.get('section') ?? '') : ''} />
             </div>
           </section>
         </div>
