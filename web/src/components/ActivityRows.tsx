@@ -30,6 +30,7 @@ export function channelColor(source: string): string {
     url: 'var(--type-question)',
     research: 'var(--research)',
     manual: 'var(--type-meta)',
+    git: 'var(--muted)',
   }
   return map[source] ?? 'var(--ok)'
 }
@@ -43,6 +44,7 @@ export function channelLabel(source: string): string {
     telegram: 'Telegram',
     manual: 'Manual edits',
     research: 'Research runs',
+    git: 'Vault commit',
   }
   return map[source] ?? source
 }
@@ -232,9 +234,21 @@ export function HistoryJobRow({
  * record beyond the last settle per kind, so this row carries what that record has: outcome,
  * page count, time. Research rows open the run list, the rest open System.
  */
-export function SettleRow({ event }: { event: ActivityEvent }): React.ReactElement {
+export function SettleRow({
+  event,
+  vaultName,
+  authMode,
+}: {
+  event: ActivityEvent
+  vaultName: string
+  authMode: AuthMode
+}): React.ReactElement {
   const isResearch = event.kind === 'research'
   const open = (): void => navigate(isResearch ? '/research' : '/system')
+  // The kind names the run ("Lint report written"); a research topic is appended to it,
+  // because "Research run" alone was all the per-kind settle record could ever say.
+  const base = runTitle(event.runKind ?? event.kind, event.state !== 'failed')
+  const name = event.title === '' ? base : `${base}: ${event.title}`
   return (
     <tr
       onClick={open}
@@ -247,14 +261,17 @@ export function SettleRow({ event }: { event: ActivityEvent }): React.ReactEleme
       <td>
         <span className="hrow-name">
           <span className={`hrow-dot ${event.state === 'failed' ? 'failed' : 'done'}`} aria-hidden />
-          <span className="nm">{runTitle(event.title, event.state !== 'failed')}</span>
+          <span className="nm" title={name}>
+            {name}
+          </span>
         </span>
         {event.note !== undefined && <span className="rowerr">{event.note}</span>}
+        <PageChips vaultName={vaultName} paths={event.pages} />
       </td>
       <td className="dimc">{channelLabel(event.channel)}</td>
-      <td className="num">-</td>
-      <td className="num">-</td>
-      <td className="num">-</td>
+      <td className="num">{event.pages.length > 0 ? `+${event.pages.length}` : '-'}</td>
+      <td className="num">{duration(event.startedIso ?? null, event.whenIso)}</td>
+      <td className="num">{event.costUsd !== null ? <Cost value={event.costUsd} authMode={authMode} /> : '-'}</td>
       <td className="faintc">{timeAgo(event.whenIso)}</td>
     </tr>
   )

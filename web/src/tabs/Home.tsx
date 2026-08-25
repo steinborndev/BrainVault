@@ -111,6 +111,12 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
 
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const jobsQ = useQuery({ queryKey: ['jobs', limit], queryFn: () => api.jobs({ limit }) })
+  // The persistent run log (schema v12): every settled agent run, not just the newest per
+  // kind - so a research run keeps its topic and its cost in the stream.
+  const historyQ = useQuery({
+    queryKey: ['maintenance-history', 'all'],
+    queryFn: () => api.maintenanceHistory({ limit: 200 }),
+  })
   const runs = useActiveRuns()
   const maint = useMaintenanceStatus()
 
@@ -126,10 +132,11 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
       buildActivity({
         jobs,
         activeRuns: runs.running,
+        runHistory: historyQ.data?.runs ?? [],
         lastRuns: [...(maint.data?.lastRuns.values() ?? [])],
         commits: stats.data?.commits ?? [],
       }),
-    [jobs, runs.running, maint.data, stats.data],
+    [jobs, runs.running, historyQ.data, maint.data, stats.data],
   )
 
   const shown = filterActivity(events, filter, new Date())
@@ -482,7 +489,7 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                 ) : e.kind === 'edit' ? (
                   <CommitRow key={e.id} event={e} vaultName={vaultName} />
                 ) : (
-                  <SettleRow key={e.id} event={e} />
+                  <SettleRow key={e.id} event={e} vaultName={vaultName} authMode={authMode} />
                 ),
               )}
               {shown.length === 0 && (

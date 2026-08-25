@@ -15,7 +15,14 @@
  * the windows stay unit-testable; Home feeds them from the queries it already runs.
  */
 
-import type { Commit, Job, JobStatus, MaintenanceAreaState, MaintenanceRun } from '../api/types.ts'
+import type {
+  AgentRunRecord,
+  Commit,
+  Job,
+  JobStatus,
+  MaintenanceAreaState,
+  MaintenanceRun,
+} from '../api/types.ts'
 import { parsePages } from './format.ts'
 
 export type ActivityKind = 'ingest' | 'research' | 'maintenance' | 'edit'
@@ -45,6 +52,10 @@ export interface ActivityEvent {
   readonly job?: Job
   /** Present for live agent runs: drives the progress line. */
   readonly run?: MaintenanceRun
+  /** The raw run kind (`lint`, `research`, …) for run rows - the row names it from this. */
+  readonly runKind?: string
+  /** When the run started, where that is known - the table shows a duration from it. */
+  readonly startedIso?: string
   /** Failure reason, duplicate note, deferral reason - the one line that explains the state. */
   readonly note?: string
 }
@@ -73,13 +84,42 @@ export function contentPages(paths: readonly string[]): string[] {
 /** Research is its own kind; every other agent run is maintenance. */
 const kindOfRun = (runKind: string): ActivityKind => (runKind === 'research' ? 'research' : 'maintenance')
 
+/**
+ * What a commit was, read off the subject the service itself wrote:
+ *
+ *   ingest: …        the ingest queue           (`queue.ts`)
+ *   maintenance: …   an agent maintenance run   (`maintenance.ts`)
+ *   chat: …          a saved conversation       (`maintenance.ts`)
+ *   edit: / delete:  a page written by hand     (`routes/pages.ts`)
+ *   domains: add …   a domain added by hand     (`routes/domains.ts`)
+ *
+ * This matters after "clear history": while a job row exists its commit is attributed to it
+ * and never becomes an event of its own. Once the row is deleted the commit is all that is
+ * left - and calling an ingest commit a "manual edit" because its job record is gone would
+ * be a lie the vault's own history contradicts.
+ */
+export function classifyCommit(subject: string): { kind: ActivityKind; channel: string } {
+  if (subject.startsWith('ingest:')) return { kind: 'ingest', channel: 'git' }
+  if (subject.startsWith('maintenance:') || subject.startsWith('chat:')) {
+    return { kind: 'maintenance', channel: 'git' }
+  }
+  // Everything else is a person writing the vault: the page editor, the domain form, or a
+  // commit made outside the service entirely (Obsidian, a terminal).
+  return { kind: 'edit', channel: 'manual' }
+}
+
 export interface ActivityInput {
   readonly jobs: readonly Job[]
   /** Agent runs in flight (research, lint, hot cache …) - no queue tracks these. */
   readonly activeRuns: readonly MaintenanceRun[]
-  /** Restart-proof last settle per run kind. */
+  /**
+   * The persistent run log (schema v12): every settled agent run, with what it cost and how
+   * long it took. Preferred over `lastRuns`, which only ever holds the newest run per kind.
+   */
+  readonly runHistory?: readonly AgentRunRecord[]
+  /** Restart-proof last settle per run kind - the fallback for runs older than the log. */
   readonly lastRuns: readonly MaintenanceAreaState[]
-  /** Recent vault commits, for the edits nothing else explains. */
+  /** Recent vault commits, for the events nothing else explains. */
   readonly commits: readonly Commit[]
 }
 
@@ -119,7 +159,8 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
       id: `run:${r.id}`,
       kind: kindOfRun(r.kind),
       state: 'running',
-      title: r.label ?? r.kind,
+      title: r.label ?? '',
+      runKind: r.kind,
       channel: r.kind,
       whenIso: r.startedAt,
       pages: [],
@@ -131,13 +172,43 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
   }
 
   const settleTimes: number[] = []
+  const loggedIds = new Set<string>()
+  const loggedKinds = new Map<string, number>()
+
+  for (const r of input.runHistory ?? []) {
+    loggedIds.add(r.id)
+    const at = Date.parse(r.finishedAt)
+    settleTimes.push(at)
+    loggedKinds.set(r.kind, Math.max(loggedKinds.get(r.kind) ?? 0, at))
+    out.push({
+      id: `logrun:${r.id}`,
+      kind: kindOfRun(r.kind),
+      state: r.ok ? 'done' : 'failed',
+      title: r.label ?? '',
+      runKind: r.kind,
+      channel: r.kind,
+      whenIso: r.finishedAt,
+      pages: contentPages(r.pages),
+      costUsd: r.costUsd,
+      commit: null,
+      live: false,
+      startedIso: r.startedAt,
+      ...(r.error !== null ? { note: r.error } : {}),
+    })
+  }
+
   for (const a of input.lastRuns) {
-    settleTimes.push(Date.parse(a.finishedAt))
+    // The log is the better record; the settle row only fills in for runs that predate it.
+    if (loggedIds.has(a.runId)) continue
+    const at = Date.parse(a.finishedAt)
+    if ((loggedKinds.get(a.kind) ?? -Infinity) >= at) continue
+    settleTimes.push(at)
     out.push({
       id: `settle:${a.kind}:${a.runId}`,
       kind: kindOfRun(a.kind),
       state: a.ok ? 'done' : 'failed',
-      title: a.kind,
+      title: '',
+      runKind: a.kind,
       channel: a.kind,
       whenIso: a.finishedAt,
       pages: [],
@@ -152,12 +223,13 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
     if (jobCommits.has(c.hash.slice(0, 8))) continue
     const t = Date.parse(c.date)
     if (settleTimes.some((rt) => Math.abs(rt - t) < 90_000)) continue
+    const { kind, channel } = classifyCommit(c.subject)
     out.push({
       id: `commit:${c.hash}`,
-      kind: 'edit',
+      kind,
       state: 'done',
       title: c.subject,
-      channel: 'manual',
+      channel,
       whenIso: c.date,
       pages: contentPages(c.pages),
       costUsd: null,
