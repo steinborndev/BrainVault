@@ -6,7 +6,7 @@
  * leaving them to a lucky node click.
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
@@ -129,6 +129,25 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
   }, [knowledge, query, type, domain, subset, sort])
 
   const shown = filtered.slice(0, limit)
+  const more = filtered.length > limit
+
+  // Load the next page when the end of the list comes into view. Sorting by domain made the
+  // page cap read as a bug: the first 50 rows are all one domain, so the list looked like it
+  // only held that domain - the rest was one "Show more" away, which is not where a reader
+  // looks. The button stays for keyboards and for anyone who wants it explicitly.
+  const sentinel = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = sentinel.current
+    if (el === null || !more) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setLimit((l) => l + PAGE_SIZE)
+      },
+      { rootMargin: '200px' },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [more, shown.length])
 
   if (graph.isLoading) return <div className="empty">Loading the page index…</div>
   if (graph.isError)
@@ -391,6 +410,9 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </tbody>
           </table>
         )}
+        {/* Watched by the observer above; 200px of root margin means the next page is in
+            place before the reader reaches the bottom. */}
+        <div ref={sentinel} className="lib-sentinel" aria-hidden />
         </div>
         <div className="dtable-foot">
           <span>
@@ -398,7 +420,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             {filtered.length !== knowledge.length ? ` (${knowledge.length} in this subset)` : ''}
           </span>
           <span className="spacer" />
-          {filtered.length > limit && (
+          {more && (
             <button className="btn" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
               Show more
             </button>

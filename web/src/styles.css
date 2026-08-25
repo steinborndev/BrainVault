@@ -3980,104 +3980,8 @@ details.hot-cache[open] summary {
   background: var(--bg);
   margin-bottom: 13px;
 }
-.prog-now {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 13px 15px;
-  border-bottom: 1px solid var(--border);
-}
-.prog-spin {
-  width: 15px;
-  height: 15px;
-  flex: none;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--research) 25%, transparent);
-  border-top-color: var(--research);
-  animation: prog-spin 0.9s linear infinite;
-}
 @keyframes prog-spin {
   to { transform: rotate(360deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .prog-spin { animation: none; }
-}
-.prog-done {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.prog-done svg {
-  width: 12px;
-  height: 12px;
-}
-.prog-txt {
-  min-width: 0;
-}
-.prog-lab {
-  display: block;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.prog-act {
-  display: block;
-  margin-top: 1px;
-  font-size: 13.5px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.prog-el {
-  margin-left: auto;
-  text-align: right;
-  font-size: 11px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.prog-el b {
-  display: block;
-  font-family: var(--mono);
-  font-size: 14px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.prog-steps {
-  display: grid;
-}
-.prog-step {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  gap: 11px;
-  align-items: center;
-  padding: 9px 15px;
-  border-bottom: 1px solid var(--border);
-}
-.prog-step:last-child {
-  border-bottom: 0;
-}
-.prog-mark {
-  width: 20px;
-  height: 20px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
-  color: var(--text-faint);
-  font-size: 10px;
-  font-weight: 700;
-}
-.prog-mark svg {
-  width: 11px;
-  height: 11px;
 }
 .prog-step.done .prog-mark {
   background: var(--ok-bg);
@@ -4091,16 +3995,6 @@ details.hot-cache[open] summary {
   background: color-mix(in srgb, var(--research) 20%, transparent);
   border-color: var(--research);
 }
-.prog-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--research);
-}
-.prog-nm {
-  font-size: 13px;
-  color: var(--text-dim);
-}
 .prog-step.done .prog-nm,
 .prog-step.now .prog-nm {
   color: var(--text);
@@ -4108,102 +4002,10 @@ details.hot-cache[open] summary {
 .prog-step.now .prog-nm {
   font-weight: 600;
 }
-.prog-res {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.prog-bar-wrap {
-  grid-column: 2 / -1;
-  margin-top: 6px;
-}
-.prog-bar {
-  display: block;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--bg-elev-2);
-  overflow: hidden;
-}
-.prog-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--research);
-  transition: width 0.4s ease;
-}
-.prog-cap {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-.prog-counters {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border-top: 1px solid var(--border);
-}
-.prog-counter {
-  padding: 9px 14px;
-  border-right: 1px solid var(--border);
-}
-.prog-counter:last-child {
-  border-right: 0;
-}
-.prog-counter .cv {
-  font-family: var(--mono);
-  font-size: 16px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.prog-counter .cl {
-  font-size: 10.5px;
-  color: var(--text-faint);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-/* The raw log, one disclosure away from the summary above it. */
-details.logbox {
-  margin-bottom: 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-}
-details.logbox > summary {
-  padding: 9px 13px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  cursor: pointer;
-  user-select: none;
-}
-details.logbox > summary:hover {
-  color: var(--text);
-}
 details.logbox .log {
   border: 0;
   border-radius: 0;
 }
-
-/* What the run will file, stated before it finishes filing it. */
-.run-target {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 4px 12px;
-  margin-bottom: 13px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-.run-target .rt-k {
-  color: var(--text-faint);
-}
-.run-target .rt-v {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 /* ---- Keyboard hints (vault view shortcuts, 2026-07-21) ---- */
 
 /* A key chip - used in the shortcut legend and the page-head Esc hint. */
@@ -4495,10 +4297,16 @@ kbd {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
+/* `scrollbar-gutter: stable` reserves the scrollbar's width whether or not it is showing,
+   so switching to a domain that fits without scrolling no longer shifts the columns. */
 .lib-main > .tscroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.lib-sentinel {
+  height: 1px;
 }
 /* The header has to stay put while the body scrolls under it. */
 .lib-main thead th {
@@ -4784,16 +4592,6 @@ kbd {
   color: var(--text);
   padding: 7px 12px;
   font-size: 13px;
-}
-.pulse-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--gold);
-  animation: badge-pulse 1.6s ease infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .pulse-dot { animation: none; }
 }
 .now-channels .d,
 .now-cell .d {
@@ -5843,3 +5641,149 @@ kbd {
   color: var(--accent);
 }
 
+/* ── The composer's step strip ─────────────────────────────────────────────
+   Dimmed while nothing runs, lit as it happens - one row, so both modes are the same
+   height and starting a run never moves the screen. */
+.agentsteps {
+  flex: none;
+  padding: 9px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.as-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.as-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  opacity: 0.6;
+}
+.as-step + .as-step::before {
+  content: '';
+  position: relative;
+  left: -9px;
+  width: 6px;
+  height: 1px;
+  background: var(--border-strong);
+}
+.as-mark {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+.as-mark svg {
+  width: 10px;
+  height: 10px;
+}
+.as-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+.as-note {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+/* Live states. The tone follows the mode: research violet, ask accent. */
+.agentsteps.live .as-step.done {
+  opacity: 1;
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+}
+.agentsteps.live .as-step.done .as-mark {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.agentsteps.live .as-step.now {
+  opacity: 1;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.agentsteps.research.live .as-step.now {
+  border-color: var(--research);
+  color: var(--research);
+  background: color-mix(in srgb, var(--research) 14%, transparent);
+}
+.agentsteps.live .as-step.now .as-mark {
+  background: transparent;
+  color: inherit;
+}
+.as-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.as-now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agentsteps.live .as-now {
+  color: var(--text-dim);
+}
+.as-el b {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+/* The outcome of the run that just finished, in the same fixed head as the strip. */
+.runbanner {
+  flex: none;
+  margin: 0;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+/* ── Research start view: runs and backlog split the height, each scrolls ── */
+.box-body.start-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.sv-sec {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 132px;
+}
+.sv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.sv-scroll > .dtable {
+  table-layout: fixed;
+}
+.sv-scroll > .dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}

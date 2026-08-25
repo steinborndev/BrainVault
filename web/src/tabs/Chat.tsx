@@ -27,7 +27,7 @@ import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
 import { JobLog } from '../components/JobLog.tsx'
-import { RunProgress } from '../components/RunProgress.tsx'
+import { AskSteps, ResearchSteps } from '../components/AgentSteps.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Icon } from '../components/Icon.tsx'
 import { navigate } from '../lib/router.ts'
@@ -38,15 +38,15 @@ import { buildResearchRuns, targetTitle, type ResearchRunEntry } from '../lib/re
 
 type ComposerMode = 'research' | 'ask'
 
-type View =
-  | { kind: 'start' }
-  /** The run this browser just started (or any run still in flight). */
-  | { kind: 'live' }
-  | { kind: 'run'; id: string }
-  | { kind: 'thread'; id: string | null }
+/**
+ * A run in flight does not get a screen of its own: the step strip under the composer is
+ * already showing it, in the same place it sits while idle, so starting a run changes state
+ * rather than layout. `run` is a settled run picked out of the list.
+ */
+type View = { kind: 'start' } | { kind: 'run'; id: string } | { kind: 'thread'; id: string | null }
 
 /** How many gaps the research backlog offers at once. */
-const BACKLOG_SIZE = 6
+const BACKLOG_SIZE = 40
 
 export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): React.ReactElement {
   const qc = useQueryClient()
@@ -69,6 +69,14 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     enabled: activeId !== null,
   })
   const messages = threadQ.data?.messages ?? []
+  // The citation count of the newest answer - the ask strip's last step reports it.
+  const lastCitations = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]!
+      if (m.role === 'assistant') return parseCitations(m.citations).length
+    }
+    return 0
+  })()
 
   // Live answer text (SPEC.md §6.3), a preview only. First questions have no session id
   // yet, so they stream under a client-generated request id the server echoes.
@@ -191,7 +199,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     setRunProfileKey(profileKey)
     setRunStartedAt(new Date().toISOString())
     setDraft('')
-    setView({ kind: 'live' })
+    setView({ kind: 'start' })
     research.start()
   }
 
@@ -210,7 +218,8 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   }
 
   const openEntry = (entry: ResearchRunEntry): void => {
-    setView(entry.status === 'running' ? { kind: 'live' } : { kind: 'run', id: entry.id })
+    // A running entry has no detail to open - the strip under the composer is its view.
+    setView(entry.status === 'running' ? { kind: 'start' } : { kind: 'run', id: entry.id })
   }
 
   const startAbout = (topic: string): void => {
@@ -280,8 +289,11 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
           <div className="domlist">
             {entries.map((e) => {
+              // A running entry is "current" while the start view is up, because that is
+              // where its progress is showing.
               const on =
-                (view.kind === 'run' && view.id === e.id) || (view.kind === 'live' && e.status === 'running')
+                (view.kind === 'run' && view.id === e.id) ||
+                (view.kind === 'start' && e.status === 'running')
               return (
                 <button
                   key={e.id}
@@ -418,7 +430,50 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           )}
         </div>
 
-        <div className="box-body" ref={bodyRef}>
+        {/* Always here, in both modes: dimmed while nothing runs, lit as it happens. The
+            run does not move the screen when it starts. */}
+        {mode === 'research' ? (
+          <ResearchSteps
+            running={research.running || liveEntry !== undefined}
+            startedAt={runStartedAt ?? liveEntry?.startedAt ?? null}
+            profile={runProfile ?? selectedProfile}
+          />
+        ) : (
+          <AskSteps
+            pending={ask.isPending}
+            streamed={streamed}
+            citations={lastCitations}
+            answered={messages.some((m) => m.role === 'assistant')}
+          />
+        )}
+
+        {mode === 'research' && research.error !== null && (
+          <div className="toast err runbanner">
+            {research.error}{' '}
+            <button className="btn" onClick={research.start}>
+              Retry
+            </button>
+          </div>
+        )}
+        {mode === 'research' && research.result?.ok === true && (
+          <div className="toast ok runbanner">
+            {lastTopic === '' ? 'Run finished' : `Run finished: ${lastTopic}`}
+            {research.result.usage.costUsd > 0 && (
+              <span>
+                {' '}
+                · <Cost value={research.result.usage.costUsd} authMode={authMode} />
+                {isEstimate(authMode) && <span className="dim"> ({ESTIMATE_LABEL})</span>}
+              </span>
+            )}
+            {research.result.pages.length > 0 ? (
+              <PageLinks vaultName={vaultName} paths={research.result.pages} />
+            ) : (
+              <> - no changes.</>
+            )}
+          </div>
+        )}
+
+        <div className={`box-body${view.kind === 'start' ? ' start-view' : ''}`} ref={bodyRef}>
           {view.kind === 'start' && (
             <StartView
               entries={entries}
@@ -426,22 +481,6 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               gaps={gaps.slice(0, BACKLOG_SIZE)}
               onOpen={openEntry}
               onResearch={startAbout}
-            />
-          )}
-
-          {view.kind === 'live' && (
-            <LiveRunView
-              entry={liveEntry}
-              topic={liveEntry?.topic ?? lastTopic}
-              profile={runProfile}
-              startedAt={runStartedAt}
-              running={research.running || liveEntry !== undefined}
-              error={research.error}
-              result={research.result}
-              vaultName={vaultName}
-              authMode={authMode}
-              onRetry={research.start}
-              onBack={() => setView({ kind: 'start' })}
             />
           )}
 
@@ -549,10 +588,16 @@ function StartView({
     key === null ? '-' : (profiles.find((p) => p.key === key)?.label ?? key)
   return (
     <>
+      {/* Two sections that split the height and scroll on their own: the run list grows with
+          every run now that they are recorded, and the backlog grows with the vault. */}
+      <div className="sv-sec">
       <div className="sub-head">
         <h3 className="sub-title">Runs</h3>
         <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
+        <span className="spacer" />
+        <span className="box-sub">{entries.length}</span>
       </div>
+      <div className="sv-scroll">
       {entries.length === 0 ? (
         <div className="empty">
           No research run yet. Name a topic above, pick a lens on the left, and the run files one synthesis
@@ -596,10 +641,17 @@ function StartView({
         </table>
       )}
 
+      </div>
+      </div>
+
+      <div className="sv-sec">
       <div className="sub-head">
         <h3 className="sub-title">Worth a run</h3>
         <span className="box-sub">missing pages your vault already links to</span>
+        <span className="spacer" />
+        <span className="box-sub">{gaps.length}</span>
       </div>
+      <div className="sv-scroll">
       {gaps.length === 0 ? (
         <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
       ) : (
@@ -617,104 +669,9 @@ function StartView({
           ))}
         </div>
       )}
-    </>
-  )
-}
-
-/**
- * The run in flight: what it is doing and what is left, instead of a scrolling wall of tool
- * calls. The raw log is one click away for when the summary is not enough.
- */
-function LiveRunView({
-  entry,
-  topic,
-  profile,
-  startedAt,
-  running,
-  error,
-  result,
-  vaultName,
-  authMode,
-  onRetry,
-  onBack,
-}: {
-  entry: ResearchRunEntry | undefined
-  topic: string
-  profile: ResearchProfile | undefined
-  startedAt: string | null
-  running: boolean
-  error: string | null
-  result: ReturnType<typeof useMaintenanceRun>['result']
-  vaultName: string
-  authMode: AuthMode
-  onRetry: () => void
-  onBack: () => void
-}): React.ReactElement {
-  const settled = result !== undefined || error !== null
-  return (
-    <div className="detail-pad">
-      <div className="detail-head">
-        <Icon name="flask" />
-        <h3 className="detail-title">{topic || 'Research run'}</h3>
-        {profile !== undefined && profile.key !== 'broad' && <span className="lens-tag">{profile.label}</span>}
-        {running && !settled && (
-          <span className="badge ingesting">
-            <span className="pulse-dot" aria-hidden />
-            running
-          </span>
-        )}
-        <span className="spacer" />
-        <button className="btn ghost" onClick={onBack}>
-          All runs
-        </button>
       </div>
-
-      {!settled && (
-        <div className="run-target">
-          <span className="rt-k">Files as</span>
-          <span className="rt-v mono-meta">{targetTitle(topic || 'your topic', profile)}</span>
-          <span className="rt-k">Commit</span>
-          <span className="rt-v">one commit when the run settles - revertable from Home like any other.</span>
-        </div>
-      )}
-
-      <RunProgress
-        channel="maintenance:research"
-        startedAt={startedAt ?? entry?.startedAt ?? null}
-        profile={profile}
-        running={running && !settled}
-      />
-
-      {running && !settled && (
-        <details className="logbox">
-          <summary>Show the raw agent log</summary>
-          <JobLog jobId="maintenance:research" seed={false} />
-        </details>
-      )}
-
-      {error !== null && (
-        <div className="toast err">
-          {error}{' '}
-          <button className="btn" onClick={onRetry}>
-            Retry
-          </button>
-        </div>
-      )}
-
-      {result?.ok === true && (
-        <div className="toast ok">
-          New/updated pages
-          {result.usage.costUsd > 0 && (
-            <span>
-              {' '}
-              · <Cost value={result.usage.costUsd} authMode={authMode} />
-              {isEstimate(authMode) && <span className="dim"> ({ESTIMATE_LABEL})</span>}
-            </span>
-          )}
-          {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> - no changes.</>}
-        </div>
-      )}
-    </div>
+      </div>
+    </>
   )
 }
 
