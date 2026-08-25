@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { spendByChannel, spendItems, topSpend, totalSpend, withinDays } from '../src/lib/usage.ts'
-import type { Job, MaintenanceRun } from '../src/api/types.ts'
+import type { AgentRunRecord, Job } from '../src/api/types.ts'
 
 const NOW = new Date('2026-08-25T12:00:00.000Z')
 
@@ -27,20 +27,23 @@ const job = (over: Partial<Job> = {}): Job => ({
   ...over,
 })
 
-const run = (over: Partial<MaintenanceRun> = {}): MaintenanceRun => ({
+/**
+ * A row of the PERSISTENT run log (`GET /maintenance/history`). The section used to be fed
+ * from the runner's in-memory registry, which is empty after every restart.
+ */
+const run = (over: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
   id: 'r1',
   kind: 'research',
-  channel: 'maintenance:research',
-  status: 'done',
   label: 'Batteries',
+  profileKey: 'broad',
+  ok: true,
+  pages: [],
+  tokensIn: 40000,
+  tokensOut: 3000,
+  costUsd: 1.8,
+  error: null,
   startedAt: '2026-08-24T09:00:00.000Z',
   finishedAt: '2026-08-24T09:20:00.000Z',
-  result: {
-    ok: true,
-    kind: 'research',
-    pages: [],
-    usage: { tokensIn: 40000, tokensOut: 3000, costUsd: 1.8 },
-  },
   ...over,
 })
 
@@ -53,7 +56,8 @@ describe('spendItems', () => {
 
   it('skips rows that cost nothing - an unpriced job is not a zero-cost run', () => {
     expect(spendItems([job({ cost_usd: null }), job({ id: 'j2', cost_usd: 0 })], [])).toHaveLength(0)
-    expect(spendItems([], [run({ result: undefined })])).toHaveLength(0)
+    expect(spendItems([], [run({ costUsd: null })])).toHaveLength(0)
+    expect(spendItems([], [run({ id: 'r2', costUsd: 0 })])).toHaveLength(0)
   })
 
   it('sorts newest first', () => {

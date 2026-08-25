@@ -226,7 +226,12 @@ function UsageSection(): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   // The same window Home lists, so the two screens agree and the query is shared.
   const jobs = useQuery({ queryKey: ['jobs', 300], queryFn: () => api.jobs({ limit: 300 }) })
-  const runs = useQuery({ queryKey: ['maintenance-runs'], queryFn: api.maintenanceRuns })
+  // The PERSISTENT run log, not the runner's in-memory registry: the registry starts empty
+  // on every service restart, so both cards below said "nothing" while the log held the runs.
+  const runs = useQuery({
+    queryKey: ['maintenance-history', 'all'],
+    queryFn: () => api.maintenanceHistory({ limit: 200 }),
+  })
 
   const items = useMemo(
     () => spendItems(jobs.data?.jobs ?? [], runs.data?.runs ?? []),
@@ -259,7 +264,9 @@ function UsageSection(): React.ReactElement {
         <Fact k="Spend 7 days" v={<Cost value={s.usage.last7d.costUsd} authMode={authMode} />} />
         <Fact k="Tokens in · 7d" v={tokens(s.usage.last7d.tokensIn)} />
         <Fact k="Tokens out · 7d" v={tokens(s.usage.last7d.tokensOut)} />
-        <Fact k="Agent runs · 7d" v={String(s.usage.last7d.ingests)} />
+        {/* Every settled agent run in the window - ingests and the runs from the run log
+            alike, which is also the count the daily budget measures in subscription mode. */}
+        <Fact k="Runs · 7d" v={String(s.usage.last7d.ingests)} />
       </Facts>
 
       <div className="sys-grid">

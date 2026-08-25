@@ -449,8 +449,8 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               onClick={onClear}
               title={
                 clearable === null
-                  ? 'Deletes every stored history entry (all statuses, including ones not shown). The vault and created pages stay untouched.'
-                  : `Deletes every stored "${clearable}" entry, including ones the filters hide. The vault and created pages stay untouched.`
+                  ? 'Deletes every stored history entry (all statuses, including ones not shown), and with it the token and cost history those entries carry - System → Usage & cost counts from them, and so does the daily budget. The vault and created pages stay untouched.'
+                  : `Deletes every stored "${clearable}" entry, including ones the filters hide, and with it the token and cost history those entries carry. The vault and created pages stay untouched.`
               }
             >
               {armedLeft !== null

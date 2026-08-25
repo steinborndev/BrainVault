@@ -264,16 +264,25 @@ export class JobStore {
   }
 
   /**
-   * Token/cost totals over jobs whose agent run FINISHED at or after `sinceIso` — the aggregate
+   * Token/cost totals over every agent run that FINISHED at or after `sinceIso` — the aggregate
    * usage display and the daily budget (SPEC.md §7.1, §11.3).
    *
-   * Scope is `done` + `failed` deliberately: a failed run still spent tokens and still competed
-   * for the subscription's limits, so counting only successes would under-report what was used
-   * and let a run of failures blow through a daily budget unnoticed. `duplicate`/`cancelled`
-   * never started an agent run and carry no usage.
+   * BOTH sources, because both spend the same tokens against the same limits: ingest jobs, and
+   * the agent runs the run log records (research, lint, hot cache, tag-fix, domain work). It
+   * read `jobs` alone until 2026-08-25, which made a vault filled mainly by research report a
+   * spend of $0 — and, far worse, let those runs pass the daily budget untouched. A single
+   * research run measured at $7.20 and 14.8M input tokens while the budget saw nothing at all.
    *
-   * `ingests` is the job count — the unit the budget uses in subscription mode, where the limit
-   * is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1).
+   * Scope on the job side is `done` + `failed` deliberately: a failed run still spent tokens and
+   * still competed for the subscription's limits, so counting only successes would under-report
+   * what was used and let a run of failures blow through a daily budget unnoticed.
+   * `duplicate`/`cancelled` never started an agent run and carry no usage. The run log holds
+   * only settled runs and records failures the same way, so it needs no such filter.
+   *
+   * `ingests` is the RUN count across both tables — the unit the budget uses in subscription
+   * mode, where the limit is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1). One
+   * agent run counts as one, the same as one ingest: they are the same kind of event, and a
+   * research run is if anything the more expensive of the two.
    *
    * Filtering on `finished_at` is only correct because `failed` is in FINISHED_STATES (it was
    * not before — finding F2; migration v3 backfilled the rows written under the old behaviour).
@@ -286,11 +295,18 @@ export class JobStore {
            COALESCE(SUM(tokens_out), 0) AS tokensOut,
            COALESCE(SUM(cost_usd), 0)   AS costUsd,
            COUNT(*)                     AS ingests
-         FROM jobs
-         WHERE status IN ('done', 'failed')
-           AND finished_at IS NOT NULL AND finished_at >= ?`,
+         FROM (
+           SELECT tokens_in, tokens_out, cost_usd
+             FROM jobs
+            WHERE status IN ('done', 'failed')
+              AND finished_at IS NOT NULL AND finished_at >= :since
+           UNION ALL
+           SELECT tokens_in, tokens_out, cost_usd
+             FROM agent_runs
+            WHERE finished_at >= :since
+         )`,
       )
-      .get(sinceIso) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
+      .get({ since: sinceIso }) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
     return row
   }
 

@@ -10,7 +10,7 @@
  * unit-testable; the section feeds them from the queries it already runs.
  */
 
-import type { Job, MaintenanceRun } from '../api/types.ts'
+import type { AgentRunRecord, Job } from '../api/types.ts'
 
 export interface SpendItem {
   /** Stable id, for keys and for opening the underlying record. */
@@ -33,8 +33,15 @@ export interface ChannelSpend {
   readonly runs: number
 }
 
-/** Every priced agent run the client knows about, newest first. */
-export function spendItems(jobs: readonly Job[], runs: readonly MaintenanceRun[]): SpendItem[] {
+/**
+ * Every priced agent run the client knows about, newest first.
+ *
+ * `runs` comes from the persistent run log (`GET /maintenance/history`), not from the
+ * runner's in-memory registry. The section used to read the registry, which the runner
+ * rebuilds empty on every start - so "where did the money go" answered "nowhere" after each
+ * restart, while the log right beside it held the runs and their cost.
+ */
+export function spendItems(jobs: readonly Job[], runs: readonly AgentRunRecord[]): SpendItem[] {
   const out: SpendItem[] = []
 
   for (const j of jobs) {
@@ -52,16 +59,17 @@ export function spendItems(jobs: readonly Job[], runs: readonly MaintenanceRun[]
   }
 
   for (const r of runs) {
-    const usage = r.result?.usage
-    if (usage === undefined || usage.costUsd === 0) continue
+    // A run with no cost recorded is not the same as a free run, but neither belongs in a
+    // "where it went" chart: both contribute nothing to explain.
+    if (r.costUsd === null || r.costUsd === 0) continue
     out.push({
       id: r.id,
       label: r.label ?? r.kind,
       channel: r.kind,
-      costUsd: usage.costUsd,
-      tokensIn: usage.tokensIn,
-      tokensOut: usage.tokensOut,
-      whenIso: r.finishedAt ?? r.startedAt,
+      costUsd: r.costUsd,
+      tokensIn: r.tokensIn ?? 0,
+      tokensOut: r.tokensOut ?? 0,
+      whenIso: r.finishedAt,
       kind: 'run',
     })
   }
