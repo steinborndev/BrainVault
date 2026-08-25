@@ -222,13 +222,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   return (
     <div className="workspace">
       <aside className="gpanel" aria-label="Home controls">
-        <div className="gp-sec">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Add to vault</span>
-          </div>
-          <Dropzone />
-        </div>
-
         <div className="gp-sec gp-find">
           <div className="gp-search">
             <Icon name="search" />
@@ -240,6 +233,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               onChange={(e) => setFilter({ ...filter, query: e.target.value })}
             />
           </div>
+        </div>
+
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Add to vault</span>
+          </div>
+          <Dropzone />
         </div>
 
         <div className="gp-sec">

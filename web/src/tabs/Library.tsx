@@ -325,10 +325,15 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
               {shown.map((n) => (
                 <tr key={n.path} onClick={() => navigate(pageRoute(n.path))}>
                   <td className="lt-title" title={n.title}>
-                    <span className="lt-bucket">{bucketLabel(n.type)}</span>
-                    <strong className="lt-name">{n.title}</strong>
-                    {isOrphan(n) && <span className="lt-flag err">orphan</span>}
-                    {isStub(n) && <span className="lt-flag warn">stub</span>}
+                    {/* The flex row is a span inside the cell: a `td` set to `display: flex`
+                        leaves the table layout, and its baseline then drifts against the
+                        cells beside it, a little further with every row. */}
+                    <span className="lt-cell">
+                      <span className="lt-bucket">{bucketLabel(n.type)}</span>
+                      <strong className="lt-name">{n.title}</strong>
+                      {isOrphan(n) && <span className="lt-flag err">orphan</span>}
+                      {isStub(n) && <span className="lt-flag warn">stub</span>}
+                    </span>
                   </td>
                   <td className="lt-domain">
                     {n.domain !== null ? (

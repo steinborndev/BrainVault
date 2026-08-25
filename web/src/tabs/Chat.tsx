@@ -357,7 +357,9 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               Ask the vault
             </button>
             <span className="spacer" />
-            {mode === 'research' && <span className="faintc">web access on · writes pages</span>}
+            <span className="faintc">
+              {mode === 'research' ? 'web access on · writes pages' : 'reads the vault only'}
+            </span>
           </div>
           <div className="comp-main">
             <textarea
@@ -385,18 +387,33 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               {sendLabel}
             </button>
           </div>
-          {mode === 'research' && selectedProfile !== undefined && (
+          {/* Both modes state what the send button will do, in the same line and the same
+              shape - otherwise switching modes moved everything below by the height of
+              this row. Ask has no lens, no target page and no commit; saying so is the
+              honest counterpart to the research plan. */}
+          {mode === 'research' ? (
+            selectedProfile !== undefined && (
+              <div className="planline">
+                <span className="pl-lens">{selectedProfile.label}</span>
+                <span className="pl-sep">·</span>
+                <span className="pl-k">files as</span>
+                <span className="pl-title" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
+                  {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                </span>
+                <span className="pl-sep">·</span>
+                <span className="pl-cost">
+                  up to <b>{selectedProfile.fetchEstimate}</b> fetches · 1 commit
+                </span>
+              </div>
+            )
+          ) : (
             <div className="planline">
-              <span className="pl-lens">{selectedProfile.label}</span>
+              <span className="pl-lens ask">Read-only</span>
               <span className="pl-sep">·</span>
-              <span className="pl-k">files as</span>
-              <span className="pl-title" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
-                {targetTitle(draft.trim() || 'your topic', selectedProfile)}
-              </span>
+              <span className="pl-k">answers cite</span>
+              <span className="pl-title">the vault pages they came from</span>
               <span className="pl-sep">·</span>
-              <span className="pl-cost">
-                up to <b>{selectedProfile.fetchEstimate}</b> fetches · 1 commit
-              </span>
+              <span className="pl-cost">no web access · no commit</span>
             </div>
           )}
         </div>
