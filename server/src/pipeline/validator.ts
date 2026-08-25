@@ -133,12 +133,6 @@ function readDragonScale(vaultRoot: string): DragonScaleState {
   return { active: true, rollout, legacy, counter }
 }
 
-/** Wikilink targets minus code: fenced blocks and inline code hold illustrative `[[examples]]`
- * (the 2026-07-19 lint had to hand-annotate those as false positives — strip them up front). */
-function linkTargets(markdown: string): string[] {
-  return parseWikilinks(markdown.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]+`/g, ''))
-}
-
 /**
  * Case-insensitive name index over EVERY vault file, keyed by basename, by basename minus
  * extension, AND — for markdown pages — by frontmatter `title:` and `aliases:`. Deliberately
@@ -326,7 +320,7 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
       }
     }
 
-    const targets = skipLinkCheck(rel) ? [] : linkTargets(markdown)
+    const targets = skipLinkCheck(rel) ? [] : parseWikilinks(markdown)
     if (targets.length > 0) {
       fileIndex ??= buildFileIndex(vaultRoot)
       for (const t of targets) {

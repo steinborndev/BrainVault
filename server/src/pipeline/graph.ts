@@ -13,7 +13,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { parseWikilinks } from './citations.js'
+import { parseWikilinkRefs, type WikilinkRef } from './citations.js'
 
 /**
  * How a page participates in the vault (SPEC §12.4): `knowledge` is what the vault exists
@@ -53,7 +53,8 @@ export interface GraphNode {
  *
  * Artifact pages (lint reports, session logs, folds) never count as referrers: they QUOTE
  * dangling links while reporting on them rather than wanting the page written, so one lint
- * report would otherwise inflate every gap and mint pure-noise entries.
+ * report would otherwise inflate every gap and mint pure-noise entries. Embeds (`![[…]]`)
+ * are excluded for the same reason: a missing image is a broken picture, not a page to write.
  */
 export interface GraphGap {
   /** The missing page's name, cased as first written in a wikilink. */
@@ -76,8 +77,8 @@ export interface VaultGraph {
 interface CacheEntry {
   readonly mtimeMs: number
   readonly size: number
-  /** Raw wikilink targets as written (pre-resolution) — resolution is re-run per build. */
-  readonly links: readonly string[]
+  /** Wikilink refs as written (pre-resolution): resolution is re-run per build. */
+  readonly refs: readonly WikilinkRef[]
   readonly tags: readonly string[]
   readonly domain: string | null
   /** Frontmatter `type:` (lowercased), the primary signal for the kind classification. */
@@ -192,6 +193,14 @@ export function classifyKind(
   return 'structural'
 }
 
+/**
+ * Vault areas OUTSIDE `wiki/` that hold linkable media. Ingest runs park images in
+ * `_attachments/`, so `![[shot.png]]` resolves to nothing unless the graph sees them - the
+ * subset of upstream-guard's WRITABLE_AREAS that holds files, minus the staging (`.raw/`)
+ * and derived (`.vault-meta/`) areas, which are never link targets.
+ */
+const ASSET_ROOTS = ['_attachments', 'assets'] as const
+
 export class GraphBuilder {
   private readonly cache = new Map<string, CacheEntry>()
   private lastSignature = ''
@@ -218,7 +227,7 @@ export class GraphBuilder {
     for (const f of files) {
       const hit = this.cache.get(f.abs)
       if (hit !== undefined && hit.mtimeMs === f.mtimeMs && hit.size === f.size) continue
-      let links: string[] = []
+      let refs: WikilinkRef[] = []
       let meta: ReturnType<typeof parseFrontmatterMeta> = {
         tags: [],
         domain: null,
@@ -228,7 +237,7 @@ export class GraphBuilder {
       }
       try {
         const markdown = fs.readFileSync(f.abs, 'utf8')
-        links = parseWikilinks(markdown)
+        refs = parseWikilinkRefs(markdown)
         meta = parseFrontmatterMeta(markdown)
       } catch {
         // A page deleted mid-build or unreadable: an empty node beats a failed graph.
@@ -236,7 +245,7 @@ export class GraphBuilder {
       this.cache.set(f.abs, {
         mtimeMs: f.mtimeMs,
         size: f.size,
-        links,
+        refs,
         tags: meta.tags,
         domain: meta.domain,
         fmType: meta.fmType,
@@ -255,8 +264,10 @@ export class GraphBuilder {
     //  3. Frontmatter `title:` and `aliases:` — filenames drop characters the filesystem
     //     dislikes while links keep them (`[[…work?]]` vs `…work.md`), and hub pages go by
     //     another name entirely (`meta/domains.md` titled "Domain Registry").
-    //  4. Non-markdown vault files (`.canvas`, `.base`, …): resolution-only — a link to an
-    //     existing canvas is not a missing page, but assets never become nodes.
+    //  4. Vault media: non-markdown files under `wiki/` (`.canvas`, `.base`, …) plus
+    //     everything in the media roots outside it (see ASSET_ROOTS, where ingest runs put
+    //     images). Resolution-only: an existing canvas or screenshot is not a missing page,
+    //     but media never becomes a node.
     const byName = new Map<string, number>()
     files.forEach((f, i) => {
       const key = f.title.toLowerCase()
@@ -279,7 +290,9 @@ export class GraphBuilder {
     })
     const assetKeys = new Set<string>()
     for (const rel of assets) {
-      const sub = rel.slice('wiki/'.length).toLowerCase()
+      // Media under wiki/ is linked wiki-relative; media in the roots outside it by bare
+      // name (`![[shot.png]]`, how the vault writes every image) or vault-relative path.
+      const sub = (rel.startsWith('wiki/') ? rel.slice('wiki/'.length) : rel).toLowerCase()
       const base = sub.split('/').pop()!
       // Writers link assets by name with ([[dashboard.base]]) or without ([[Wiki Map]])
       // the extension, bare or path-qualified — accept all four spellings.
@@ -303,7 +316,7 @@ export class GraphBuilder {
     // the first-written casing becomes the display title.
     const gapByKey = new Map<string, { title: string; refBy: Set<number> }>()
     files.forEach((f, from) => {
-      for (const target of this.cache.get(f.abs)?.links ?? []) {
+      for (const { target, embed } of this.cache.get(f.abs)?.refs ?? []) {
         const lower = target.toLowerCase()
         // A leading `wiki/` is tolerated everywhere: paths and asset keys are stored
         // wiki-relative, and both link spellings occur in agent-written pages.
@@ -316,9 +329,9 @@ export class GraphBuilder {
           if (assetKeys.has(wikiRel)) continue // an existing canvas/base — resolved, no node
           unresolved++
           // Path-qualified stragglers (`[[notes/Foo]]`, `.raw/…`) stay out of the gap list:
-          // they are navigation or staging references, not missing CONTENT pages. Artifact
-          // sources count as unresolved but never as gap referrers (see GraphGap).
-          if (!target.includes('/') && kinds[from] !== 'artifact') {
+          // they are navigation or staging references, not missing CONTENT pages. Embeds and
+          // artifact sources count as unresolved but never as gap referrers (see GraphGap).
+          if (!target.includes('/') && !embed && kinds[from] !== 'artifact') {
             const gap = gapByKey.get(lower)
             if (gap === undefined) gapByKey.set(lower, { title: target, refBy: new Set([from]) })
             else gap.refBy.add(from)
@@ -379,17 +392,18 @@ export class GraphBuilder {
 
   /**
    * All wiki pages with the stat data the cache keys on, plus the vault-relative paths of
-   * non-markdown wiki files (canvases, bases, …) that participate in link resolution only.
-   * Both sorted for a stable signature.
+   * every media file that participates in link resolution only: non-markdown files under
+   * `wiki/` (canvases, bases, …) and everything in ASSET_ROOTS. Both sorted for a stable
+   * signature. Media joins the signature by path alone, its content never matters.
    */
   private listFiles(): {
     pages: Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }>
     assets: string[]
   } {
-    const wikiRoot = path.join(this.vaultRoot, 'wiki')
     const pages: Array<{ abs: string; rel: string; title: string; type: string; mtimeMs: number; size: number }> = []
     const assets: string[] = []
-    const walk = (dir: string): void => {
+    /** `collectPages`: only under `wiki/` is a `.md` file a page; media roots hold files. */
+    const walk = (dir: string, collectPages: boolean): void => {
       let entries: fs.Dirent[]
       try {
         entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -398,8 +412,8 @@ export class GraphBuilder {
       }
       for (const e of entries) {
         const abs = path.join(dir, e.name)
-        if (e.isDirectory()) walk(abs)
-        else if (e.isFile() && e.name.endsWith('.md')) {
+        if (e.isDirectory()) walk(abs, collectPages)
+        else if (e.isFile() && collectPages && e.name.endsWith('.md')) {
           let stat: fs.Stats
           try {
             stat = fs.statSync(abs)
@@ -421,7 +435,8 @@ export class GraphBuilder {
         }
       }
     }
-    walk(wikiRoot)
+    walk(path.join(this.vaultRoot, 'wiki'), true)
+    for (const root of ASSET_ROOTS) walk(path.join(this.vaultRoot, root), false)
     pages.sort((a, b) => a.rel.localeCompare(b.rel))
     assets.sort()
     return { pages, assets }

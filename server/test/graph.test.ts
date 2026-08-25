@@ -217,6 +217,43 @@ describe('GraphBuilder', () => {
     expect(g.gaps[0]!.refBy.map((i) => g.nodes[i]!.title)).toEqual(['A'])
   })
 
+  it('ignores wikilinks inside code, so code literals never become gaps', () => {
+    // `tf.constant([[1.]] * n)` is a Python list literal. It used to mint a page named "1."
+    // and, with two knowledge pages "linking" to it, rank FIRST in most-wanted pages.
+    page(
+      'wiki/concepts/Net.md',
+      '---\ntype: concept\n---\ntrains on [[Tensors]]\n\n```python\ny = tf.constant([[0.]] * n + [[1.]] * n)\n```\n',
+    )
+    // A lint report QUOTES the dangling links it reports. The artifact rule already kept
+    // those out of the gap list; stripping code keeps them out of the unresolved count too.
+    page('wiki/meta/lint-report-2026-08-24.md', '---\ntype: report\n---\n- `[[Ghost]]` does not exist.')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.gaps.map((x) => x.title)).toEqual(['Tensors'])
+    expect(g.unresolved).toBe(1)
+  })
+
+  it('resolves a table-escaped alias pipe instead of calling the page missing', () => {
+    // Inside a markdown table the alias separator must be written `\|` or the cell breaks.
+    // Splitting on the bare pipe left the escape in the page name, so three concept pages
+    // that exist showed up at the top of most-wanted pages.
+    page('wiki/concepts/Comparison.md', '| [[Compound Interest\\|CI]] | dominant |')
+    page('wiki/concepts/Compound Interest.md', 'the page that exists')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(0)
+    expect(g.gaps).toHaveLength(0)
+    expect(g.nodes.find((n) => n.title === 'Compound Interest')!.in).toBe(1)
+  })
+
+  it('resolves embeds against the media roots outside wiki/, and never gaps on one', () => {
+    page('wiki/sources/Infographic.md', 'the picture: ![[chart.png]] plus a broken one ![[gone.png]]')
+    fs.mkdirSync(path.join(vaultRoot, '_attachments/images'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, '_attachments/images/chart.png'), 'x')
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.nodes).toHaveLength(1) // media resolves links but never becomes a node
+    expect(g.unresolved).toBe(1) // the broken embed is still a dangling reference...
+    expect(g.gaps).toHaveLength(0) // ...but a missing image is not a page to write
+  })
+
   it('resolves links via frontmatter title and aliases when the basename differs', () => {
     // Filenames drop filesystem-hostile characters that links keep: the vault files
     // "…work?" as "…work.md" with the `?` preserved only in `title:`.
