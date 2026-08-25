@@ -4287,7 +4287,9 @@ kbd {
 }
 /* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
 .gp-search:focus-within,
-.graph-search:focus-within,
+.graph-search:focus-within {
+  border-color: var(--accent);
+}
 
 /* ---- Inbox (redesign 2026-08): channels line, paused banner, history rows + drawer ---- */
 .channels {
@@ -4463,11 +4465,6 @@ kbd {
   padding: 7px 12px;
   font-size: 13px;
 }
-.now-channels .d,
-.now-channels .d.ok { background: var(--ok); }
-.now-channels .d.warn { background: var(--warn); }
-.statlink:hover .sub,
-
 /* ══ Home, bounded (2026-08-25) ═══════════════════════════════════════════════════════
    Four fixed rows and one filling row. The filling row's two columns scroll INSIDE
    themselves, so the screen itself never scrolls - at any window height, rather than at
@@ -5449,6 +5446,10 @@ kbd {
   border-radius: 50%;
   background: currentColor;
   animation: badge-pulse 1.4s ease-in-out infinite;
+}
+/* The step's own name, between its mark and its note. */
+.as-nm {
+  font-weight: 500;
 }
 .as-note {
   font-family: var(--mono);

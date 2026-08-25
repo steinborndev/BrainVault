@@ -1319,7 +1319,7 @@ function RunResult({ result, vaultName, label }: { result: MaintenanceResult; va
     <div className="toast ok">
       {label}
       {result.usage.costUsd > 0 && (
-        <span className="run-cost">
+        <span>
           {' '}· <Cost value={result.usage.costUsd} authMode={authMode} />
         </span>
       )}

@@ -185,6 +185,20 @@ the headless Chromium already in the Playwright cache over CDP, opens each route
 what actually rendered (rows, canvas, cards, visible height). It needs the service running and
 `node --experimental-websocket` on Node 20.
 
+**The dead-CSS sweep also left two kinds of damage that only turned up later.** It matched
+a rule by its opening line, so for a multi-line selector GROUP it removed the last line plus
+the block and left the earlier lines dangling. `.gp-search:focus-within,` then had no block
+and swallowed whatever followed - in one case an `@media` block - and the visible keyboard
+focus on every search field was gone. Braces stayed balanced, so a brace check saw nothing;
+`vite build` DID warn (`Unexpected "@media"`), and the warning was scrolled past. The second
+kind: one class on the hand-built dead list (`.badge.queued-badge`, the queue's "N waiting")
+was still being rendered. It now uses the shared `queued` tone instead of a rule of its own.
+
+`test/styles.test.ts` catches both classes of damage from here on: balanced braces, no
+dangling selector line, no at-rule nested in a plain rule, and every class a component
+renders has a rule somewhere. That last check also turned up three long-standing unstyled
+hooks (`as-nm`, `graph-bars`, `run-cost`) which are resolved.
+
 **A dead-CSS sweep by pattern nearly cost `styles.css`.** A script that removed rules whose
 class had no call site also walked backwards over the preceding comment to remove it, and took
 2298 lines with it instead of the intended ~270. Recovered by resetting the file and replaying
@@ -224,6 +238,40 @@ it is believed.
   this file - it has to be done by reading, not by pattern.
 - A visual pass over all five screens in both themes is still worth doing by hand; the build
   and the tests cannot see a 2px seam.
+
+## Follow-up found from this screen: usage and the daily budget (2026-08-25)
+
+Reviewing the finished System screen showed every figure under "Usage & cost" at zero on a
+day with a completed research run. Three independent causes, two of them real defects:
+
+1. **`usageSince` read the `jobs` table alone.** Agent runs (research, lint, hot cache,
+   tag-fix, domain work) land in `agent_runs` (schema v12) with their tokens and cost, and no
+   aggregate ever read that table. A vault filled mainly by research therefore reported a
+   spend of $0.
+
+   The serious half is not the display: `budgetStatus()` uses the same function, so the
+   **daily budget could not see agent runs at all** - the single most expensive thing the
+   service does. The run that surfaced this cost $7.20 across 14.8M input tokens while the
+   budget counted zero. Fixed by summing both tables. Per the decision taken here, one agent
+   run counts as one against the subscription-mode limit, the same as one ingest: they are
+   the same kind of event, and a research run is the more expensive of the two.
+
+2. **The section read the runner's in-memory registry** (`GET /maintenance/runs`) instead of
+   the persistent run log (`GET /maintenance/history`, v12). The registry is rebuilt empty on
+   every service start, so "Where it went" and "Most expensive runs" said "nothing" after
+   each restart while the log beside them held the runs.
+
+3. **`jobs` was genuinely empty**, so "Ingests per day" was telling the truth. Worth knowing:
+   Home's "Clear history" deletes the token and cost history along with the rows, and the
+   daily budget counts from them - its tooltip promised only that the vault stays untouched.
+   It now says so.
+
+Also relabelled: the tile read "Agent runs 7d" while showing `usage.ingests`, which was the
+job count. It is "Runs 7d" now and counts both.
+
+Not done, by decision: the runs from before the run log existed (23-24 August) stay without
+cost figures. Their usage was never recorded and cannot be reconstructed; the window fills in
+by itself within a week.
 
 ## Not in scope
 

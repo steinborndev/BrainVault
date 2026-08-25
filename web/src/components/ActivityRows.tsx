@@ -331,7 +331,7 @@ export function QueueState({
         <span className={`badge ${state === 'paused' ? 'deferred' : state === 'working' ? 'ingesting' : ''}`}>
           {state === 'paused' ? 'paused' : state === 'working' ? `${active} running` : 'idle'}
         </span>
-        {queued > 0 && <span className="badge queued-badge">{queued} waiting</span>}
+        {queued > 0 && <span className="badge queued">{queued} waiting</span>}
         {concurrency !== undefined && state !== 'paused' && (
           <span className="faintc">up to {concurrency} at a time</span>
         )}

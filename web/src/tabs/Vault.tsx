@@ -903,7 +903,7 @@ function GraphView({
       <StaleLinksBanner />
       <div className="workspace graph-workspace">
         {(clusterFocus !== null || focusNode) && (
-          <div className="ws-bar graph-bars">
+          <div className="ws-bar">
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
           the "· domain" suffix make the cluster ≠ domain distinction visible - one domain
