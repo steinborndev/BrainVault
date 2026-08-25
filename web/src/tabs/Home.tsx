@@ -127,7 +127,7 @@ export function Home(): React.ReactElement {
         paused={data.queue.paused}
         onOpenJob={setDrawerJob}
       />
-      <StatBand stats={data} gapCount={graph.data?.unresolved ?? null} />
+      <StatBand stats={data} gapCount={graph.data?.gaps.length ?? null} />
       <StateLine stats={data} maint={maint} />
 
       <div className="home-grid">
@@ -400,7 +400,17 @@ function Delta({ now, prev, invert = false }: { now: number; prev: number; inver
  * stacking three, which is 45px per tile of Home's height budget for no information lost
  * (the caption still swaps to the destination on hover).
  */
-function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }): React.ReactElement {
+function StatBand({
+  stats,
+  gapCount,
+}: {
+  stats: Stats
+  /** DISTINCT missing pages (`graph.gaps.length`), not `graph.unresolved`. The latter counts
+   *  every dangling link OCCURRENCE, including the path-qualified, embed, artifact-page and
+   *  plugin-doc ones the backlog deliberately drops - so the card promised 52 and the graph it
+   *  opens listed 10. The tile must show the same number as the screen behind it. */
+  gapCount: number | null
+}): React.ReactElement {
   const doneDaily = dense(stats.kpisDaily, 'done', 14)
   const failedDaily = dense(stats.kpisDaily, 'failed', 14)
   const prevIngests = sum(doneDaily.slice(0, 7))
@@ -446,7 +456,7 @@ function StatBand({ stats, gapCount }: { stats: Stats; gapCount: number | null }
       <button className="stat card statlink" onClick={() => navigate('/graph?gaps=1')}>
         <div className="label">Gaps</div>
         <div className="value">{gapCount ?? '…'}</div>
-        <div className="sub">unresolved link targets</div>
+        <div className="sub">pages your vault wants written</div>
         <div className="goto">See them in the graph</div>
       </button>
     </div>
