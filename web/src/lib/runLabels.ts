@@ -33,6 +33,22 @@ export const RUN_RUNNING_TITLES: Record<string, string> = {
 }
 
 /**
+ * Which tab announces a run while it is in flight.
+ *
+ * Research shows its own runs and the conversation-save that belongs to them; every other
+ * kind is machine-room work and belongs to System. The split has to be exhaustive, or a run
+ * goes unannounced - which is what a domain backfill did until 2026-08-25: it appeared in
+ * Home's activity table but no tab said anything, so starting one from System and switching
+ * away left no trace that the vault was being written to.
+ */
+export const RESEARCH_RUN_KINDS: ReadonlySet<string> = new Set(['research', 'save'])
+
+/** True for the runs the System tab is responsible for announcing. */
+export function isMaintenanceRun(kind: string): boolean {
+  return !RESEARCH_RUN_KINDS.has(kind)
+}
+
+/**
  * A settled run's title, stated as what it PRODUCED rather than as whether it threw.
  *
  * The distinction matters because most of these titles name an artifact ("Lint report

@@ -238,26 +238,24 @@ button {
   height: 2px;
   background: var(--bg);
 }
+/* The tab's own counter. Two meanings share it, never at once: what is IN FLIGHT (with a
+   pulse, in the busy tone) and, when nothing is running, what is DUE (amber, static). */
 .tab-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 18px;
-  padding: 0 6px;
+  gap: 5px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
+  padding: 3px 7px;
+  background: var(--busy);
+  color: var(--accent-ink);
   font-family: var(--font);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1;
 }
 .tab-badge.due {
   background: var(--warn-bg);
   color: var(--warn);
-}
-.tab-badge.research {
-  background: color-mix(in srgb, var(--research) 16%, transparent);
-  color: var(--research);
 }
 .topright {
   display: flex;
@@ -399,18 +397,6 @@ button {
 }
 
 /* Activity badge (sidebar Inbox item) - outstanding jobs, visible from every screen. */
-.tab-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  background: var(--busy);
-  color: var(--accent-ink);
-  border-radius: 999px;
-  padding: 3px 7px;
-}
 /* Research runs get the lens colour, so the badge says WHICH kind of work is running
    rather than just that something is. */
 .tab-badge.research {

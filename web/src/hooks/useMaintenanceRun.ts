@@ -34,7 +34,13 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
 
   const start = useMutation({
     mutationFn: starter,
-    onSuccess: (run) => setRunId(run.id),
+    onSuccess: (run) => {
+      setRunId(run.id)
+      // The tab badges read the server's run registry, which polls every 15 s while idle.
+      // Without this the badge for a run you just started appeared up to fifteen seconds
+      // after the click - long enough to read as "nothing happened".
+      qc.invalidateQueries({ queryKey: ['maintenance-runs'] })
+    },
   })
 
   const poll = useQuery({
@@ -55,6 +61,9 @@ export function useMaintenanceRun(starter: () => Promise<MaintenanceRun>): Maint
     if (settled) {
       qc.invalidateQueries({ queryKey: ['stats'] })
       qc.invalidateQueries({ queryKey: ['maintenance-state'] })
+      // …and the same registry on the way out, so the badge clears on settle rather than
+      // on the next poll.
+      qc.invalidateQueries({ queryKey: ['maintenance-runs'] })
       // The run just wrote its own row in the persistent log (schema v12) - the research
       // run list reads from there.
       qc.invalidateQueries({ queryKey: ['maintenance-history'] })

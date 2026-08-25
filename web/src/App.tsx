@@ -13,6 +13,7 @@ import { System } from './tabs/System.tsx'
 import { Library } from './tabs/Library.tsx'
 import { Icon, type IconName } from './components/Icon.tsx'
 import { usePath, navigate, pageFromPath } from './lib/router.ts'
+import { RUN_RUNNING_TITLES, isMaintenanceRun } from './lib/runLabels.ts'
 
 // Code-split: the vault viewer pulls in d3-force + the canvas machinery, which the other
 // screens never need - keep the shell light.
@@ -93,8 +94,7 @@ export function App(): React.ReactElement {
   // Outstanding work for the Home badge - a running ingest is otherwise invisible from
   // every other screen. Rides the shared ['stats'] query (SSE keeps it fresh).
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
-  const outstanding = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
-  const running = (stats.data?.queue.active ?? 0) > 0
+  const queued = (stats.data?.queue.active ?? 0) + (stats.data?.queue.queued ?? 0)
   const vaultName = stats.data?.vaultName ?? 'vault'
 
   // Agent runs in flight, server-side truth. Ingests are only half the work the service
@@ -102,6 +102,15 @@ export function App(): React.ReactElement {
   // started it, and vanished from that one on reload.
   const runs = useActiveRuns()
   const researchRunning = runs.countOf('research')
+
+  // Home counts everything in flight, the same way its own "In flight" tile does - the tile
+  // counted agent runs while the badge beside it counted only the ingest queue, so a running
+  // backfill made the two disagree on the same screen.
+  const outstanding = queued + runs.running.length
+  const running = (stats.data?.queue.active ?? 0) > 0 || runs.running.length > 0
+
+  // The machine room's runs - see `isMaintenanceRun` for why the split is exhaustive.
+  const maintenanceRuns = runs.running.filter((r) => isMaintenanceRun(r.kind))
 
   // System badge: due/recommended from the deterministic status model (shared queries).
   const maint = useMaintenanceStatus()
@@ -153,7 +162,7 @@ export function App(): React.ReactElement {
   const badgeFor = (id: ScreenId): React.ReactElement | null => {
     if (id === 'home' && outstanding > 0) {
       return (
-        <span className="tab-badge" aria-label={`${outstanding} jobs outstanding`}>
+        <span className="tab-badge" aria-label={`${outstanding} in flight`}>
           {running && <span className="pulse" aria-hidden />}
           {outstanding}
         </span>
@@ -167,6 +176,17 @@ export function App(): React.ReactElement {
         >
           <span className="pulse" aria-hidden />
           {researchRunning}
+        </span>
+      )
+    }
+    // A run in flight outranks the due count: one badge says one thing at a time, and what
+    // is happening now is the more urgent of the two. The due items are still due afterwards.
+    if (id === 'system' && maintenanceRuns.length > 0) {
+      const names = maintenanceRuns.map((r) => RUN_RUNNING_TITLES[r.kind] ?? r.kind)
+      return (
+        <span className="tab-badge" aria-label={names.join(', ')} title={names.join(' · ')}>
+          <span className="pulse" aria-hidden />
+          {maintenanceRuns.length}
         </span>
       )
     }
