@@ -4516,15 +4516,12 @@ kbd {
   padding: 12px 14px;
 }
 .library > .gpanel,
-.inbox > .gpanel,
-.lib-main,
-.inbox-main {
+.lib-main {
   min-height: 0;
 }
 /* The big box: same card as the panel beside it, and it scrolls INSIDE itself so both
    columns end on the workspace's bottom line. */
-.lib-main,
-.inbox-main {
+.lib-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -4534,23 +4531,19 @@ kbd {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
-.lib-main > table,
-.inbox-main .tscroll {
-  display: block;
+.lib-main > .tscroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 /* The header has to stay put while the body scrolls under it. */
-.lib-main thead th,
-.inbox-main thead th {
+.lib-main thead th {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--bg-elev);
 }
-.lib-main > .empty,
-.inbox-main > .empty {
+.lib-main .tscroll > .empty {
   flex: 1;
   display: grid;
   place-content: center;
@@ -5835,4 +5828,41 @@ kbd {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* The library table keeps ONE layout across every filter. Fixed columns mean the domain,
+   link and date columns never move because a domain happens to hold shorter titles; the
+   page column takes whatever is left, which is the layout the longest titles need. */
+.lib-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.lib-table th:nth-child(2) { width: 150px; }
+.lib-table th:nth-child(3) { width: 96px; }
+.lib-table th:nth-child(4) { width: 132px; }
+.lib-table th:nth-child(5) { width: 78px; }
+/* Bucket and flags keep their size; only the title itself gives way, on one line, so the
+   row height stays constant too. The full title is in the cell's tooltip. */
+.lib-table .lt-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.lib-table .lt-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.lib-table .lt-bucket,
+.lib-table .lt-flag {
+  flex: none;
+  margin: 0;
+}
+/* The action buttons appear on hover; the column is reserved either way, so nothing shifts
+   under the pointer. */
+.lib-table .lt-acts {
+  width: 78px;
 }

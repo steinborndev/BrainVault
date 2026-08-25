@@ -304,10 +304,14 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       </aside>
 
       <div className="lib-main">
+        {/* The scroll box is a DIV, not the table: a table set to `display: block` (the old
+            way of making it scroll) shrinks to its content, so the columns moved every time
+            a domain filter changed the longest title on screen. */}
+        <div className="tscroll">
         {shown.length === 0 ? (
           <div className="empty">Nothing matches the current filters.</div>
         ) : (
-          <table className="dtable">
+          <table className="dtable lib-table">
             <thead>
               <tr>
                 <th>Page</th>
@@ -320,8 +324,9 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             <tbody>
               {shown.map((n) => (
                 <tr key={n.path} onClick={() => navigate(pageRoute(n.path))}>
-                  <td className="lt-title">
-                    <span className="lt-bucket">{bucketLabel(n.type)}</span> <strong>{n.title}</strong>
+                  <td className="lt-title" title={n.title}>
+                    <span className="lt-bucket">{bucketLabel(n.type)}</span>
+                    <strong className="lt-name">{n.title}</strong>
                     {isOrphan(n) && <span className="lt-flag err">orphan</span>}
                     {isStub(n) && <span className="lt-flag warn">stub</span>}
                   </td>
@@ -364,6 +369,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </tbody>
           </table>
         )}
+        </div>
         <div className="dtable-foot">
           <span>
             Showing {shown.length} of {filtered.length} pages

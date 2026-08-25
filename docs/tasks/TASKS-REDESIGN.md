@@ -607,3 +607,12 @@ collected and simply never added up anywhere.
       table with columns instead of one packed line per row.
 - [x] Vault stats: only the domain list scrolls - the figures, growth and index cards stay on
       screen instead of scrolling away with it.
+- [x] The library table reformatted itself per domain filter: `.lib-main > table` carried
+      `display: block` so the table could scroll as a flex child, and a block-level table
+      shrinks to its content - so picking a domain with shorter page titles pulled the
+      domain, links and date columns left. A div scrolls around a real table now, with fixed
+      column widths; the page column takes the rest, which is the layout the longest titles
+      need, and the title itself ellipsizes on one line (full text in the cell tooltip).
+- [x] Decided: "clear history" stays scoped to the job rows. The run log is a separate
+      record - it is the cost history, and it should not disappear with a click meant to
+      tidy the inbox.
