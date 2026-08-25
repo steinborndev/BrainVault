@@ -48,7 +48,7 @@ import { useMaintenanceRun, type MaintenanceRunState } from '../hooks/useMainten
 import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
 import { buildRunPlan, type MaintStatusItem, type RunPlanStep, type RunStepId } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
-import { timeAgo } from '../lib/format.ts'
+import { timeAgo, usd } from '../lib/format.ts'
 import { runTitle } from '../lib/runLabels.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { pageRoute, navigate } from '../lib/router.ts'
@@ -136,9 +136,9 @@ export function Maintenance({ showRunHistory = true }: { showRunHistory?: boolea
       <div className="mcol">
         {/* Lint */}
         {showCard('card-lint') && (
-        <div className="card card-pad" id="card-lint">
-          <div className="section-head">
-            <h3 className="section-title">
+        <div className="subcard sc-pad" id="card-lint">
+          <div className="sc-head">
+            <h3 className="sc-title">
               Lint - wiki health
               <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit). 'Fix safe findings' fixes only the mechanical categories from the newest report (frontmatter gaps, stub pages, missing wikilinks, stale index entries) - deletions, merges and contradictions stay yours." />
             </h3>
@@ -199,9 +199,9 @@ export function Maintenance({ showRunHistory = true }: { showRunHistory?: boolea
 
         {/* Hot cache */}
         {showCard('card-hot-cache') && (
-        <div className="card card-pad" id="card-hot-cache">
-          <div className="section-head">
-            <h3 className="section-title">
+        <div className="subcard sc-pad" id="card-hot-cache">
+          <div className="sc-head">
+            <h3 className="sc-title">
               Hot cache
               <Tip
                 text={
@@ -249,9 +249,9 @@ export function Maintenance({ showRunHistory = true }: { showRunHistory?: boolea
 
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
         {showCard('card-domains') && (
-        <div className="card card-pad" id="card-domains">
-          <div className="section-head">
-            <h3 className="section-title">
+        <div className="subcard sc-pad" id="card-domains">
+          <div className="sc-head">
+            <h3 className="sc-title">
               Domains
               <Tip text="The meta-categories pages are filed under, maintained as a vault page. Every ingest gets this list as a closed set; when nothing fits, 'unassigned' is used. New domains are only ever created by you - never by an agent." />
             </h3>
@@ -354,9 +354,9 @@ function StatusHead({
   if (data === null) {
     // A failed input query must offer a way out - not spin as "Checking…" forever.
     return (
-      <div className="card card-pad maint-status">
-        <div className="section-head">
-          <h3 className="section-title">What&apos;s due</h3>
+      <div className="subcard sc-pad maint-status">
+        <div className="sc-head">
+          <h3 className="sc-title">What&apos;s due</h3>
         </div>
         {failed ? (
           <div className="tool-meta">
@@ -381,9 +381,9 @@ function StatusHead({
   const planSize = buildRunPlan(status).length
 
   return (
-    <div className="card card-pad maint-status">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad maint-status">
+      <div className="sc-head">
+        <h3 className="sc-title">
           What&apos;s due
           <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'All tools' shows every card." />
         </h3>
@@ -521,9 +521,9 @@ function RunHistory({ data }: { data: MaintenanceStatusData | null }): React.Rea
     (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt),
   )
   return (
-    <div className="card card-pad run-history">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad run-history">
+      <div className="sc-head">
+        <h3 className="sc-title">
           Last runs
           <Tip text="The most recent settle per run kind, restart-proof (SPEC 12.7 Stufe b). Vault facts (report date, cache age) stay the primary source; this covers the areas no vault file captures." />
         </h3>
@@ -628,9 +628,9 @@ function TagHygieneCard({
   const findingCount = report.variants.length + report.implications.length + report.domainEchoes.length
   const CAP = 8 // evidence, not an endless list - the counts carry the "how bad is it"
   return (
-    <div className="card card-pad" id="card-tags">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad" id="card-tags">
+      <div className="sc-head">
+        <h3 className="sc-title">
           Tags - hygiene
           <Tip text="Deterministic tag lint, computed from the live graph - the report itself writes nothing. Repairs with an unambiguous direction come preselected: uncheck what you disagree with, then 'Fix selected' runs an agent over exactly the checked actions - frontmatter tags only, one revertable git commit. Non-actionable findings (implied tags, single-use tags) are collapsed under Observations." />
         </h3>
@@ -835,9 +835,9 @@ function UnversionedCard(): React.ReactElement {
   const total = (u?.untracked ?? 0) + (u?.modified ?? 0)
 
   return (
-    <div className="card card-pad" id="card-unversioned">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad" id="card-unversioned">
+      <div className="sc-head">
+        <h3 className="sc-title">
           Pages outside git
           <Tip
             text={
@@ -899,9 +899,9 @@ function RetrievalIndexCard(): React.ReactElement {
   const missing = s !== undefined && !s.scriptsPresent
 
   return (
-    <div className="card card-pad" id="card-index">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad" id="card-index">
+      <div className="sc-head">
+        <h3 className="sc-title">
           Retrieval index
           <Tip
             text={
@@ -1020,8 +1020,8 @@ function DomainCandidates({
 
   return (
     <div className="domain-candidates">
-      <div className="section-head">
-        <h4 className="section-title">Candidates for new domains</h4>
+      <div className="sc-head">
+        <h4 className="sc-title">Candidates for new domains</h4>
         <div className="candidate-actions">
           <label
             className="toggle"
@@ -1193,7 +1193,7 @@ function CandidateCard({
   }
 
   return (
-    <div className="candidate card card-pad">
+    <div className="candidate subcard sc-pad">
       <div className="candidate-head">
         <strong>{candidate.key}</strong>
         <span className="candidate-meta">
@@ -1274,7 +1274,7 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
     <div>
       <div className="grid kpis" style={{ marginBottom: 14 }}>
         {Object.entries(report.summary).map(([k, v]) => (
-          <div key={k} className="stat card">
+          <div key={k} className="stat subcard">
             <div className="value">{v}</div>
             <div className="sub">{k}</div>
           </div>
@@ -1355,7 +1355,8 @@ function GuidedRun({
   const authMode = stats.data?.authMode ?? 'oauth'
   // Receipts: what a step cost, appended to its outcome note (the estimate footnote sits
   // under the summary once, so the per-step suffix stays a bare number).
-  const costSuffix = (usd: number): string => (usd > 0 ? ` · $${usd.toFixed(2)}${isEstimate(authMode) ? '*' : ''}` : '')
+  const costSuffix = (cost: number): string =>
+    cost > 0 ? ` · ${usd(cost)}${isEstimate(authMode) ? '*' : ''}` : ''
   const [idx, setIdx] = useState(0)
   const [outcomes, setOutcomes] = useState<Record<string, StepOutcome>>({})
   /** Domains created in the decision step - what makes the follow-up backfill run vs. skip. */
@@ -1452,9 +1453,9 @@ function GuidedRun({
 
   return (
     <div className="guided-run">
-      <div className="card card-pad maint-status">
-        <div className="section-head">
-          <h3 className="section-title">
+      <div className="subcard sc-pad maint-status">
+        <div className="sc-head">
+          <h3 className="sc-title">
             Maintenance run
             <Tip text="Works through the open items in dependency order. Automatic steps run on their own - the run stops only where your judgement is needed. Every step is one revertable git commit." />
           </h3>
@@ -1480,9 +1481,9 @@ function GuidedRun({
       </div>
 
       {finished || step === undefined ? (
-        <div className="card card-pad">
+        <div className="subcard sc-pad">
           <div className="toast ok">Maintenance run finished.</div>
-          <h3 className="section-title" style={{ marginBottom: 4 }}>
+          <h3 className="sc-title" style={{ marginBottom: 4 }}>
             What happened
           </h3>
           <p className="tab-hint">
@@ -1511,9 +1512,9 @@ function GuidedRun({
           </div>
         </div>
       ) : step.kind === 'decision' ? (
-        <div className="card card-pad wiz-panel">
-          <div className="section-head">
-            <h3 className="section-title">{step.title}</h3>
+        <div className="subcard sc-pad wiz-panel">
+          <div className="sc-head">
+            <h3 className="sc-title">{step.title}</h3>
             <span className="sev rec">you decide</span>
           </div>
           <p className="tab-hint">{step.why}</p>
@@ -1560,9 +1561,9 @@ function GuidedRun({
           </div>
         </div>
       ) : (
-        <div className="card card-pad wiz-panel">
-          <div className="section-head">
-            <h3 className="section-title">{step.title}</h3>
+        <div className="subcard sc-pad wiz-panel">
+          <div className="sc-head">
+            <h3 className="sc-title">{step.title}</h3>
             <span className="sev mut">automatic</span>
           </div>
           <p className="tab-hint">{step.why}</p>

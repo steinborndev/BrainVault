@@ -107,7 +107,7 @@ export function JobDrawer({
                 )}
                 {job.attempts > 1 && <span className="chip">{job.attempts} attempts</span>}
               </div>
-              <dl className="kv">
+              <dl className="deflist">
                 <dt>Source</dt>
                 <dd>
                   {job.source} · {exact(job.created_at)}

@@ -23,7 +23,9 @@ import type { Job, JobStatus } from '../api/types.ts'
 import { Dropzone } from '../components/Dropzone.tsx'
 import { JobDrawer } from '../components/JobDrawer.tsx'
 import { Icon } from '../components/Icon.tsx'
+import { queryState, merge } from '../components/QueryState.tsx'
 import { Cost } from '../components/Cost.tsx'
+import { Fact, Facts } from '../components/Fact.tsx'
 import {
   BatchHead,
   CommitRow,
@@ -215,6 +217,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
     clear.mutate()
   }
 
+  // The stream needs both queries: the jobs are the rows, the stats are the all-time counts
+  // the rows are read against. Either failing means the table cannot be trusted.
+  const streamState = queryState(merge(jobsQ, stats), 'the activity stream')
+  // Stats missing is not "still loading" once the query has failed - the tiles say so
+  // instead of sitting on their placeholder forever.
+  const statPlaceholder = stats.isError ? '-' : '…'
+
   const kindHint = KINDS.find((k) => k.id === filter.kind)!.hint
   const historyCount = jobs.filter((j) => AT_REST.includes(j.status)).length
   const allTime = AT_REST.reduce((sum, st) => sum + (totals[st] ?? 0), 0)
@@ -222,7 +231,20 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   return (
     <div className="workspace">
       <aside className="gpanel" aria-label="Home controls">
+        {/* The reset lives in the head of the panel's FIRST section on every screen that has
+            one - here and on Library that is the search, on Graph it is the view lens. It
+            used to sit in whichever section happened to come third, so it moved between
+            screens. */}
         <div className="gp-sec gp-find">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Find</span>
+            <span className="spacer" />
+            {filtered && (
+              <button className="btn ghost" onClick={reset} title="Back to everything, last 30 days">
+                Reset
+              </button>
+            )}
+          </div>
           <div className="gp-search">
             <Icon name="search" />
             <input
@@ -245,12 +267,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
         <div className="gp-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">Show</span>
-            <span className="spacer" />
-            {filtered && (
-              <button className="btn ghost" onClick={reset} title="Back to everything, last 30 days">
-                Reset
-              </button>
-            )}
           </div>
           <div className="pillrow" role="radiogroup" aria-label="Event kind">
             {KINDS.map((k) => (
@@ -361,64 +377,61 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
       </aside>
 
       <div className="box">
-        <div className="glance">
-          <button className="glance-tile" onClick={() => navigate('/library')}>
-            <span className="k">Pages</span>
-            <span className="v">{stats.data?.pages.total ?? '…'}</span>
-            <span className="s">Browse the library</span>
-          </button>
-          <button
-            className="glance-tile"
-            onClick={() => setFilter({ ...DEFAULT_FILTER, state: 'running', days: null })}
-          >
-            <span className="k">In flight</span>
-            <span className="v">{events.filter((e) => e.live).length}</span>
-            <span className="s">
-              {events.filter((e) => e.live && e.state === 'running').length} running,{' '}
-              {events.filter((e) => e.state === 'queued').length} queued
-            </span>
-          </button>
-          <button
-            className="glance-tile"
-            onClick={() => setFilter({ ...DEFAULT_FILTER, state: 'failed', days: null })}
-          >
-            <span className="k">Failures · 7d</span>
-            <span className={`v${(stats.data?.kpis7d.failures ?? 0) > 0 ? ' err' : ''}`}>
-              {stats.data?.kpis7d.failures ?? '…'}
-            </span>
-            <span className="s">
-              {(stats.data?.kpis7d.failures ?? 0) > 0 ? 'retry from the row' : 'nothing failed this week'}
-            </span>
-          </button>
-          <button className="glance-tile" onClick={() => navigate('/system?section=usage')}>
-            <span className="k">Spend today</span>
-            <span className="v">
-              {stats.data !== undefined ? (
+        <Facts size="lead">
+          <Fact
+            k="Pages"
+            v={stats.data?.pages.total ?? statPlaceholder}
+            sub="Browse the library"
+            size="lead"
+            onOpen={() => navigate('/library')}
+          />
+          <Fact
+            k="In flight"
+            v={events.filter((e) => e.live).length}
+            sub={`${events.filter((e) => e.live && e.state === 'running').length} running, ${events.filter((e) => e.state === 'queued').length} queued`}
+            size="lead"
+            onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'running', days: null })}
+          />
+          <Fact
+            k="Failures · 7d"
+            v={stats.data?.kpis7d.failures ?? statPlaceholder}
+            tone={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'err' : undefined}
+            sub={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'retry from the row' : 'nothing failed this week'}
+            size="lead"
+            onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'failed', days: null })}
+          />
+          <Fact
+            k="Spend today"
+            v={
+              stats.data !== undefined ? (
                 <Cost value={stats.data.usage.today.costUsd} authMode={authMode} />
               ) : (
-                '…'
-              )}
-            </span>
-            <span className="s">
-              {stats.data?.budget.limit != null
+                statPlaceholder
+              )
+            }
+            sub={
+              stats.data?.budget.limit != null
                 ? `${Math.min(100, Math.round((stats.data.budget.spent / stats.data.budget.limit) * 100))}% of the daily budget`
-                : 'no daily budget set'}
-            </span>
-          </button>
-          <button className="glance-tile" onClick={() => navigate('/system')}>
-            <span className="k">Checks due</span>
-            <span className={`v${(maint.data?.status.due ?? 0) > 0 ? ' warn' : ''}`}>
-              {maint.data?.status.due ?? '…'}
-            </span>
-            <span className="s">
-              {maint.data === null
+                : 'no daily budget set'
+            }
+            size="lead"
+            onOpen={() => navigate('/system?section=usage')}
+          />
+          <Fact
+            k="Checks due"
+            v={maint.data?.status.due ?? statPlaceholder}
+            tone={(maint.data?.status.due ?? 0) > 0 ? 'warn' : undefined}
+            sub={
+              maint.data === null
                 ? 'checking…'
                 : (maint.data?.status.recommended ?? 0) > 0
                   ? `${maint.data?.status.recommended} recommended soon`
-                  : 'nothing else pending'}
-            </span>
-          </button>
-        </div>
+                  : 'nothing else pending'
+            }
+            size="lead"
+            onOpen={() => navigate('/system')}
+          />
+        </Facts>
 
         <div className="box-head">
           <h2 className="box-title">Activity</h2>
@@ -495,15 +508,18 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                 ),
               )}
               {shown.length === 0 && (
-                <tr>
+                <tr className="staterow">
                   <td colSpan={6}>
-                    <div className="empty">
-                      {jobsQ.isLoading
-                        ? 'Loading the stream…'
-                        : filtered
+                    {/* A failed query must not render as an empty vault. `streamState` is
+                        null once the data is there, and only then does "nothing here" mean
+                        what it says. */}
+                    {streamState ?? (
+                      <div className="empty">
+                        {filtered
                           ? 'Nothing matches these filters.'
                           : 'Nothing yet - drop a file on the left and it starts here.'}
-                    </div>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )}

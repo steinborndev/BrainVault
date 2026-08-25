@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { queryState } from './QueryState.tsx'
 import { CredentialSetup } from './CredentialSetup.tsx'
 import { TelegramSetup } from './TelegramSetup.tsx'
 import type { EffectiveSettings, SettingsPatch, SettingsResponse } from '../api/types.ts'
@@ -56,8 +57,9 @@ export function SettingsEditor({ section = 'all' }: { section?: SettingsSection 
     },
   })
 
-  if (q.isError) return <div className="toast err">{(q.error as Error).message}</div>
-  if (!q.data || !draft) return <div className="tab-hint">Loading settings…</div>
+  const state = queryState(q, 'the settings')
+  if (state !== null) return state
+  if (!q.data || !draft) return <div className="empty">Loading the settings…</div>
 
   const data = q.data
   // The budget's unit follows the Anthropic auth mode: ingests/day on a subscription (where

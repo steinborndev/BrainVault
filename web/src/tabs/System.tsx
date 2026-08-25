@@ -26,7 +26,9 @@ import { Maintenance } from './Maintenance.tsx'
 import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { GrowthChart } from '../components/GrowthChart.tsx'
 import { Cost, CostFootnote, isEstimate } from '../components/Cost.tsx'
+import { Fact, Facts } from '../components/Fact.tsx'
 import { Icon } from '../components/Icon.tsx'
+import { queryState, merge } from '../components/QueryState.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
 import { STUB_BYTES } from '../lib/domains.ts'
@@ -234,7 +236,13 @@ function UsageSection(): React.ReactElement {
   const byChannel = useMemo(() => spendByChannel(last7d), [last7d])
   const biggest = useMemo(() => topSpend(last7d, 6), [last7d])
 
-  if (stats.data === undefined) return <div className="empty">Loading usage…</div>
+  // Every figure here is derived from all three queries, so the section reports one state
+  // for all three. It used to gate on `stats.data === undefined` alone, which rendered a
+  // failed request as "Loading usage…" for as long as the screen stayed open.
+  const state = queryState(merge(stats, jobs, runs), 'the usage figures')
+  if (stats.data === undefined) {
+    return <div className="sys-pane">{state ?? <div className="empty">No usage recorded yet.</div>}</div>
+  }
 
   const s = stats.data
   const authMode: AuthMode = s.authMode
@@ -246,13 +254,13 @@ function UsageSection(): React.ReactElement {
 
   return (
     <div className="sys-pane">
-      <div className="facts">
+      <Facts>
         <Fact k="Spend today" v={<Cost value={s.usage.today.costUsd} authMode={authMode} />} />
         <Fact k="Spend 7 days" v={<Cost value={s.usage.last7d.costUsd} authMode={authMode} />} />
         <Fact k="Tokens in · 7d" v={tokens(s.usage.last7d.tokensIn)} />
         <Fact k="Tokens out · 7d" v={tokens(s.usage.last7d.tokensOut)} />
         <Fact k="Agent runs · 7d" v={String(s.usage.last7d.ingests)} />
-      </div>
+      </Facts>
 
       <div className="sys-grid">
         <section className="subcard">
@@ -363,7 +371,7 @@ function UsageSection(): React.ReactElement {
                   <th>Channel</th>
                   <th className="num">Tokens</th>
                   <th className="num">Cost</th>
-                  <th className="num">When</th>
+                  <th>When</th>
                 </tr>
               </thead>
               <tbody>
@@ -377,7 +385,7 @@ function UsageSection(): React.ReactElement {
                     <td className="num">
                       <Cost value={i.costUsd} authMode={authMode} />
                     </td>
-                    <td className="num faintc">{timeAgo(i.whenIso)}</td>
+                    <td className="faintc">{timeAgo(i.whenIso)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -403,7 +411,10 @@ function VaultStatsSection(): React.ReactElement {
   const index = useQuery({ queryKey: ['retrieve-index-status'], queryFn: api.retrieveIndexStatus })
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
 
-  if (stats.data === undefined) return <div className="empty">Loading vault statistics…</div>
+  const state = queryState(merge(stats, graph), 'the vault statistics')
+  if (stats.data === undefined) {
+    return <div className="sys-pane">{state ?? <div className="empty">No vault statistics yet.</div>}</div>
+  }
   const s = stats.data
   const nodes = graph.data?.nodes ?? []
   const knowledge = nodes.filter((n) => (n.kind ?? 'knowledge') === 'knowledge')
@@ -422,7 +433,7 @@ function VaultStatsSection(): React.ReactElement {
     // `fill`: the figures above stay on screen and the domain list takes the leftover
     // height and scrolls inside itself, instead of the whole pane scrolling as one.
     <div className="sys-pane fill">
-      <div className="facts">
+      <Facts>
         <Fact k="Pages" v={String(s.pages.total)} sub={`${grew >= 0 ? '+' : ''}${grew} in 7 d`} />
         <Fact k="Links" v={graph.data !== undefined ? String(graph.data.edges.length) : '…'} />
         <Fact
@@ -443,7 +454,7 @@ function VaultStatsSection(): React.ReactElement {
           v={graph.data !== undefined ? String(undomained) : '…'}
           tone={undomained > 0 ? 'warn' : undefined}
         />
-      </div>
+      </Facts>
 
       <div className="sys-grid">
         <section className="subcard">
@@ -599,34 +610,6 @@ function DayBars({ values }: { values: number[] }): React.ReactElement {
         <span>{label(values.length - 1)}</span>
       </div>
     </div>
-  )
-}
-
-function Fact({
-  k,
-  v,
-  sub,
-  tone,
-  onOpen,
-}: {
-  k: string
-  v: React.ReactNode
-  sub?: string | undefined
-  tone?: 'warn' | 'err' | undefined
-  onOpen?: (() => void) | undefined
-}): React.ReactElement {
-  const body = (
-    <>
-      <span className="k">{k}</span>
-      <span className={`v${tone !== undefined ? ` ${tone}` : ''}`}>{v}</span>
-      {sub !== undefined && <span className="s">{sub}</span>}
-    </>
-  )
-  if (onOpen === undefined) return <div className="fact">{body}</div>
-  return (
-    <button className="fact linky" onClick={onOpen}>
-      {body}
-    </button>
   )
 }
 

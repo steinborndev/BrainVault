@@ -29,8 +29,11 @@ import { CitationChip } from '../components/CitationChip.tsx'
 import { JobLog } from '../components/JobLog.tsx'
 import { AskSteps, ResearchSteps } from '../components/AgentSteps.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
+import { Fact, Facts } from '../components/Fact.tsx'
 import { Icon } from '../components/Icon.tsx'
+import { queryState, merge } from '../components/QueryState.tsx'
 import { navigate } from '../lib/router.ts'
+import { openableRow } from '../lib/tableRow.ts'
 import { chatStream } from '../lib/chatStream.ts'
 import { duration, timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
@@ -285,7 +288,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           <div className="gp-head">
             <span className="gp-eyebrow">Runs</span>
             <span className="spacer" />
-            <span className="gp-state">{entries.length}</span>
+            <span className="gp-count">{entries.length}</span>
           </div>
           <div className="domlist">
             {entries.map((e) => {
@@ -479,6 +482,9 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               entries={entries}
               profiles={profiles}
               gaps={gaps.slice(0, BACKLOG_SIZE)}
+              authMode={authMode}
+              runState={queryState(merge(historyQ, runsQ, stateQ), 'the run history')}
+              gapState={queryState(graphQ, 'the knowledge gaps')}
               onOpen={openEntry}
               onResearch={startAbout}
             />
@@ -575,12 +581,20 @@ function StartView({
   entries,
   profiles,
   gaps,
+  authMode,
+  runState,
+  gapState,
   onOpen,
   onResearch,
 }: {
   entries: ResearchRunEntry[]
   profiles: ResearchProfile[]
   gaps: Array<{ title: string; refBy: number[] }>
+  authMode: AuthMode
+  /** Loading/failed for the three queries the run list is built from; null once ready. */
+  runState: React.ReactElement | null
+  /** Same for the graph query behind the backlog. */
+  gapState: React.ReactElement | null
   onOpen: (e: ResearchRunEntry) => void
   onResearch: (topic: string) => void
 }): React.ReactElement {
@@ -598,7 +612,7 @@ function StartView({
         <span className="box-sub">{entries.length}</span>
       </div>
       <div className="sv-scroll">
-      {entries.length === 0 ? (
+      {runState ?? (entries.length === 0 ? (
         <div className="empty">
           No research run yet. Name a topic above, pick a lens on the left, and the run files one synthesis
           page.
@@ -616,7 +630,7 @@ function StartView({
           </thead>
           <tbody>
             {entries.map((e) => (
-              <tr key={e.id} onClick={() => onOpen(e)} tabIndex={0} aria-label={`Open the run about ${e.topic}`}>
+              <tr key={e.id} {...openableRow(() => onOpen(e), `Open the run about ${e.topic}`)}>
                 <td>
                   <span className="hrow-name">
                     <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
@@ -633,13 +647,15 @@ function StartView({
                 </td>
                 <td className="dimc">{lensLabel(e.profileKey)}</td>
                 <td className="num dimc">{e.pages.length > 0 ? `+${e.pages.length}` : '-'}</td>
-                <td className="num dimc">{e.costUsd !== null ? `$${e.costUsd.toFixed(2)}` : '-'}</td>
+                <td className="num dimc">
+                  {e.costUsd !== null ? <Cost value={e.costUsd} authMode={authMode} /> : '-'}
+                </td>
                 <td className="faintc">{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
+      ))}
 
       </div>
       </div>
@@ -652,7 +668,7 @@ function StartView({
         <span className="box-sub">{gaps.length}</span>
       </div>
       <div className="sv-scroll">
-      {gaps.length === 0 ? (
+      {gapState ?? (gaps.length === 0 ? (
         <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
       ) : (
         <div className="backlog">
@@ -668,7 +684,7 @@ function StartView({
             </div>
           ))}
         </div>
-      )}
+      ))}
       </div>
       </div>
     </>
@@ -709,30 +725,16 @@ function RunDetail({
         </button>
       </div>
 
-      <div className="facts">
-        <div className="fact">
-          <span className="k">Filed as</span>
-          <span className="v mono-meta">{targetTitle(entry.topic, profile)}</span>
-        </div>
-        <div className="fact">
-          <span className="k">When</span>
-          <span className="v">{timeAgo(entry.finishedAt)}</span>
-        </div>
-        <div className="fact">
-          <span className="k">Took</span>
-          <span className="v">{duration(entry.startedAt, entry.finishedAt)}</span>
-        </div>
-        <div className="fact">
-          <span className="k">Cost</span>
-          <span className="v">
-            {entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
-          </span>
-        </div>
-        <div className="fact">
-          <span className="k">Pages</span>
-          <span className="v">{entry.pages.length}</span>
-        </div>
-      </div>
+      <Facts>
+        <Fact k="Filed as" v={<span className="mono-meta">{targetTitle(entry.topic, profile)}</span>} />
+        <Fact k="When" v={timeAgo(entry.finishedAt)} />
+        <Fact k="Took" v={duration(entry.startedAt, entry.finishedAt)} />
+        <Fact
+          k="Cost"
+          v={entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
+        />
+        <Fact k="Pages" v={entry.pages.length} />
+      </Facts>
 
       {entry.error !== null && <div className="toast err">{entry.error}</div>}
 

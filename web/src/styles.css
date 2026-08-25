@@ -34,6 +34,12 @@
   /* Width of the graph's standing view panel. One token so the panel, its collapsed
      variants and the workspace grid can never disagree about it. */
   --gpanel-w: 252px;
+  /* The status dot. It was written out thirteen times in four sizes, which showed up wherever
+     two lists sat in one panel: Home's state list rendered 8px dots and its channel list
+     directly below rendered 9px ones, in identical rows. `--dot-sm` is for dots inside dense
+     running text (a channel line, a step marker), not a second opinion about status. */
+  --dot: 8px;
+  --dot-sm: 6px;
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -268,8 +274,8 @@ button {
   white-space: nowrap;
 }
 .tstat .d {
-  width: 7px;
-  height: 7px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   background: var(--muted);
 }
@@ -448,8 +454,8 @@ button {
   color: var(--text);
 }
 .status-pill .dot {
-  width: 8px;
-  height: 8px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   background: var(--muted);
 }
@@ -605,42 +611,17 @@ button {
   flex-wrap: wrap;
   min-width: 0;
 }
-/* Only reserve the bar's row when a bar is actually rendered - an always-on `auto` row
-   would leave a gap's worth of dead space on the screens that have no bar right now. */
-.library,
-.inbox,
-.graph-workspace {
-  grid-template-rows: minmax(0, 1fr);
-}
-.library:has(> .ws-bar),
-.inbox:has(> .ws-bar),
-.graph-workspace:has(> .ws-bar) {
-  grid-template-rows: auto minmax(0, 1fr);
-}
-/* With a bar present the two columns belong to row 2; without one the single row is row 1
-   and these are ignored, because a grid-row beyond the template just creates it. */
-.library:has(> .ws-bar) > .gpanel,
-.library:has(> .ws-bar) > .lib-main,
-.inbox:has(> .ws-bar) > .gpanel,
-.inbox:has(> .ws-bar) > .inbox-main,
-.graph-workspace:has(> .ws-bar) > .gpanel,
-.graph-workspace:has(> .ws-bar) > .graph-main {
-  grid-row: 2;
-}
 
-/* ---- Cards & layout ---- */
-.card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-.card-pad {
-  padding: 16px 18px;
-}
-.section {
-  margin-bottom: 20px;
-}
+
+/* ---- Cards & layout ----
+   The `.card` / `.card-pad` / `.section-head` family is gone: it was only ever used by the
+   maintenance tools, and those are hosted INSIDE the System screen, right next to sections
+   built from `.subcard`. Two card languages a click apart - different padding, different
+   radius, one with a shadow - was the most visible seam left after the shell redesign. The
+   tools now use `.subcard.sc-pad` (see the subcard block further down).
+
+   `.section-title` survives for the two headings that are not card heads at all (the run
+   detail's "Pages", the job drawer's log sections). */
 .section-title {
   font-size: 13px;
   font-weight: 600;
@@ -648,21 +629,6 @@ button {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 0 0 10px;
-}
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.section-head .section-title {
-  margin-bottom: 10px;
-}
-.section-head .right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
 }
 
 .grid {
@@ -697,9 +663,6 @@ button {
   height: 26px;
 }
 .kpis .stat .sub,
-.kpis .statlink .goto {
-  font-size: 11.5px;
-}
 .grid.two {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
@@ -713,16 +676,6 @@ button {
   .ov-grid .col-7,
   .ov-grid .col-6,
   .ov-grid .col-5 { grid-column: span 12; }
-}
-.spill.warn {
-  border-color: var(--warn);
-  background: var(--warn-bg);
-}
-.spill .d {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }
 .spill .d.ok { background: var(--ok); }
 .spill .d.warn { background: var(--warn); }
@@ -765,6 +718,28 @@ button {
   border-radius: 0 4px 4px 0;
 }
 
+/* A single-value progress bar: `<div class="meter"><i style="width:NN%"></i></div>`, with
+   `.over` on the fill when the value has passed its limit. It was only ever styled as
+   `.gx-gaprow .meter`, so the daily-budget bar in System - the one place a reader actually
+   needs a proportion - rendered as nothing at all: no track, and an inline `<i>` with a
+   percentage width but no height. Free-standing here; the gap list keeps its own small
+   variant below. */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+.meter i.over {
+  background: var(--warn);
+}
+
 /* ---- Stat tiles ----
    Three rows, two columns: the label spans, the number and its sparkline share a row,
    and the caption row is SHARED by `.sub` and the hover affordance `.goto` - stacked,
@@ -774,6 +749,7 @@ button {
    a chart. */
 .stat {
   padding: 11px 14px 10px;
+  border-radius: var(--radius-sm);
   position: relative;
   overflow: hidden;
   display: grid;
@@ -783,24 +759,11 @@ button {
 }
 .stat .label,
 .stat .sub,
-.statlink .goto {
-  grid-column: 1 / -1;
-}
 .stat .value {
   grid-column: 1;
 }
 /* Same cell: the caption gives way to "where this goes" while the pointer is on it. */
 .stat .sub,
-.statlink .goto {
-  grid-row: 3;
-}
-.stat .delta {
-  font-size: 11.5px;
-  font-weight: 600;
-  margin-left: 7px;
-  vertical-align: 2px;
-  letter-spacing: 0;
-}
 .stat .delta.good { color: var(--ok); }
 .stat .delta.bad { color: var(--err); }
 .stat .spark {
@@ -849,7 +812,22 @@ button {
 }
 
 /* ---- Badges ---- */
-.badge {
+/* ── Status pills ───────────────────────────────────────────────────────────────────
+   One shape for every label that names a state. There were four families doing this, each
+   with its own geometry: `.badge` (12px/600 with a leading dot), `.sev` (11px/650 upper
+   case), `.hrow-state` (10.5px/600) and `.lt-flag` (10.5px/600). They differed in ways
+   nobody chose - the same "due" was `badge.deferred` on one screen and `sev.due` on the
+   next.
+
+   The geometry is declared once here and the three narrower families are densities of it,
+   not separate things. The NAMES stay, because they carry meaning the visual tone does not:
+   `sev.due` says a check is overdue, `hrow-state.failed` says a job failed. What was merged
+   is what nobody was choosing on purpose - size, radius, alignment and, below, the colour
+   pairs. */
+.badge,
+.sev,
+.hrow-state,
+.lt-flag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -859,22 +837,73 @@ button {
   border-radius: 999px;
   white-space: nowrap;
 }
+/* Only `.badge` carries the leading dot: it labels one thing on its own, where a bare word
+   would read as running text. The dense variants sit next to a real status dot already. */
 .badge::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: var(--dot-sm);
+  height: var(--dot-sm);
   border-radius: 50%;
   background: currentColor;
 }
-.badge.queued { color: var(--muted); background: var(--muted-bg); }
-.badge.preprocessing,
-.badge.ingesting { color: var(--busy); background: var(--busy-bg); }
-.badge.done { color: var(--ok); background: var(--ok-bg); }
-.badge.failed { color: var(--err); background: var(--err-bg); }
-.badge.deferred { color: var(--warn); background: var(--warn-bg); }
-.badge.duplicate,
-.badge.cancelled { color: var(--muted); background: var(--muted-bg); }
+/* Severity of a maintenance check: upper case, because it is a verdict rather than a name. */
+.sev {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* Inside a table row, beside the row's own name: the smallest density. */
+.hrow-state,
+.lt-flag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+/* A library flag follows the page title rather than labelling it, so it needs the gap. */
+.lt-flag {
+  margin-left: 7px;
+}
 
+/* The colour pairs, once. Every pill tone is one of five, and the semantic names of all four
+   families map onto them here rather than each family repeating the same pairs. */
+.badge.done,
+.badge.ok,
+.sev.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.badge.failed,
+.hrow-state.failed,
+.lt-flag.err {
+  color: var(--err);
+  background: var(--err-bg);
+}
+.badge.deferred,
+.hrow-state.deferred,
+.lt-flag.warn,
+.sev.due {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.badge.preprocessing,
+.badge.ingesting,
+.sev.rec {
+  color: var(--busy);
+  background: var(--busy-bg);
+}
+.badge.queued,
+.badge.duplicate,
+.badge.cancelled,
+.hrow-state.duplicate,
+.hrow-state.cancelled,
+.hrow-state.reverted,
+.sev.mut {
+  color: var(--muted);
+  background: var(--muted-bg);
+}
+
+/* The page/job TYPE, not a status: neutral ink on the raised ground, no dot. Shared with
+   the library table's bucket label, which was a separate rule for the same chip. */
 .badge.type {
   color: var(--text-dim);
   background: var(--bg-elev-2);
@@ -887,11 +916,23 @@ button {
 }
 
 /* ---- Buttons ---- */
+/* Every button is one row height. The token existed but was only applied inside the graph's
+   control bar, so everywhere else a `.btn` (~31px) and a `.btn.ghost` (~27px) standing in
+   the same row - a box head, a panel head, the article head - were visibly different boxes
+   with different baselines. Height plus centred content, once, for all of them. */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  /* A fixed height only works if the label cannot wrap into a second line - the armed
+     confirm ("Really delete 42 entries? (4)") is the long one that would. */
+  white-space: nowrap;
   border: 1px solid var(--border-strong);
   background: var(--bg-elev-2);
   color: var(--text);
-  padding: 6px 12px;
+  padding: 0 12px;
   border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 13px;
@@ -913,7 +954,7 @@ button {
   background: transparent;
   border-color: transparent;
   color: var(--text-dim);
-  padding: 4px 8px;
+  padding: 0 8px;
 }
 .btn.ghost:hover {
   background: var(--bg-elev-2);
@@ -923,13 +964,18 @@ button {
   border-color: var(--err);
   color: var(--err);
 }
+/* The secondary size: a button that rides along inside a row of text (a table foot, a
+   backlog row, a detail head) rather than being the row's own control. It was used in six
+   places and defined in none, so every "small" button rendered full size. After `.ghost`
+   deliberately, so `btn ghost sm` reads as small rather than as ghost's own padding. */
+.btn.sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-.intake-collapsed.over {
-  border-color: var(--gold);
-  background: var(--gold-bg);
 }
 .intake {
   position: relative;
@@ -998,21 +1044,8 @@ button {
   font-size: 17px;
   opacity: 1;
 }
-/* Two visible lines is plenty for a URL or a one-line note; it grows on focus for longer
-   ones. The old fixed height set the whole intake band's height for the rare case. */
-.intake-note {
-  min-height: 38px;
-  height: 38px;
-  transition: height 0.12s;
-}
-.intake-note:focus,
-.intake-note:not(:placeholder-shown) {
-  height: 62px;
-}
+
 /* Home bounds its own rows - a section margin inside it would fight the grid gap. */
-.home > .section {
-  margin-bottom: 0;
-}
 .toast {
   margin-top: 12px;
   padding: 10px 14px;
@@ -1046,56 +1079,8 @@ button {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.step {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.step .sdot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  display: grid;
-  place-items: center;
-  background: var(--bg-elev);
-  flex-shrink: 0;
-}
-.step .sdot svg {
-  width: 11px;
-  height: 11px;
-}
-.step.done {
-  color: var(--text-dim);
-}
-.step.done .sdot {
-  border-color: var(--ok);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.step.now {
-  color: var(--busy);
-  font-weight: 600;
-}
-.step.now .sdot {
-  border-color: var(--busy);
-  background: var(--busy-bg);
-}
-.step.now .sdot i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--busy);
-  animation: badge-pulse 1.4s ease infinite;
-}
 @media (prefers-reduced-motion: reduce) {
   .step.now .sdot i { animation: none; }
-}
-.stepline.done {
-  background: var(--ok);
 }
 .elapsed {
   margin-left: auto;
@@ -1191,9 +1176,14 @@ button {
   text-decoration: none;
   color: var(--accent);
 }
-.pagelink .bucket {
+/* The page-type kicker beside a page's name (concept / entity / source / …). Free-standing:
+   besides the page link and the graph search it also labels the article head, which rendered
+   it unstyled while the rule was scoped to those two ancestors. */
+.bucket {
   color: var(--text-faint);
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .pagelink .copy {
@@ -1325,8 +1315,8 @@ button {
 /* Domain legend dot inside a filter chip - wears the same color as the domain's nodes. */
 .chip-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   margin-right: 5px;
 }
@@ -1614,14 +1604,15 @@ details.hot-cache[open] summary {
   gap: 8px;
   padding: 8px;
 }
-.chip.research-on {
-  background: color-mix(in srgb, var(--research) 16%, transparent);
-  border-color: var(--research);
-  color: var(--research);
-}
-.btn.primary.research {
+/* Research violet on a button: the action has side effects (web access + vault writes), so
+   it never wears the neutral accent. Applies with or without `.primary` - the backlog's
+   "Research" button carries `btn sm research` and was rendering as a plain grey button,
+   because the only violet rule was scoped to `.primary` and its sibling `.research-btn`
+   had no call site left at all. */
+.btn.research {
   background: var(--research);
   border-color: var(--research);
+  color: var(--accent-ink);
 }
 .lens {
   flex-shrink: 0;
@@ -1659,17 +1650,14 @@ details.hot-cache[open] summary {
   background: color-mix(in srgb, var(--research) 22%, transparent);
   color: var(--research);
 }
-.rp-v .target {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg-elev-2);
-  padding: 1px 6px;
-  border-radius: 5px;
-  word-break: break-word;
-}
-/* The lens tag echoed in a running/finished research block's header. */
-.research-head .lens-tag {
+/* The lens tag: the research profile a run was filed under. It appears wherever a run is
+   named - the activity table, the run detail head, the panel's run list - so it is styled
+   free-standing. It used to hang off `.research-head`, an element the second redesign pass
+   removed, which left it rendering as bare text at every remaining call site. */
+.lens-tag {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1695,14 +1683,6 @@ details.hot-cache[open] summary {
 
 /* Empty thread: the hint + composer center in the viewport instead of a vast gap with the
    input pinned to the bottom; auto margins on both sides of the group do the centering. */
-.chat.empty-thread .chat-thread {
-  flex: 0 1 auto;
-  overflow: visible;
-  margin-top: auto;
-}
-.chat.empty-thread .composer {
-  margin-bottom: auto;
-}
 
 /* ---- Maintenance ---- */
 /* Two columns on desktop: agent-run tools left, settings right. */
@@ -1814,7 +1794,7 @@ details.hot-cache[open] summary {
 .wiz-summary-row:last-child {
   border-bottom: none;
 }
-.guided-run > .card + .card {
+.guided-run > .subcard + .subcard {
   margin-top: 16px;
 }
 .mcol {
@@ -1841,21 +1821,6 @@ details.hot-cache[open] summary {
   margin-bottom: 16px;
 }
 /* Tab-wide severity chips: due (amber) / soon (accent) / healthy (green). */
-.sev {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 2px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.sev.due { color: var(--warn); background: var(--warn-bg); }
-.sev.rec { color: var(--accent); background: var(--accent-soft); }
-.sev.ok { color: var(--ok); background: var(--ok-bg); }
-.sev.mut { color: var(--muted); background: var(--muted-bg); }
 .ms-counts {
   display: inline-flex;
   gap: 8px;
@@ -2124,17 +2089,19 @@ details.hot-cache[open] summary {
   padding: 28px 12px;
   font-size: 14px;
 }
-.stub {
-  text-align: center;
-  padding: 48px 20px;
+/* The failure variant (components/QueryState.tsx): what failed, then why, then the way
+   back. The detail line is the raw message, so it stays quieter than the sentence above it
+   and never dictates the width of the block it sits in. */
+.empty > .qs-line {
+  margin: 0 0 4px;
   color: var(--text-dim);
 }
-.stub .icon {
-  font-size: 40px;
-  opacity: 0.6;
-}
-.stub h2 {
-  margin: 12px 0 6px;
+.empty > .qs-detail {
+  margin: 0 auto 12px;
+  max-width: 46ch;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
 }
 @keyframes shimmer {
   0% { background-position: 100% 0; }
@@ -2220,12 +2187,6 @@ details.hot-cache[open] summary {
   gap: 8px;
   margin-top: 16px;
 }
-.btn.ghost {
-  background: transparent;
-  color: var(--text-dim);
-}
-.btn.ghost:hover { color: var(--text); }
-
 .toast.warn { background: var(--warn-bg); color: var(--warn); }
 
 .settings-ro-title {
@@ -2380,20 +2341,6 @@ details.hot-cache[open] summary {
    that grows with the vault - takes the leftover height and scrolls on its own, while
    everything above it stays in view. The old horizontal band had to either wrap (and
    reflow the render controls) or hide its overflow behind a panel. ═══ */
-.graph-workspace {
-  display: grid;
-  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
-  /* An explicit row is required: with the implicit `auto` row the panel's content height
-     wins and the canvas gets pushed below the fold. */
-  grid-template-rows: minmax(0, 1fr);
-  flex: 1;
-  min-height: 0;
-  /* The WORKSPACE owns the inset, not the columns (2026-08-25). While the canvas padded
-     itself and the panel ran edge to edge, the two could never start or end on the same
-     line - which is the whole complaint. One padding, two columns, four aligned edges. */
-  gap: 12px;
-  padding: 12px 14px;
-}
 .graph-main {
   display: flex;
   flex-direction: column;
@@ -2762,8 +2709,8 @@ details.hot-cache[open] summary {
   font-weight: 500;
 }
 .domrow .dot {
-  width: 9px;
-  height: 9px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
 }
 .domrow .nm {
@@ -2779,6 +2726,14 @@ details.hot-cache[open] summary {
 }
 /* The panel's search section, at the very top: one field, no eyebrow - what it does is
    the placeholder's job, and a heading here would only push the first real filter down. */
+/* A count in a section head, as opposed to `.gp-state` which names the current CHOICE.
+   Research was using `.gp-state` for "how many runs are in this list", which reads as if 12
+   were the selected value. */
+.gp-count {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
 .gp-find {
   padding: 10px 12px;
 }
@@ -2855,11 +2810,6 @@ details.hot-cache[open] summary {
 .dropdown {
   position: relative;
 }
-.dropdown-item .count {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: 12px;
-}
 .graph-search {
   position: relative;
   display: flex;
@@ -2922,15 +2872,12 @@ details.hot-cache[open] summary {
   background: var(--bg-elev-2);
 }
 .graph-search-results .bucket {
-  color: var(--text-faint);
-  font-size: 10px;
-  text-transform: uppercase;
   flex-shrink: 0;
 }
 /* Domain hits sit above the page hits; a color dot ties them to their filter chip. */
 .graph-search-results .dom-hit .dom-dot {
-  width: 9px;
-  height: 9px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex-shrink: 0;
   align-self: center;
@@ -3008,8 +2955,8 @@ details.hot-cache[open] summary {
   color: var(--text);
 }
 .clusterbar .cb-dot {
-  width: 9px;
-  height: 9px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -3145,7 +3092,7 @@ details.hot-cache[open] summary {
   background: var(--bg);
   border: 1px solid var(--border);
   font-size: 12px;
-  padding: 3px 10px;
+  padding: 0 10px;
 }
 .graph-controls .btn.active {
   border-color: var(--accent);
@@ -3262,14 +3209,6 @@ details.hot-cache[open] summary {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-.lens-item.sel {
-  color: var(--text);
-}
-.lens-item.sel .lens-name::after {
-  content: '✓';
-  margin-left: 6px;
-  color: var(--accent);
-}
 /* Metric-lens legend, bottom-right of the canvas. */
 .lens-legend {
   position: absolute;
@@ -3361,10 +3300,13 @@ details.hot-cache[open] summary {
   padding: 16px 16px 12px;
   border-bottom: 1px solid var(--border);
 }
+/* The kicker over a title in the explorer: the same label as `.bucket`, one step up because
+   it sits over a heading rather than beside a name in a list. */
 .gx-kicker {
   font-size: 11px;
-  text-transform: uppercase;
+  font-weight: 600;
   letter-spacing: 0.07em;
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 .gx-kicker.gap {
@@ -3472,8 +3414,8 @@ details.hot-cache[open] summary {
   color: var(--text);
 }
 .gx-link .bullet {
-  width: 7px;
-  height: 7px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex: none;
 }
@@ -3526,17 +3468,14 @@ details.hot-cache[open] summary {
   font-size: 13px;
   color: var(--text);
 }
+/* The gap list's variant of the shared `.meter`: fixed width, thinner, and amber because it
+   measures how badly a page is missing rather than progress towards a limit. */
 .gx-gaprow .meter {
   width: 56px;
   height: 5px;
-  border-radius: 3px;
-  background: var(--bg-elev-2);
-  overflow: hidden;
   flex: none;
 }
 .gx-gaprow .meter i {
-  display: block;
-  height: 100%;
   background: var(--warn);
 }
 .gx-gaprow .gn {
@@ -3974,31 +3913,7 @@ details.hot-cache[open] summary {
 /* ══ Research run progress (components/RunProgress.tsx) ═══════════════════════════════
    Three layers: what it is doing now, the plan, the counted numbers. One bar, on the one
    phase with a real denominator. ══ */
-.prog {
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg);
-  margin-bottom: 13px;
-}
-.prog-step.done .prog-mark {
-  background: var(--ok-bg);
-  border-color: var(--ok);
-  color: var(--ok);
-}
-.prog-step.now {
-  background: color-mix(in srgb, var(--research) 8%, transparent);
-}
-.prog-step.now .prog-mark {
-  background: color-mix(in srgb, var(--research) 20%, transparent);
-  border-color: var(--research);
-}
 .prog-step.done .prog-nm,
-.prog-step.now .prog-nm {
-  color: var(--text);
-}
-.prog-step.now .prog-nm {
-  font-weight: 600;
-}
 details.logbox .log {
   border: 0;
   border-radius: 0;
@@ -4262,70 +4177,42 @@ kbd {
   font-size: 13.5px;
 }
 
-/* ---- Library: the graph's panel, over the page table (rework 2026-08-24) ----
-   Same two scope filters in the same place, so what you learn in one screen works in
-   the other. The row above the table keeps only what is about the table. */
-/* ── Library and Inbox: the workspace shape, one box each ─────────────────────────────
-   The toolbar moved OUT of the right column into the shared `.ws-bar` row (2026-08-25).
-   Inside the column it pushed the table down by its own height while the panel started at
-   the top, so the two columns could not line up however the padding was tuned. ── */
-.library,
-.inbox {
-  display: grid;
-  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
-  height: 100%;
-  min-height: 0;
-  gap: 12px;
-  padding: 12px 14px;
-}
-.library > .gpanel,
-.lib-main {
-  min-height: 0;
-}
-/* The big box: same card as the panel beside it, and it scrolls INSIDE itself so both
-   columns end on the workspace's bottom line. */
-.lib-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-}
-/* `scrollbar-gutter: stable` reserves the scrollbar's width whether or not it is showing,
-   so switching to a domain that fits without scrolling no longer shifts the columns. */
-.lib-main > .tscroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
+/* ---- Library ----
+   It used to carry its own copy of the workspace grid and its own copy of the content box
+   (`.lib-main`, which differed from `.box` by having a drop shadow - so the Library box sat
+   visibly differently on the ground than the three screens beside it). Both are gone: the
+   screen is a `.workspace` with a `.box` like Home, Research and System, and what is left
+   here is the table itself. */
 .lib-sentinel {
   height: 1px;
 }
-/* The header has to stay put while the body scrolls under it. */
-.lib-main thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--bg-elev);
-}
-.lib-main .tscroll > .empty {
-  flex: 1;
+/* Nothing matched the filters, or the index failed to load: centre the block in the space
+   the table would have had, rather than leaving it clinging to the top edge. */
+.library-empty {
   display: grid;
   place-content: center;
+  min-height: 100%;
 }
-.typechips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
+/* The one data table. Four screens use it (activity, research runs, library, spend), and
+   until this sweep each of them re-declared the same three structural facts through its own
+   ancestor: `table-layout: fixed` was set four times, the sticky header three times over
+   three different parents. They live here once; a per-table rule below adds only its column
+   widths.
+
+   `fixed` is not a nicety: with `auto`, one long file name or a row of page chips widens the
+   whole table past its box and the screen scrolls sideways. Fixed columns cannot be pushed,
+   so the cells clip instead - which is why `td` carries `overflow: hidden`. */
 .dtable {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: fixed;
+}
+.dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
 }
 .dtable th {
   text-align: left;
@@ -4344,8 +4231,14 @@ kbd {
   padding: 9px 14px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  overflow: hidden;
 }
-.dtable tbody tr {
+/* Interactive rows opt IN. The pointer used to be on every row of every `.dtable`, so the
+   spend table - which has no row action at all - had to take it back by hand, and any new
+   read-only table would have inherited the same lie. `[tabindex]` is exactly the set of rows
+   `openableRow()` made focusable, so the cursor and the keyboard affordance can never
+   disagree about which rows do something. */
+.dtable tbody tr[tabindex] {
   cursor: pointer;
 }
 .dtable tbody tr:hover td {
@@ -4354,29 +4247,14 @@ kbd {
 .dtable tbody tr:last-child td {
   border-bottom: none;
 }
+/* The row that holds a loading/empty/error block instead of data: no hover, no separator. */
+.dtable tr.staterow td {
+  border-bottom: none;
+  background: none;
+}
 .lt-title strong {
   font-weight: 600;
 }
-.lt-bucket {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  background: var(--bg-elev-2);
-  border-radius: 5px;
-  padding: 2px 6px;
-  margin-right: 4px;
-}
-.lt-flag {
-  font-size: 10.5px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 2px 7px;
-  margin-left: 7px;
-}
-.lt-flag.err { color: var(--err); background: var(--err-bg); }
-.lt-flag.warn { color: var(--warn); background: var(--warn-bg); }
 .lt-domain {
   color: var(--text-dim);
   white-space: nowrap;
@@ -4397,29 +4275,19 @@ kbd {
   text-align: right;
   width: 76px;
 }
+/* The row's hover actions must not make the row taller than a row of plain text. */
 .lt-acts .btn.ghost {
-  padding: 3px 6px;
+  height: 24px;
+  padding: 0 6px;
   opacity: 0;
 }
 .dtable tr:hover .lt-acts .btn.ghost,
 .lt-acts .btn.ghost:focus-visible {
   opacity: 1;
 }
-.dtable-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-  color: var(--text-faint);
-  font-size: 12.5px;
-}
 /* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
 .gp-search:focus-within,
 .graph-search:focus-within,
-.db-panel .p-search:focus-within {
-  border-color: var(--accent);
-}
 
 /* ---- Inbox (redesign 2026-08): channels line, paused banner, history rows + drawer ---- */
 .channels {
@@ -4447,8 +4315,8 @@ kbd {
   max-width: 260px;
 }
 .channels .d {
-  width: 7px;
-  height: 7px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex: none;
 }
@@ -4471,8 +4339,8 @@ kbd {
   max-width: 420px;
 }
 .hrow-dot {
-  width: 8px;
-  height: 8px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex: none;
 }
@@ -4480,16 +4348,6 @@ kbd {
 .hrow-dot.failed { background: var(--err); }
 .hrow-dot.deferred { background: var(--warn); }
 .hrow-dot.duplicate, .hrow-dot.cancelled { background: var(--muted); }
-.hrow-state {
-  font-size: 10.5px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 2px 7px;
-  white-space: nowrap;
-}
-.hrow-state.failed { color: var(--err); background: var(--err-bg); }
-.hrow-state.deferred { color: var(--warn); background: var(--warn-bg); }
-.hrow-state.duplicate, .hrow-state.cancelled, .hrow-state.reverted { color: var(--muted); background: var(--muted-bg); }
 .dtable td.dimc { color: var(--text-dim); }
 .dtable td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); white-space: nowrap; }
 .dtable td.faintc { color: var(--text-faint); font-size: 12.5px; white-space: nowrap; }
@@ -4541,31 +4399,40 @@ kbd {
   padding: 11px 16px;
   border-top: 1px solid var(--border);
 }
-.kv {
+/* A real definition list (the job drawer's record): label column, value column. It used to
+   be called `.kv` as well, and lost every one of these declarations to the later `.kv` in
+   the System pane - a flex row with `justify-content: space-between`, which laid every
+   dt/dd pair of the drawer out side by side on ONE line. Two different layouts cannot share
+   a class name; this one is `.deflist`. */
+.deflist {
   display: grid;
   grid-template-columns: 110px 1fr;
   gap: 6px 14px;
   font-size: 12.5px;
   margin: 12px 0;
 }
-.kv dt {
+.deflist dt {
   color: var(--text-faint);
 }
-.kv dd {
+.deflist dd {
   margin: 0;
   color: var(--text);
   word-break: break-all;
   min-width: 0;
 }
-.kv dd code {
+.deflist dd code {
   font-size: 11.5px;
 }
 
-/* Intake note textarea + optional title (notes can be multi-line and carry a title now). */
+/* Intake note textarea + optional title (notes can be multi-line and carry a title now).
+   Two visible lines is plenty for a URL or a short note; it grows on focus for longer ones,
+   because a fixed height for the rare long note set the whole intake band's height. */
 .intake-note {
   width: 100%;
   resize: vertical;
-  min-height: 44px;
+  height: 38px;
+  min-height: 38px;
+  transition: height 0.12s;
   max-height: 160px;
   background: var(--bg);
   border: 1px solid var(--border-strong);
@@ -4575,6 +4442,12 @@ kbd {
   font: inherit;
   font-size: 13.5px;
   line-height: 1.45;
+}
+/* Grows once there is something in it, so the intake band's resting height is set by the
+   common case rather than the long one. */
+.intake-note:focus,
+.intake-note:not(:placeholder-shown) {
+  height: 62px;
 }
 .intake-note:focus,
 .intake-title:focus {
@@ -4591,18 +4464,9 @@ kbd {
   font-size: 13px;
 }
 .now-channels .d,
-.now-cell .d {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  display: inline-block;
-}
 .now-channels .d.ok { background: var(--ok); }
 .now-channels .d.warn { background: var(--warn); }
 .statlink:hover .sub,
-.statlink:focus-visible .sub {
-  opacity: 0;
-}
 
 /* ══ Home, bounded (2026-08-25) ═══════════════════════════════════════════════════════
    Four fixed rows and one filling row. The filling row's two columns scroll INSIDE
@@ -4610,20 +4474,6 @@ kbd {
    the one the old fixed `min-height: 340px` happened to suit. The absolute-positioning
    trick that used to keep the feed from running past the rail is gone with it: with a
    real bounded row, `minmax(0, 1fr)` does the same job honestly. ══ */
-.home {
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  gap: 11px;
-  height: 100%;
-  min-height: 0;
-  padding: 14px 18px 16px;
-}
-.home-grid > .feed {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
 @media (max-width: 1100px) {
   /* Stacked, there is no rail to match - let the screen scroll as a document again. */
   .home {
@@ -4631,15 +4481,6 @@ kbd {
     height: auto;
     overflow-y: auto;
   }  .home-grid > .feed { overflow: visible; }}
-.feed-head .section-title {
-  margin: 0;
-}
-.feed-item.clickable {
-  cursor: pointer;
-}
-.feed-item.clickable:hover {
-  background: color-mix(in srgb, var(--bg-elev-2) 55%, transparent);
-}
 .fico.ingest { background: var(--busy-bg); color: var(--busy); }
 .fico.failed { background: var(--err-bg); color: var(--err); }
 .fico.maintenance { background: var(--ok-bg); color: var(--ok); }
@@ -4648,32 +4489,7 @@ kbd {
 .fico.queued { background: var(--muted-bg); color: var(--muted); }
 /* Idle is ONE line, not a card with an empty state inside it - about 70px of the height
    budget, and it says the same thing. */
-.inflight.idle {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 9px 15px;
-  font-size: 12.5px;
-}
-.inflight.idle .if-lab {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.inflight.idle .if-idle {
-  color: var(--text-faint);
-}
-.badge.queued-badge {
-  background: var(--muted-bg);
-  color: var(--text-dim);
-}
 .fico.research,
-.feed-item .fico.research {
-  background: color-mix(in srgb, var(--research) 18%, transparent);
-  color: var(--research);
-}
 .minibar.research i {
   background: var(--research);
 }
@@ -4705,39 +4521,14 @@ kbd {
     animation: none;
   }
 }
-.stateline .linkish {
-  color: var(--text-dim);
-}
-.stateline .linkish:hover {
-  color: var(--accent);
-}
-.stateline .warnish {
-  color: var(--warn);
-}
-.fmeta .mono-meta {
+/* A short machine fact inside running text: a commit hash, a target page title. Free-standing
+   for the same reason as `.lens-tag` - its old `.fmeta` parent is gone. */
+.mono-meta {
   font-family: var(--mono);
   font-size: 11px;
+  color: var(--text-dim);
 }
 /* Most wanted pages: the gap backlog with a research handoff. */
-.wanted {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.wrow .wc {
-  color: var(--text-faint);
-  font-size: 11px;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.btn.research-btn {
-  background: var(--research);
-  border-color: var(--research);
-  color: #fff;
-  font-size: 12px;
-  padding: 4px 10px;
-}
-
 /* ---- Health screen (redesign 2026-08): status + run history side by side ---- */
 /* Two columns only when the run-history card is actually rendered - inside the System
    screen the last-settle rows live in the control column, and the head then takes the
@@ -4817,23 +4608,6 @@ kbd {
   padding: 10px 12px;
   background: var(--bg);
 }
-.sess.run-item {
-  border: 1px solid transparent;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  width: 100%;
-}
-.sess.run-item:hover {
-  background: var(--bg-elev);
-}
-.sess.run-item .st {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 .run-state.running { color: var(--research); background: color-mix(in srgb, var(--research) 16%, transparent); }
 .run-state.done { color: var(--ok); background: var(--ok-bg); }
 .run-state.failed { color: var(--err); background: var(--err-bg); }
@@ -4880,29 +4654,6 @@ kbd {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.planline .pl-change {
-  font-size: 12px;
-  color: var(--research);
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.lens-opt.on {
-  background: color-mix(in srgb, var(--research) 12%, transparent);
-}
-.lens-opt .lo-head .badge {
-  font-size: 9.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 1px 5px;
-  border-radius: 5px;
-  background: var(--bg);
-  color: var(--text-faint);
-}
-.lens-opt .lo-head .badge::before {
-  display: none;
-}
 /* Unsaved-editor badge in the page head - the draft guard's visible half. */
 .dirty-badge {
   display: inline-flex;
@@ -4936,6 +4687,32 @@ kbd {
   min-height: 0;
   gap: 12px;
   padding: 12px 14px;
+}
+
+/* The graph's two departures from the shared workspace, and the only two left:
+
+   1. It sits inside a flex column (the stale-links banner can appear above it), so it grows
+      into the space left over rather than claiming the full height.
+   2. It is the last screen with a bar spanning BOTH columns - the cluster and focus rows,
+      which only exist while the graph is focused on something. Home, Library, Research and
+      System have no such bar, which is why the content edge no longer moves when you switch
+      between them. Here it is a deliberate exception: the bar says what the graph is
+      currently isolated to, and that statement belongs above both the filters that produced
+      it and the canvas it applies to. The row is only reserved when the bar is actually
+      rendered - an always-on `auto` row would cost a gap's worth of dead space the rest of
+      the time. */
+.graph-workspace {
+  flex: 1;
+  height: auto;
+}
+.graph-workspace:has(> .ws-bar) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* With a bar present the two columns belong to row 2; without one the single row is row 1
+   and these are ignored, because a grid-row beyond the template just creates it. */
+.graph-workspace:has(> .ws-bar) > .gpanel,
+.graph-workspace:has(> .ws-bar) > .graph-main {
+  grid-row: 2;
 }
 
 /* The content box: head, a body that scrolls inside itself, an optional foot. */
@@ -4974,12 +4751,9 @@ kbd {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-}
-.box-body > .dtable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--bg-elev);
+  /* Reserve the scrollbar's width whether or not it is showing, so a filter change that
+     happens to fit without scrolling does not shift the columns sideways. */
+  scrollbar-gutter: stable;
 }
 .box-foot {
   display: flex;
@@ -5009,62 +4783,13 @@ kbd {
   color: var(--text-faint);
 }
 
-/* ── Home: the glance strip ─────────────────────────────────────────────────
-   Five numbers that are doors. Two of them (spend today, checks due) are figures
-   the service always collected and never showed. */
-.glance {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
-  flex: none;
-  border-bottom: 1px solid var(--border);
-}
-.glance-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
-  padding: 9px 14px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: none;
-  color: var(--text);
-  text-align: left;
-}
-.glance-tile:last-child {
-  border-right: 0;
-}
-.glance-tile:hover {
-  background: var(--bg-elev-2);
-}
-.glance-tile .k {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-.glance-tile .v {
-  font-family: var(--display);
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-.glance-tile .v.warn { color: var(--warn); }
-.glance-tile .v.err { color: var(--err); }
-.glance-tile .s {
-  font-size: 11.5px;
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
 
-/* Page chips and the error line under a table row's title. */
+/* Page chips and the error line under a table row's title. The table's fixed layout means
+   this must clip rather than push its column wider. */
 .rowpages {
   display: flex;
   flex-wrap: wrap;
+  overflow: hidden;
   gap: 4px;
   margin-top: 5px;
   padding-left: 15px;
@@ -5134,8 +4859,8 @@ kbd {
   gap: 4px;
 }
 .ip-actions .ch .d {
-  width: 6px;
-  height: 6px;
+  width: var(--dot-sm);
+  height: var(--dot-sm);
   border-radius: 50%;
   background: var(--muted);
 }
@@ -5320,6 +5045,11 @@ kbd {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
 }
+/* ── Figures: one label, one number, one optional line of context ────────────────────
+   Home's glance strip and System's fact grids were the same k/v/s markup written twice,
+   with six values drifted apart. One component now (components/Fact.tsx) in two densities:
+   `.lead` is the strip of doors under a box head, the default is a dense grid inside a
+   pane. Everything except size, separator and grid track is shared. */
 .facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
@@ -5328,6 +5058,17 @@ kbd {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   overflow: hidden;
+}
+/* The lead strip spans the box: no card outline, a bottom border against the content, and
+   the separators are real borders rather than a 1px grid gap showing the ground through. */
+.facts.lead {
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  flex: none;
+  gap: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
 }
 .fact {
   display: flex;
@@ -5339,6 +5080,15 @@ kbd {
   border: 0;
   text-align: left;
   color: var(--text);
+}
+.fact.lead {
+  gap: 2px;
+  padding: 9px 14px;
+  border-right: 1px solid var(--border);
+  background: none;
+}
+.fact.lead:last-child {
+  border-right: 0;
 }
 .fact.linky:hover {
   background: var(--bg-elev-2);
@@ -5354,15 +5104,26 @@ kbd {
   font-family: var(--display);
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.fact.lead .v {
+  font-size: 20px;
 }
 .fact .v.warn { color: var(--warn); }
 .fact .v.err { color: var(--err); }
 .fact .s {
   font-size: 11px;
   color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.fact.lead .s {
+  font-size: 11.5px;
 }
 .subcard {
   border: 1px solid var(--border);
@@ -5388,6 +5149,29 @@ kbd {
 .sc-body {
   padding: 12px 13px;
 }
+/* The variant for a card that puts its body straight into the card rather than into an
+   `.sc-body`: the card carries the body padding and the head cancels it back out to the
+   edges. Same result as the old `.card-pad` + `.section-head` pair, in the subcard's
+   proportions, and without asking fourteen call sites to grow a wrapper element. */
+.subcard.sc-pad {
+  padding: 12px 13px;
+}
+.subcard.sc-pad > .sc-head {
+  margin: -12px -13px 12px;
+  padding: 9px 13px;
+}
+.subcard.sc-pad > .sc-head:last-child {
+  margin-bottom: -12px;
+}
+/* The head's trailing action group. `.sc-head` is a flex row, so this just claims the gap
+   to the right of the title - the same job `.spacer` does on the box heads. */
+.sc-head .right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
 .sc-meta {
   display: flex;
   gap: 10px;
@@ -5399,6 +5183,8 @@ kbd {
   display: flex;
   flex-direction: column;
 }
+/* A key and its value on one line, label left, value right (the System panes). For a real
+   `<dl>` use `.deflist` above. */
 .kv {
   display: flex;
   align-items: baseline;
@@ -5441,36 +5227,21 @@ kbd {
 }
 .hrow-dot.queued { background: var(--warn); }
 .hrow-dot.edit { background: var(--type-meta); }
-.badge.ok {
-  background: var(--ok-bg);
-  color: var(--ok);
-}
 
 /* ── Fixes 2026-08-25 (second pass, round two) ─────────────────────────────── */
 
-/* Home's activity table used the default `auto` layout, so one long file name or a row of
-   page chips widened the whole table past its box and the screen scrolled sideways. Fixed
-   columns cannot be pushed: the event column takes what is left and its content clips. */
-.box-body > .dtable {
-  table-layout: fixed;
-}
+/* Home's activity table: `table-layout` and the sticky head now come from `.dtable`; what is
+   left here is this table's own column split. */
 .inbox-table th:nth-child(1) { width: 44%; }
 .inbox-table th:nth-child(2) { width: 13%; }
 .inbox-table th:nth-child(3) { width: 8%; }
 .inbox-table th:nth-child(4) { width: 8%; }
 .inbox-table th:nth-child(5) { width: 9%; }
 .inbox-table th:nth-child(6) { width: 18%; }
-.box-body > .dtable td {
-  overflow: hidden;
-}
 /* The name may take the whole column now - the fixed width is the limit, not a magic px. */
 .box-body > .dtable .hrow-name .nm {
   max-width: none;
 }
-.rowpages {
-  overflow: hidden;
-}
-
 /* The research run table shares the fixed layout; its columns are its own. */
 .runs-table th:nth-child(1) { width: 42%; }
 .runs-table th:nth-child(2) { width: 18%; }
@@ -5479,14 +5250,7 @@ kbd {
 .runs-table th:nth-child(5) { width: 18%; }
 
 /* The graph's control bar: the search field is the tallest control in it, so everything
-   beside it takes the same box height instead of sitting a few pixels short. */
-.graph-controls .btn {
-  height: var(--control-h);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-}
+   beside it takes the same box height. */
 .graph-controls .graph-search {
   height: var(--control-h);
   padding-top: 0;
@@ -5550,17 +5314,11 @@ kbd {
   padding-left: 13px;
   padding-right: 13px;
 }
-.runtable {
-  table-layout: fixed;
-}
 .runtable th:nth-child(1) { width: 46%; }
 .runtable th:nth-child(2) { width: 14%; }
 .runtable th:nth-child(3) { width: 12%; }
 .runtable th:nth-child(4) { width: 12%; }
 .runtable th:nth-child(5) { width: 16%; }
-.runtable tbody tr {
-  cursor: default;
-}
 .runtable .rt-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5592,10 +5350,6 @@ kbd {
 /* The library table keeps ONE layout across every filter. Fixed columns mean the domain,
    link and date columns never move because a domain happens to hold shorter titles; the
    page column takes whatever is left, which is the layout the longest titles need. */
-.lib-table {
-  table-layout: fixed;
-  width: 100%;
-}
 .lib-table th:nth-child(2) { width: 150px; }
 .lib-table th:nth-child(3) { width: 96px; }
 .lib-table th:nth-child(4) { width: 132px; }
@@ -5621,7 +5375,7 @@ kbd {
   white-space: nowrap;
   font-weight: 600;
 }
-.lib-table .lt-bucket,
+.lib-table .badge.type,
 .lib-table .lt-flag {
   flex: none;
   margin: 0;
@@ -5690,8 +5444,8 @@ kbd {
   height: 10px;
 }
 .as-dot {
-  width: 6px;
-  height: 6px;
+  width: var(--dot-sm);
+  height: var(--dot-sm);
   border-radius: 50%;
   background: currentColor;
   animation: badge-pulse 1.4s ease-in-out infinite;
@@ -5774,13 +5528,4 @@ kbd {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-.sv-scroll > .dtable {
-  table-layout: fixed;
-}
-.sv-scroll > .dtable thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--bg-elev);
 }

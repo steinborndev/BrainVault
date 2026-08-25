@@ -10,10 +10,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
+import { openableRow } from '../lib/tableRow.ts'
 import { timeAgo } from '../lib/format.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { domainColor, STUB_BYTES } from '../lib/domains.ts'
 import { Icon } from '../components/Icon.tsx'
+import { queryState } from '../components/QueryState.tsx'
 import type { GraphNode } from '../api/types.ts'
 
 /** Bucket display labels, shared vocabulary with the graph's type filter. */
@@ -149,16 +151,10 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
     return () => io.disconnect()
   }, [more, shown.length])
 
-  if (graph.isLoading) return <div className="empty">Loading the page index…</div>
-  if (graph.isError)
-    return (
-      <div className="empty">
-        Failed to load the page index: {(graph.error as Error).message}{' '}
-        <button className="btn" onClick={() => void graph.refetch()}>
-          Retry
-        </button>
-      </div>
-    )
+  const state = queryState(graph, 'the page index')
+  // Deliberately NOT an early return any more: the panel and the table box stay on screen
+  // while the index loads or fails, so a retry does not make the whole workspace jump.
+  // Only the table's own area changes.
 
   const domainRows = [
     ...domainCounts.domains.map(([d, c]) => [d, c] as [string, number]),
@@ -169,6 +165,8 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       const f = domFilter.trim().toLowerCase()
       return f === '' || (d === '' ? 'no domain' : d).toLowerCase().includes(f)
     })
+  /** Whether anything is narrowing the list - the reset only appears when it would do something. */
+  const dirty = query !== '' || type !== null || domain !== null || subset !== 'all' || sort !== 'changed'
   const subsetHint = SUBSETS.find((x) => x.key === (subsetHover ?? subset))!.desc
   const sortHint = SORTS.find((x) => x.key === (sortHover ?? sort))!.desc
   const reset = (): void => {
@@ -182,7 +180,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
   }
 
   return (
-    <div className="library">
+    <div className="workspace">
       {/* The same standing panel as the graph, and the ONLY chrome this screen has
           (2026-08-26): the bar that used to sit above both columns held a search box and a
           sentence restating what the panel and the table foot already say, so the screen
@@ -193,7 +191,17 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
           which subset and in what order - and domains last, because that is the section
           that grows with the vault and it takes the leftover height. */}
       <aside className="gpanel" aria-label="Library filters">
+        {/* Same place as Home: the reset belongs to the head of the panel's first section. */}
         <div className="gp-sec gp-find">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Find</span>
+            <span className="spacer" />
+            {dirty && (
+              <button className="btn ghost" onClick={reset} title="Back to every page, newest first">
+                Reset
+              </button>
+            )}
+          </div>
           <div className="gp-search">
             <Icon name="search" />
             <input
@@ -214,9 +222,6 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             <span className="gp-eyebrow">Page types</span>
             <span className="spacer" />
             <span className="gp-state">{type === null ? 'all' : bucketLabel(type)}</span>
-            <button className="btn ghost" onClick={reset} title="Back to every page, newest first">
-              Reset
-            </button>
           </div>
           <div className="typechips">
             {/* "All" is a chip like the others rather than the absence of a choice - the
@@ -339,13 +344,17 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
         </div>
       </aside>
 
-      <div className="lib-main">
+      <div className="box">
         {/* The scroll box is a DIV, not the table: a table set to `display: block` (the old
             way of making it scroll) shrinks to its content, so the columns moved every time
             a domain filter changed the longest title on screen. */}
-        <div className="tscroll">
-        {shown.length === 0 ? (
-          <div className="empty">Nothing matches the current filters.</div>
+        <div className="box-body">
+        {state !== null ? (
+          <div className="library-empty">{state}</div>
+        ) : shown.length === 0 ? (
+          <div className="library-empty">
+            <div className="empty">Nothing matches the current filters.</div>
+          </div>
         ) : (
           <table className="dtable lib-table">
             <thead>
@@ -359,13 +368,13 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </thead>
             <tbody>
               {shown.map((n) => (
-                <tr key={n.path} onClick={() => navigate(pageRoute(n.path))}>
+                <tr key={n.path} {...openableRow(() => navigate(pageRoute(n.path)), `Open ${n.title}`)}>
                   <td className="lt-title" title={n.title}>
                     {/* The flex row is a span inside the cell: a `td` set to `display: flex`
                         leaves the table layout, and its baseline then drifts against the
                         cells beside it, a little further with every row. */}
                     <span className="lt-cell">
-                      <span className="lt-bucket">{bucketLabel(n.type)}</span>
+                      <span className="badge type">{bucketLabel(n.type)}</span>
                       <strong className="lt-name">{n.title}</strong>
                       {isOrphan(n) && <span className="lt-flag err">orphan</span>}
                       {isStub(n) && <span className="lt-flag warn">stub</span>}
@@ -414,7 +423,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             place before the reader reaches the bottom. */}
         <div ref={sentinel} className="lib-sentinel" aria-hidden />
         </div>
-        <div className="dtable-foot">
+        <div className="box-foot" hidden={state !== null}>
           <span>
             Showing {shown.length} of {filtered.length} pages
             {filtered.length !== knowledge.length ? ` (${knowledge.length} in this subset)` : ''}

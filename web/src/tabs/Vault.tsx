@@ -18,6 +18,7 @@ import type { GraphNode, VaultGraph, ValidationFinding, RepairTask } from '../ap
 import { GraphCanvas, domainColor, TYPE_VARS, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
+import { queryState } from '../components/QueryState.tsx'
 import { Shortcuts } from '../components/Shortcuts.tsx'
 import { linkifyText } from '../lib/linkify.tsx'
 import { navigate, pageRoute, pageFromPath, originPath } from '../lib/router.ts'
@@ -125,13 +126,16 @@ export function Vault({ path }: { path: string }): React.ReactElement {
   // `?gaps=1` arrives from Home's Gaps card: open the graph with the gaps overlay already on.
   const openGaps = params.get('gaps') === '1'
 
-  if (graphQ.isLoading) return <div className="empty">Loading graph…</div>
-  if (graphQ.isError || !graphQ.data) {
+  const state = queryState(graphQ, 'the graph')
+  if (state !== null) return state
+  // Neither loading nor failed, but nothing came back: the query settled empty. Rare, and
+  // the retry is still the only useful thing to offer.
+  if (!graphQ.data) {
     return (
       <div className="empty">
-        Failed to load the graph: {(graphQ.error as Error)?.message ?? 'unknown'}{' '}
+        <p className="qs-line">The graph came back empty.</p>
         <button className="btn" onClick={() => void graphQ.refetch()}>
-          Retry
+          Try again
         </button>
       </div>
     )
@@ -897,7 +901,7 @@ function GraphView({
   return (
     <div className={`vault-graph${fullscreen ? ' fullscreen' : ''}`} ref={rootRef}>
       <StaleLinksBanner />
-      <div className="graph-workspace">
+      <div className="workspace graph-workspace">
         {(clusterFocus !== null || focusNode) && (
           <div className="ws-bar graph-bars">
       {/* The isolated community as its own row (the spotlight-click result), mirroring the

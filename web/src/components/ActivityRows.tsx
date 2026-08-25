@@ -19,6 +19,7 @@ import { duration, parsePages, timeAgo } from '../lib/format.ts'
 import type { ActivityEvent } from '../lib/activity.ts'
 import { RUN_RUNNING_TITLES, runTitle } from '../lib/runLabels.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
+import { openableRow } from '../lib/tableRow.ts'
 
 /** Stable per-channel colour, so a row's origin reads without parsing the word. */
 export function channelColor(source: string): string {
@@ -73,15 +74,7 @@ export function RunRow({ run }: { run: MaintenanceRun }): React.ReactElement {
   const isResearch = run.kind === 'research'
   const open = (): void => navigate(isResearch ? '/research' : '/system')
   return (
-    <tr
-      className={`live${isResearch ? ' research' : ''}`}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') open()
-      }}
-      tabIndex={0}
-      aria-label={`Open the ${run.kind} run`}
-    >
+    <tr className={`live${isResearch ? ' research' : ''}`} {...openableRow(open, `Open the ${run.kind} run`)}>
       <td>
         <span className="hrow-name">
           <span className="hrow-dot running" aria-hidden />
@@ -112,15 +105,7 @@ export function LiveJobRow({ job, onOpen }: { job: Job; onOpen: () => void }): R
   const phase = PHASES.indexOf(job.status)
   const name = job.original_name ?? job.url ?? job.id
   return (
-    <tr
-      className="live"
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onOpen()
-      }}
-      tabIndex={0}
-      aria-label={`Open job detail: ${name}`}
-    >
+    <tr className="live" {...openableRow(onOpen, `Open job detail: ${name}`)}>
       <td>
         <span className="hrow-name">
           <span className={`hrow-dot ${job.status === 'queued' ? 'queued' : 'running'}`} aria-hidden />
@@ -197,14 +182,7 @@ export function HistoryJobRow({
   const pages = parsePages(job.created_pages)
   const showState = job.status !== 'done'
   return (
-    <tr
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') onOpen()
-      }}
-      tabIndex={0}
-      aria-label={`Open job detail: ${name}`}
-    >
+    <tr {...openableRow(onOpen, `Open job detail: ${name}`)}>
       <td>
         <span className="hrow-name">
           <span className={`hrow-dot ${job.status}`} aria-hidden />
@@ -250,14 +228,7 @@ export function SettleRow({
   const base = runTitle(event.runKind ?? event.kind, event.state !== 'failed')
   const name = event.title === '' ? base : `${base}: ${event.title}`
   return (
-    <tr
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') open()
-      }}
-      tabIndex={0}
-      aria-label={`Open the ${event.kind} area`}
-    >
+    <tr {...openableRow(open, `Open the ${event.kind} area`)}>
       <td>
         <span className="hrow-name">
           <span className={`hrow-dot ${event.state === 'failed' ? 'failed' : 'done'}`} aria-hidden />
@@ -288,14 +259,7 @@ export function CommitRow({
   const single = event.pages.length === 1 ? event.pages[0]! : null
   const open = single !== null ? () => navigate(pageRoute(single)) : undefined
   return (
-    <tr
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && open !== undefined) open()
-      }}
-      tabIndex={open !== undefined ? 0 : undefined}
-      aria-label={single !== null ? `Open ${single}` : undefined}
-    >
+    <tr {...openableRow(open, single !== null ? `Open ${single}` : '')}>
       <td>
         <span className="hrow-name">
           <span className="hrow-dot edit" aria-hidden />
