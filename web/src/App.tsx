@@ -111,6 +111,9 @@ export function App(): React.ReactElement {
   // First-run setup mode: the server runs without a credential and every agent feature is
   // off - surface that on every screen, with the path to fix it (System → Integrations).
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  // The third intake channel. It only earns a pill while it is actually connected - "no
+  // bot" is a settings fact, not a header one.
+  const telegram = useQuery({ queryKey: ['telegram-status'], queryFn: api.telegramStatus, staleTime: 300_000 })
   const setupMode = health.data ? !health.data.credentialConfigured : false
 
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -207,6 +210,12 @@ export function App(): React.ReactElement {
               <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
               Watcher {stats.data?.watcher.active === true ? 'active' : 'off'}
             </span>
+            {telegram.data?.configured === true && (
+              <span className="tstat" title="The Telegram bot is connected and accepting messages">
+                <span className="d ok" />
+                Telegram active
+              </span>
+            )}
             {stats.data !== undefined && (
               <span className="tstat">
                 <span className="d acc" />

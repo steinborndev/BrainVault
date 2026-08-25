@@ -354,6 +354,8 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             paused={stats.data?.queue.paused === true}
             reason={stats.data?.queue.pauseReason ?? null}
             concurrency={stats.data?.queue.concurrency}
+            active={stats.data?.queue.active ?? 0}
+            queued={stats.data?.queue.queued ?? 0}
           />
         </div>
       </aside>

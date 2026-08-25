@@ -2428,12 +2428,22 @@ details.hot-cache[open] summary {
 .gp-sec:last-child {
   border-bottom: 0;
 }
-/* The domain section takes what is left and scrolls inside itself. */
+/* A section that takes what is left of the panel and scrolls inside itself. `flex-basis: 0`
+   rather than `auto` is what makes that true: with `auto` the section starts at its content
+   height, so a long list pushed the panel past its box and the WHOLE column scrolled - the
+   sections below it went off the bottom. Two such sections in one panel (research runs and
+   conversations) then split the leftover height evenly, which is the point. */
 .gp-sec.grow {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 128px;
+  flex: 1 1 0;
+  min-height: 120px;
+}
+.gp-sec.grow > .domlist,
+.gp-sec.grow > .sess-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .gp-head {
   display: flex;
@@ -5833,16 +5843,3 @@ kbd {
   color: var(--accent);
 }
 
-/* The run list is the one section that grows without bound as runs accumulate: it gets a
-   ceiling and scrolls inside it, so the conversations below it stay reachable without
-   scrolling the whole control column. */
-.gp-sec.runs-sec {
-  flex: 1 1 auto;
-  min-height: 120px;
-  max-height: 42vh;
-}
-.gp-sec.runs-sec > .domlist {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}

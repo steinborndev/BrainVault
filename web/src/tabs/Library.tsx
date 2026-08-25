@@ -30,7 +30,7 @@ const BUCKET_LABELS: Record<string, string> = {
 }
 const bucketLabel = (type: string): string => BUCKET_LABELS[type] ?? type
 
-type SortKey = 'changed' | 'title' | 'backlinks'
+type SortKey = 'changed' | 'title' | 'backlinks' | 'domain'
 /**
  * The four subsets of the page index, as ONE choice. System used to be a separate
  * toggle sitting apart from the three it belongs with - but it is a subset like the
@@ -48,6 +48,7 @@ const SORTS: Array<{ key: SortKey; label: string; desc: string }> = [
   { key: 'changed', label: 'Changed', desc: 'most recently edited first' },
   { key: 'title', label: 'Title', desc: 'alphabetical, A to Z' },
   { key: 'backlinks', label: 'Backlinks', desc: 'most linked pages first' },
+  { key: 'domain', label: 'Domain', desc: 'grouped by domain, unfiled pages last' },
 ]
 
 const PAGE_SIZE = 50
@@ -116,7 +117,14 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
     list = [...list]
     if (sort === 'title') list.sort((a, b) => a.title.localeCompare(b.title))
     else if (sort === 'backlinks') list.sort((a, b) => b.in - a.in || a.title.localeCompare(b.title))
-    else list.sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))
+    else if (sort === 'domain') {
+      // Unfiled pages last rather than first: an empty string would sort to the top and
+      // bury the domains the sort exists to group.
+      list.sort(
+        (a, b) =>
+          (a.domain ?? '\uffff').localeCompare(b.domain ?? '\uffff') || a.title.localeCompare(b.title),
+      )
+    } else list.sort((a, b) => (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0))
     return list
   }, [knowledge, query, type, domain, subset, sort])
 
@@ -192,6 +200,15 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
             </button>
           </div>
           <div className="typechips">
+            {/* "All" is a chip like the others rather than the absence of a choice - the
+                selected state was invisible while every type chip sat unselected. */}
+            <button
+              className={`chip${type === null ? ' active' : ''}`}
+              aria-pressed={type === null}
+              onClick={() => setType(null)}
+            >
+              All <span className="chip-n">{knowledge.length}</span>
+            </button>
             {typeCounts.map(([t, count]) => {
               const active = type === t
               return (

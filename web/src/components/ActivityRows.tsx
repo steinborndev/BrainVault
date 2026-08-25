@@ -348,25 +348,40 @@ export function QueueState({
   paused,
   reason,
   concurrency,
+  active,
+  queued,
 }: {
   paused: boolean
   reason: string | null
   concurrency: number | undefined
+  active: number
+  queued: number
 }): React.ReactElement {
+  // The old badge read "running" whenever the queue was merely WILLING to run, which is
+  // what it says for an idle service too - so the panel claimed work that was not
+  // happening. Three states now, and they describe the queue's actual occupation.
+  const state = paused ? 'paused' : active > 0 ? 'working' : 'idle'
   return (
     <>
       <div className="queue-row">
-        <span className={`badge ${paused ? 'deferred' : 'ok'}`}>{paused ? 'paused' : 'running'}</span>
-        {concurrency !== undefined && <span className="faintc">{concurrency} at a time</span>}
+        <span className={`badge ${state === 'paused' ? 'deferred' : state === 'working' ? 'ingesting' : ''}`}>
+          {state === 'paused' ? 'paused' : state === 'working' ? `${active} running` : 'idle'}
+        </span>
+        {queued > 0 && <span className="badge queued-badge">{queued} waiting</span>}
+        {concurrency !== undefined && state !== 'paused' && (
+          <span className="faintc">up to {concurrency} at a time</span>
+        )}
       </div>
       <div className="pillhint wrap">
         {paused
           ? reason === 'budget'
-            ? 'Daily budget reached - resumes at midnight.'
+            ? 'Daily budget reached - queued jobs resume at midnight.'
             : reason === 'rate-limit'
-              ? 'The Anthropic usage limit is exhausted - resumes when the window resets.'
+              ? 'The Anthropic usage limit is exhausted - queued jobs resume when the window resets.'
               : 'Queued jobs wait; nothing is lost.'
-          : 'Jobs start as they arrive.'}
+          : state === 'working'
+            ? 'Working through the queue - rows appear at the top of the stream.'
+            : 'Nothing to do. A drop, a watched file or a message starts a job within seconds.'}
       </div>
     </>
   )
