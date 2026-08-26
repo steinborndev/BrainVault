@@ -67,6 +67,35 @@ describe('styles.css structure', () => {
   })
 })
 
+describe('styles.css geometry invariants', () => {
+  /** The declaration block of the first rule whose selector list is exactly `selector`. */
+  const block = (selector: string): string => {
+    const i = bare.indexOf(`\n${selector} {`)
+    expect(i, `no rule for ${selector}`).toBeGreaterThan(-1)
+    return bare.slice(i, bare.indexOf('}', i))
+  }
+
+  /**
+   * The research console's plan line must be the same height in both modes. Only research
+   * files a page, so only research renders the bordered `.pl-page` chip - and while the
+   * plain values had no border and no vertical padding, that made the row 5.25px taller in
+   * research than in ask, which shifted the console and every list under it on every mode
+   * switch. `.pl-val` therefore reserves the chip's box and `.pl-page` only paints it.
+   */
+  it('reserves the same box for a plan-line value with and without the page chip', () => {
+    const plain = block('.pl-val')
+    expect(plain).toMatch(/border:\s*1px solid transparent/)
+    expect(plain).toMatch(/padding:\s*2px 0/)
+
+    const chip = block('.pl-val.pl-page')
+    expect(chip).toMatch(/padding:\s*2px 7px/)
+    // Only the COLOUR may be restated - a `border:` shorthand here would reset the width
+    // and bring the height difference back.
+    expect(chip).not.toMatch(/border:\s/)
+    expect(chip).toMatch(/border-color:/)
+  })
+})
+
 describe('styles.css coverage', () => {
   /** Every class token any component can put on an element. */
   const rendered = (): Set<string> => {

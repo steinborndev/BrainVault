@@ -4597,12 +4597,18 @@ kbd {
   color: var(--text-faint);
   white-space: nowrap;
 }
+/* Every value reserves the box the page chip needs, whether or not it IS the chip. Only
+   research files a page, so only research renders the bordered chip - and the row was
+   5.25px taller in that mode, which moved the whole console and everything under it every
+   time the mode changed. The border is transparent here and painted in `.pl-page`. */
 .pl-val {
   color: var(--text-dim);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 2px 0;
+  border: 1px solid transparent;
 }
 .pl-val.pl-hi {
   color: var(--research);
@@ -4618,7 +4624,7 @@ kbd {
   font-size: 11.5px;
   color: var(--text);
   background: var(--bg);
-  border: 1px solid var(--border);
+  border-color: var(--border);
   border-radius: 5px;
   padding: 2px 7px;
 }
