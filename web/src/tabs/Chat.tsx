@@ -1048,26 +1048,32 @@ function SessionLedgerRow({
       </td>
       <td className="num dimc">{session.message_count ?? '-'}</td>
       <td className="faintc">{timeAgo(session.last_ts ?? session.created_at)}</td>
-      <td className="rowacts">
-        <button
-          className="session-act"
-          onClick={() => {
-            setTitle(session.title ?? '')
-            setEditing(true)
-          }}
-          title="Rename"
-          aria-label="Rename conversation"
-        >
-          <Icon name="edit" />
-        </button>
-        <button
-          className={`session-act${confirming ? ' danger' : ''}`}
-          onClick={() => void del()}
-          title={confirming ? 'Really delete?' : 'Delete'}
-          aria-label={confirming ? 'Confirm delete' : 'Delete conversation'}
-        >
-          {confirming ? 'Really?' : <Icon name="x" />}
-        </button>
+      {/* The flex row is a span INSIDE the cell. A `td` set to `display: flex` drops out of
+          the table layout: this one stopped taking its 10% column, so the active row's
+          background ended three columns in, and its `opacity` made the cell its own layer
+          with a seam down the edge. Same rule as the library's `.lt-cell`. */}
+      <td className="lt-acts-cell">
+        <span className="rowacts">
+          <button
+            className="session-act"
+            onClick={() => {
+              setTitle(session.title ?? '')
+              setEditing(true)
+            }}
+            title="Rename"
+            aria-label="Rename conversation"
+          >
+            <Icon name="edit" />
+          </button>
+          <button
+            className={`session-act${confirming ? ' danger' : ''}`}
+            onClick={() => void del()}
+            title={confirming ? 'Really delete?' : 'Delete'}
+            aria-label={confirming ? 'Confirm delete' : 'Delete conversation'}
+          >
+            {confirming ? 'Really?' : <Icon name="x" />}
+          </button>
+        </span>
       </td>
     </tr>
   )

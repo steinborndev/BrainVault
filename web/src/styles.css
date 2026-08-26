@@ -4748,17 +4748,30 @@ kbd {
 .sess-table tr.active td {
   background: var(--accent-soft);
 }
+/* The open conversation keeps its colour under the pointer. The generic row hover paints a
+   translucent grey OVER the cell, which muddied the one row that already says something by
+   being coloured - hovering it made it look like a different state. */
+.sess-table tr.active:hover td {
+  background: color-mix(in srgb, var(--accent-soft) 75%, var(--bg-elev-2));
+}
+/* The actions cell is a plain table cell; the flex row lives in a span inside it. Putting
+   `display: flex` on the `td` itself drops it out of the table layout - it stopped claiming
+   its column, so a coloured row ended before it. */
+.lt-acts-cell {
+  text-align: right;
+}
 /* Row actions appear on hover and on keyboard focus - a row whose actions only exist under
-   a pointer is a row a keyboard cannot rename. */
+   a pointer is a row a keyboard cannot rename. Visibility, not opacity: an opacity below 1
+   makes the element its own compositing layer, which left a hairline seam along the cell. */
 .rowacts {
-  display: flex;
+  display: inline-flex;
   justify-content: flex-end;
   gap: 4px;
-  opacity: 0;
+  visibility: hidden;
 }
 tr:hover .rowacts,
 tr:focus-within .rowacts {
-  opacity: 1;
+  visibility: visible;
 }
 
 /* ---- Home: the vault zone (redesign 2026-08-26) ----
