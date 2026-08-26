@@ -587,9 +587,15 @@ collected and simply never added up anywhere.
       still IN FLIGHT, the settle record for a pre-v12 failure, and the synthesis pages in
       the vault for every run that predates the table. Verified against the live service: an
       index rebuild wrote its row and came back out of the endpoint.
-- [ ] OPEN: SPEC.md §6 still describes five tabs (Overview, Ingestion, Query/Chat, Vault,
-      Maintenance) and was deliberately not edited. The amendment now has two structure
-      changes to fold in (the 2026-08-23 sidebar shell and this pass).
+- [x] SPEC.md §6 amended (2026-08-26). Both structure changes folded in as one correction:
+      the five screens with their routes and what each holds, a mapping from every old
+      subsection to where its content lives now, and the two things that belong to no
+      subsection (the status chips in the header, the legacy-route normalisation). 6.1-6.5
+      are left standing rather than rewritten - code comments cite their numbers, and the
+      document's habit is to annotate, not to erase. Two divergences the amendment states
+      outright rather than papering over: the queue was never made reorderable, and
+      `recentPages` is served but rendered nowhere. §6.5's endpoint excerpt was at the M4
+      state and now names the families added since.
 
 ### Round two fixes (2026-08-25)
 
