@@ -161,16 +161,17 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const runProfile = profiles.find((p) => p.key === runProfileKey)
 
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  const bodyRef = useRef<HTMLDivElement>(null)
+  /** The thread is its own scroll container, so following it means scrolling THIS. */
+  const threadRef = useRef<HTMLDivElement>(null)
 
   // Follow a thread as it grows, and while an answer streams - but never yank the view back
   // down when the reader scrolled up to re-read something.
   useEffect(() => {
     if (view.kind !== 'thread') return
-    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight })
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight })
   }, [messages.length, ask.isPending, view.kind])
   useEffect(() => {
-    const el = bodyRef.current
+    const el = threadRef.current
     if (el === null || streamed === '') return
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
     if (nearBottom) el.scrollTo({ top: el.scrollHeight })
@@ -608,7 +609,12 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
         )}
 
-        <div className={`box-body${view.kind === 'start' ? ' start-view' : ''}`} ref={bodyRef}>
+        {/* Each view owns its own scrolling. `start` scrolls as a whole; a DETAIL must fit -
+            its head and facts are the frame you read the content against, and letting them
+            scroll away put two scrollbars on one screen and the run's own facts off it. */}
+        <div
+          className={`box-body${view.kind === 'start' ? ' start-view' : view.kind === 'run' ? ' detail-view' : ' thread-view'}`}
+        >
           {view.kind === 'start' && (
             <StartView
               entries={shownEntries}
@@ -644,7 +650,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           )}
 
           {view.kind === 'thread' && (
-            <div className="thread">
+            <div className="thread" ref={threadRef}>
               {messages.length === 0 && !ask.isPending && !ask.isError && (
                 <div className="chat-empty">
                   <div className="icon">
@@ -684,14 +690,6 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 </div>
               )}
 
-              {canSave && (
-                <div className="savebar">
-                  <button className="btn" disabled={save.running} onClick={save.start}>
-                    {save.running ? 'Saving…' : 'Save conversation to vault'}
-                  </button>
-                  <span className="dim">creates/updates wiki pages from this thread - one git commit</span>
-                </div>
-              )}
               {save.running && <JobLog jobId="maintenance:save" seed={false} />}
               {save.error && <div className="toast err">{save.error}</div>}
               {save.result?.ok && (
@@ -704,6 +702,17 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Beside the thread, not inside it: an action that scrolls away with the
+              conversation is one you cannot reach while reading it. */}
+          {view.kind === 'thread' && canSave && (
+            <div className="savebar">
+              <button className="btn" disabled={save.running} onClick={save.start}>
+                {save.running ? 'Saving…' : 'Save conversation to vault'}
+              </button>
+              <span className="dim">creates/updates wiki pages from this thread - one git commit</span>
             </div>
           )}
         </div>
@@ -993,7 +1002,7 @@ function RunDetailBody({
       {entry.error !== null && <div className="toast err">{entry.error}</div>}
 
       {entry.pages.length > 0 && (
-        <div>
+        <div className="pagesblock">
           <h4 className="section-title">Pages</h4>
           <span className="pages">
             {entry.pages.map((p) => (

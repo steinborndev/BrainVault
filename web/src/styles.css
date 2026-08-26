@@ -5414,6 +5414,62 @@ tr:focus-within .rowacts {
   gap: 14px;
   padding: 14px 16px 20px;
 }
+/* ── A detail fits the screen; only its content scrolls ────────────────────────
+   Two scrollbars on one pane is one too many, and the outer one took the run's own facts
+   with it. The body stops scrolling and hands its height down: the page chips get a bounded
+   band of their own, and the article takes whatever is left. */
+.box-body.detail-view,
+.box-body.thread-view {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.box-body.detail-view > .detail-pad {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 14px;
+}
+/* A run with thirty pages must not squeeze the article to nothing, so the chips scroll in
+   their own band rather than growing without limit. */
+.detail-pad > .pagesblock {
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.detail-pad > .pagesblock > .pages {
+  /* Two rows, then it scrolls. The chips say WHICH pages; the article is what you came to
+     read, so the chips take a band and the article takes the rest. */
+  max-height: 68px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.box-body.detail-view .article {
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+.box-body.detail-view .article-body {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+/* The conversation scrolls inside itself, so the bar above it and the save action below it
+   keep their places. */
+.box-body.thread-view > .thread {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.box-body.thread-view > .savebar {
+  flex: none;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+}
+
 /* The run's synthesis page, rendered under its facts. Bounded and scrolling in place: it is
    a full wiki page, and letting it push the run's facts off the top would turn the detail
    into an article viewer with a header nobody can see. */
