@@ -116,7 +116,9 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
       if (subset === 'orphans' && !isOrphan(n)) return false
       if (subset === 'stubs' && !isStub(n)) return false
       if (terms.length > 0) {
-        const hay = `${n.title} ${n.tags.join(' ')} ${n.domain ?? ''}`.toLowerCase()
+        // `names` carries the page's own title and aliases where they differ from the file
+        // name - the same reason the graph search reads them.
+        const hay = `${n.title} ${(n.names ?? []).join(' ')} ${n.tags.join(' ')} ${n.domain ?? ''}`.toLowerCase()
         if (!terms.every((t) => hay.includes(t))) return false
       }
       return true

@@ -165,6 +165,13 @@ export interface GraphNode {
   title: string
   /** Top-level wiki bucket: concepts | entities | sources | meta | … | root. */
   type: string
+  /**
+   * The page's other names: its frontmatter `title:` and aliases, when they differ from the
+   * basename that `title` carries. A filename drops characters the filesystem dislikes, so
+   * the two forms are not always the same string - searching only `title` could not find a
+   * page by the name it calls itself.
+   */
+  names?: string[]
   /** Frontmatter `tags:` - the thematic axis; searchable and (via domain) filterable. */
   tags: string[]
   /** Frontmatter `domain:` meta-category, or null when the page carries none. */

@@ -30,6 +30,17 @@ export interface GraphNode {
   readonly path: string
   /** Page name (basename without `.md`) — the label the graph renders. */
   readonly title: string
+  /**
+   * The page's OTHER names: its frontmatter `title:` and any aliases, when they differ from
+   * the basename. Present so search can find a page by the name it calls itself.
+   *
+   * The two drift by design, and the link resolver has always known it (see the name index
+   * below): a filename drops what the filesystem dislikes, so a page titled
+   * "… implantable/wearable …" is stored as "… implantable_wearable …", and a hub goes by
+   * another name entirely. Searching only the basename meant typing a page's own title -
+   * the string the dashboard shows for it elsewhere - found nothing (2026-08-26).
+   */
+  readonly names?: readonly string[]
   /** Top-level bucket: `concepts` | `entities` | `sources` | `meta` | … | `root` for wiki/*.md. */
   readonly type: string
   /** Frontmatter `tags:` (as written, deduped); the thematic axis the folders don't carry. */
@@ -360,6 +371,11 @@ export class GraphBuilder {
 
     const nodes: GraphNode[] = files.map((f, i) => {
       const entry = this.cache.get(f.abs)
+      // Same set the resolver indexes by, minus the basename it already is. Omitted when
+      // empty, which is the common case - the payload is fetched by every screen.
+      const names = [...new Set([entry?.fmTitle, ...(entry?.aliases ?? [])])].filter(
+        (n): n is string => typeof n === 'string' && n !== '' && n !== f.title,
+      )
       return {
         path: f.rel,
         title: f.title,
@@ -371,6 +387,7 @@ export class GraphBuilder {
         in: inDeg[i]!,
         mtimeMs: f.mtimeMs,
         size: f.size,
+        ...(names.length > 0 ? { names } : {}),
       }
     })
 

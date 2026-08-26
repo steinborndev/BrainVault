@@ -589,6 +589,10 @@ function GraphView({
       terms.every(
         (t) =>
           n.title.toLowerCase().includes(t) ||
+          // The page's own title and aliases, not just its file name. The two differ
+          // whenever the filesystem refused a character, so typing the title the dashboard
+          // shows elsewhere used to find nothing.
+          (n.names?.some((name) => name.toLowerCase().includes(t)) ?? false) ||
           n.tags.some((tag) => tag.toLowerCase().includes(t)) ||
           (n.domain?.toLowerCase().includes(t) ?? false),
       )
