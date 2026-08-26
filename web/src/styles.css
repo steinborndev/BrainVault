@@ -435,8 +435,9 @@ button {
   padding: 0 12px;
   line-height: 1;
 }
-.status-pill:hover {
-  border-color: var(--border-strong);
+.status-pill:hover,
+.status-pill:focus-visible,
+.status-pill[aria-expanded='true'] {
   color: var(--text);
 }
 .status-pill .dot {
@@ -448,10 +449,6 @@ button {
 .status-pill.live .dot {
   background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
-}
-.status-pill .chev {
-  font-size: 10px;
-  color: var(--text-faint);
 }
 .status-pop {
   position: absolute;
@@ -470,6 +467,17 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+/* The panel floats 8px below the chip. Without this the pointer leaves the wrapper while
+   crossing that gap and the grace timer is the only thing keeping the panel alive; the
+   bridge makes the trip continuous instead of merely forgiven. */
+.status-pop::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  height: 9px;
+}
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
