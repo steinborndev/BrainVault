@@ -239,7 +239,10 @@ function UsageSection(): React.ReactElement {
   )
   const last7d = useMemo(() => withinDays(items, 7, new Date()), [items])
   const byChannel = useMemo(() => spendByChannel(last7d), [last7d])
-  const biggest = useMemo(() => topSpend(last7d, 6), [last7d])
+  // Every recorded run, dearest first - not a top-6 of the last week. The question this
+  // table answers is "what has this cost me", and a window plus a cap answered it for six
+  // rows and hid the rest.
+  const byCost = useMemo(() => topSpend(items, items.length), [items])
 
   // Every figure here is derived from all three queries, so the section reports one state
   // for all three. It used to gate on `stats.data === undefined` alone, which rendered a
@@ -365,12 +368,21 @@ function UsageSection(): React.ReactElement {
 
       <section className="subcard">
         <div className="sc-head">
-          <h3 className="sc-title">Most expensive runs · last 7 days</h3>
+          <h3 className="sc-title">
+            Runs by cost
+            <Tip text="Every ingest and maintenance run the service still has a price for, dearest first. Jobs older than the stored window and runs evicted from the run log are not in here." />
+          </h3>
+          <span className="spacer" />
+          <span className="badge">{byCost.length} priced</span>
+          <span className="badge">{usd(totalSpend(byCost))} total</span>
         </div>
         <div className="sc-body flush">
-          {biggest.length === 0 ? (
-            <div className="empty">No priced runs in this window.</div>
+          {byCost.length === 0 ? (
+            <div className="empty">No priced runs recorded yet.</div>
           ) : (
+            /* The list grows with every run, so it scrolls inside the card instead of
+               pushing the rest of the section off the screen. */
+            <div className="cardscroll" style={{ maxHeight: 340 }}>
             <table className="dtable runtable">
               <thead>
                 <tr>
@@ -382,7 +394,7 @@ function UsageSection(): React.ReactElement {
                 </tr>
               </thead>
               <tbody>
-                {biggest.map((i) => (
+                {byCost.map((i) => (
                   <tr key={i.id}>
                     <td className="rt-name" title={i.label}>
                       {i.label}
@@ -397,6 +409,7 @@ function UsageSection(): React.ReactElement {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </section>

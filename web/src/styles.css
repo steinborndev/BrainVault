@@ -5589,6 +5589,19 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A table that lists everything it has, inside a card that cannot grow with it: it scrolls
+   in place. The head stays put and is painted in the card's own ground, or the rows scroll
+   straight through it. */
+.cardscroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.cardscroll .dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+}
 
 /* Vault stats: the figures stay on screen and the domain list scrolls on its own, rather
    than the whole pane scrolling and taking the numbers with it. */
