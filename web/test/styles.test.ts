@@ -94,6 +94,18 @@ describe('styles.css geometry invariants', () => {
     expect(chip).not.toMatch(/border:\s/)
     expect(chip).toMatch(/border-color:/)
   })
+
+  /**
+   * Every title in the Library starts at the same x. The type chip's width follows its
+   * label ("Meta" 48px, "Comparisons" 97px), so a chip sized to its own text put the titles
+   * at five different offsets down one screen. The SLOT is fixed, never the chip - sizing
+   * the chip would stretch "Meta" into a pill the width of "Comparisons".
+   */
+  it('gives the Library type chip a fixed slot, so titles do not start at the label width', () => {
+    expect(block('.lib-table')).toMatch(/--lib-kind-w:\s*\d+px/)
+    const slot = block('.lib-table .lt-kind')
+    expect(slot).toMatch(/flex:\s*0 0 var\(--lib-kind-w\)/)
+  })
 })
 
 describe('styles.css coverage', () => {

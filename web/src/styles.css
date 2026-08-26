@@ -5651,6 +5651,8 @@ kbd {
    `.lt-actgroup`), which is what buys the title column its width back. */
 .lib-table {
   --lib-source-w: 84px;
+  /* Wide enough for the longest bucket label ("Comparisons", 97px measured). */
+  --lib-kind-w: 100px;
 }
 .lib-table th:nth-child(2) { width: 194px; }
 .lib-table th:nth-child(3) { width: 96px; }
@@ -5670,6 +5672,15 @@ kbd {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+/* A fixed slot for the type chip, so every title in the column starts at the same x. The
+   slot is fixed, not the chip: giving the CHIP the width would stretch "Meta" into a pill
+   the width of "Comparisons". An unknown bucket with a longer label than any shipped one
+   grows past the slot into the gap rather than being clipped. */
+.lib-table .lt-kind {
+  flex: 0 0 var(--lib-kind-w);
+  display: flex;
+  align-items: center;
 }
 .lib-table .lt-name {
   min-width: 0;

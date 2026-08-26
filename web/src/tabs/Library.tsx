@@ -380,7 +380,12 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                         leaves the table layout, and its baseline then drifts against the
                         cells beside it, a little further with every row. */}
                     <span className="lt-cell">
-                      <span className="badge type">{bucketLabel(n.type)}</span>
+                      {/* The chip sits in a fixed slot, not just next to the title: its width
+                          follows the label ("Meta" 48px, "Comparisons" 97px), which started
+                          every title at a different x - five distinct ones down one screen. */}
+                      <span className="lt-kind">
+                        <span className="badge type">{bucketLabel(n.type)}</span>
+                      </span>
                       <strong className="lt-name">{n.title}</strong>
                       {isOrphan(n) && <span className="lt-flag err">orphan</span>}
                       {isStub(n) && <span className="lt-flag warn">stub</span>}
