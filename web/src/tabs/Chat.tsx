@@ -268,6 +268,13 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   }
   const shownEntries = lensFilter === null ? entries : entries.filter((e) => (e.profileKey ?? 'broad') === lensFilter)
 
+  // What the thread bar calls this conversation. A session that was never saved has no
+  // title yet, and the sessions list already names that state "New conversation".
+  const threadTitle =
+    activeId === null
+      ? 'New conversation'
+      : (sessions.find((s) => s.id === activeId)?.title ?? 'New conversation')
+
   const lensDisabled = mode === 'ask'
   const busy = mode === 'ask' ? ask.isPending : research.running
   const sendLabel = mode === 'ask' ? (ask.isPending ? 'Asking…' : 'Ask') : research.running ? 'Running…' : 'Start run'
@@ -578,6 +585,25 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
             ) : (
               <> - no changes.</>
             )}
+          </div>
+        )}
+
+        {/* The way back out of a conversation. It sits OUTSIDE the scrolling body on
+            purpose: the thread scrolls itself to the newest message, so a bar inside it
+            would be somewhere above the fold for the whole conversation - which is how a
+            reader ended up with no way back to the overview at all. The run detail keeps
+            its own "All runs" button inside its pane, where the content is short enough
+            that it stays in view. */}
+        {view.kind === 'thread' && (
+          <div className="thread-bar">
+            <button className="backlink" onClick={() => setView({ kind: 'start' })}>
+              <Icon name="back" />
+              All conversations
+            </button>
+            <Icon name="chat" />
+            <h3 className="detail-title" title={threadTitle}>
+              {threadTitle}
+            </h3>
           </div>
         )}
 
@@ -892,6 +918,10 @@ function RunDetail({
   return (
     <div className="detail-pad">
       <div className="detail-head">
+        <button className="backlink" onClick={onBack}>
+          <Icon name="back" />
+          All runs
+        </button>
         <Icon name="flask" />
         <h3 className="detail-title">{entry.topic}</h3>
         {profile !== undefined && <span className="lens-tag">{profile.label}</span>}
@@ -899,9 +929,6 @@ function RunDetail({
         <span className="spacer" />
         <button className="btn sm" onClick={() => onRerun(entry.topic, entry.profileKey)}>
           Run again
-        </button>
-        <button className="btn ghost" onClick={onBack}>
-          All runs
         </button>
       </div>
 

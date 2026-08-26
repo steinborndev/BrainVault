@@ -5401,6 +5401,64 @@ tr:focus-within .rowacts {
   gap: 14px;
   padding: 14px 16px 20px;
 }
+/* The way out of a detail view. It leads the row rather than trailing it, and it is a
+   BOX: as a `.btn.ghost` at the far right of a 1600px bar it was dim text with no border
+   until hovered, which is a label, not a control - the first reader looked straight past
+   it and asked where the button was. Arrow plus destination, at the start of the line,
+   which is where a back control is looked for. */
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  padding: 0 11px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.backlink:hover,
+.backlink:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.backlink svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: inherit;
+}
+
+/* The conversation's own bar, above the scrolling thread: the same shape as a detail head,
+   but pinned, because the thread scrolls to its newest message and a bar inside it would sit
+   above the fold from the first answer onward. Ask wears the neutral accent, never the
+   research violet - nothing here writes. */
+.thread-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.thread-bar svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--accent);
+}
+.thread-bar .detail-title {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .detail-head {
   display: flex;
   align-items: center;
