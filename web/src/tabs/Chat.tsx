@@ -168,8 +168,20 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   useEffect(() => {
     const ta = composerRef.current
     if (!ta) return
+    // Every screen stays MOUNTED and is hidden with `[hidden]` (App.tsx), so this runs once
+    // while the Research screen has no layout at all - and an element with no layout reports
+    // `scrollHeight: 0`. Writing that back pinned the field to `height: 0px`, where it stayed
+    // until the first keystroke, because `draft` never changed in between. Reloading straight
+    // onto /research measured a laid-out element and looked fine, which is why it read as "too
+    // small until you reload". With no inline height the `rows={1}` height stands, which is
+    // exactly the height this would have computed anyway.
+    if (ta.offsetParent === null) return
     ta.style.height = 'auto'
-    ta.style.height = `${Math.min(160, ta.scrollHeight)}px`
+    // `scrollHeight` counts content and padding but not the border, and the stylesheet is
+    // border-box - so assigning it straight back made the field two pixels shorter than its
+    // own content every time, which is why one line of placeholder sat clipped at the bottom.
+    const border = ta.offsetHeight - ta.clientHeight
+    ta.style.height = `${Math.min(160, ta.scrollHeight + border)}px`
   }, [draft])
 
   // A gap's "Research" landed us here with a topic: arm Research mode, drop it into the
