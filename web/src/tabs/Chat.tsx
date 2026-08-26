@@ -272,10 +272,8 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
 
   // What the thread bar calls this conversation. A session that was never saved has no
   // title yet, and the sessions list already names that state "New conversation".
-  const threadTitle =
-    activeId === null
-      ? 'New conversation'
-      : (sessions.find((s) => s.id === activeId)?.title ?? 'New conversation')
+  const sessionTitle = activeId === null ? null : (sessions.find((s) => s.id === activeId)?.title ?? null)
+  const threadTitle = sessionTitle ?? 'New conversation'
 
   const lensDisabled = mode === 'ask'
   const busy = mode === 'ask' ? ask.isPending : research.running
@@ -664,9 +662,16 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 </div>
               )}
 
-              {messages.map((m) => (
-                <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
-              ))}
+              {messages.map((m, i) => {
+                // A conversation is NAMED after its first question, and that name is in the
+                // bar above. Repeating it as the opening bubble says the same thing twice -
+                // and it is the one bubble the reader never needs, because they just clicked
+                // it to get here. A renamed conversation no longer matches and keeps it.
+                const isTitleEcho =
+                  i === 0 && m.role === 'user' && sessionTitle !== null && m.content.trim() === sessionTitle.trim()
+                if (isTitleEcho) return null
+                return <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
+              })}
 
               {ask.isPending && (
                 <>
