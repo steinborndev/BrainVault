@@ -422,18 +422,23 @@ button {
 .statuswrap {
   position: relative;
 }
+/* Shaped like the ambient `.tstat` labels beside it, not like a control: no border, no
+   raised ground, no chevron (2026-08-26). It is still a button - hover and focus open the
+   panel, click pins it - but in that row it is one status among four, and the only thing
+   that has to stand out is the live dot. */
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   height: var(--control-h);
-  border: 1px solid var(--border);
-  background: var(--bg-elev-2);
-  color: var(--text-dim);
-  font-size: 13px;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 12px;
   border-radius: 999px;
-  padding: 0 12px;
+  padding: 0 2px;
   line-height: 1;
+  white-space: nowrap;
 }
 .status-pill:hover,
 .status-pill:focus-visible,
@@ -462,11 +467,6 @@ button {
   box-shadow: var(--shadow);
   padding: 12px 14px;
 }
-.status-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
 /* The panel floats 8px below the chip. Without this the pointer leaves the wrapper while
    crossing that gap and the grace timer is the only thing keeping the panel alive; the
    bridge makes the trip continuous instead of merely forgiven. */
@@ -478,6 +478,11 @@ button {
   top: -9px;
   height: 9px;
 }
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   font-size: 13px;
@@ -1574,30 +1579,6 @@ details.hot-cache[open] summary {
   color: var(--text-faint);
 }
 
-/* One bordered card: hint line (research mode only), then [Ask|Research] · borderless
-   textarea · send. The mode toggle is part of the input, not a floating row of chips.
-   Research mode wears its own accent - it has side effects (web access + vault writes),
-   so the composer must not look like a harmless filter switch. */
-.composer {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-}
-.composer:focus-within {
-  border-color: var(--accent);
-}
-.composer.research-mode,
-.composer.research-mode:focus-within {
-  border-color: var(--research);
-}
-.comp-main {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px;
-}
 /* Research violet on a button: the action has side effects (web access + vault writes), so
    it never wears the neutral accent. Applies with or without `.primary` - the backlog's
    "Research" button carries `btn sm research` and was rendering as a plain grey button,
@@ -1658,21 +1639,6 @@ details.hot-cache[open] summary {
   background: color-mix(in srgb, var(--research) 16%, transparent);
   color: var(--research);
   border: 1px solid color-mix(in srgb, var(--research) 45%, transparent);
-}
-
-.composer textarea {
-  flex: 1;
-  resize: none; /* grows with content via JS, capped at 200px */
-  min-height: 36px;
-  max-height: 200px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  padding: 8px 4px;
-  font: inherit;
-}
-.composer textarea:focus {
-  outline: none;
 }
 
 /* Empty thread: the hint + composer center in the viewport instead of a vast gap with the
@@ -4602,46 +4568,61 @@ kbd {
 .run-state.running { color: var(--research); background: color-mix(in srgb, var(--research) 16%, transparent); }
 .run-state.done { color: var(--ok); background: var(--ok-bg); }
 .run-state.failed { color: var(--err); background: var(--err-bg); }
+/* The plan line: what the send button will do, as labelled facts rather than a sentence
+   of separators. Each fact carries its own key, so the row is scanned. Both modes render
+   the same shape, so switching modes cannot move anything below it. */
 .planline {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--text-dim);
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--research) 5%, transparent);
+  flex-wrap: wrap;
+  gap: 7px 16px;
+  padding: 11px 13px 12px 16px;
   min-width: 0;
 }
-.planline .pl-lens {
-  color: var(--research);
-  font-weight: 600;
-  white-space: nowrap;
+/* Prefixed, all of it: `.fact`/`.fk`/`.fv` are the shared figure tile (Home's glance
+   strip, System's grids) and `.lens` is the lens pill - three collisions that turned this
+   row into a grid of bordered cards the first time it shipped. */
+.pl-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
 }
-.planline .pl-sep {
-  color: var(--text-faint);
-}
-.planline .pl-k {
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.planline .pl-title {
+.pl-key {
   font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--text);
-  background: var(--bg-elev-2);
-  border-radius: 5px;
-  padding: 1px 6px;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.pl-val {
+  color: var(--text-dim);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
-  flex-shrink: 1;
 }
-.planline .pl-cost {
-  white-space: nowrap;
+.pl-val.pl-hi {
+  color: var(--research);
+  font-weight: 600;
 }
-.planline .pl-cost b {
+/* Ask wears the neutral accent, never the research violet: nothing here has side effects. */
+.console.ask .pl-val.pl-hi {
+  color: var(--accent);
+}
+/* The target page title is a filename. It should look like one. */
+.pl-val.pl-page {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.pl-val b {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -4757,21 +4738,34 @@ kbd {
   color: var(--text-faint);
 }
 /* A section heading INSIDE the body, for screens that stack two lists (research runs
-   and the backlog) - not a second box, just a labelled break. */
+   and the backlog) - not a second box, just a labelled break. It carries real weight now
+   (2026-08-26): under the console it is the only thing separating two lists, and at
+   `--text-faint` it was quieter than the rows it introduced. */
 .sub-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  padding: 12px 14px 8px;
+  padding: 13px 14px 9px;
   border-bottom: 1px solid var(--border);
 }
 .sub-title {
   margin: 0;
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-faint);
+  color: var(--text-dim);
+}
+/* How many rows the section holds, as a figure rather than another grey word. */
+.count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
 }
 
 
@@ -4915,50 +4909,324 @@ kbd {
   pointer-events: auto;
 }
 
-/* ── Research: the composer sits at the TOP of the box now ─────────────────── */
-.box > .composer {
+/* ── Research: the console (2026-08-26) ────────────────────────────────────────
+   Mode, topic, plan and phases used to be four strips of equal value stacked on the box's
+   own ground, hairline-separated, directly above a run table drawn the same way - six
+   horizontal rules of identical weight and no entry point for the eye. They are one raised
+   card now: inset from the box edge, a step up in surface, a 3px rail in the mode's colour
+   and a header tinted to match, with the step rail attached as its footer. Everything below
+   drops to `--bg`, so the console floats and the history recedes. ── */
+.console {
+  position: relative;
   flex: none;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 10px 14px 11px;
-  gap: 2px;
+  margin: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
 }
-.box > .composer.research-mode {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--research) 8%, var(--bg-elev)), var(--bg-elev));
+/* The mode's own colour, down the whole left edge. Which mode is armed is legible from
+   the shape of the card, not only from the label inside it. */
+.console::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--research);
 }
-.box > .composer:focus-within {
-  border-color: var(--border);
-  border-bottom-color: var(--accent);
+.console.ask::before {
+  background: var(--accent);
 }
-.box > .composer.research-mode:focus-within {
-  border-bottom-color: var(--research);
+.console:focus-within {
+  border-color: color-mix(in srgb, var(--research) 55%, var(--border-strong));
 }
-.box > .composer .comp-main {
-  padding: 0;
+.console.ask:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
 }
-.box > .composer textarea {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  padding: 8px 10px;
-}
-.box > .composer .planline {
-  margin-top: 9px;
-  padding: 0;
-  border: 0;
-  background: none;
-}
-.comp-modes {
+.console-head {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-bottom: 9px;
+  gap: 8px;
+  padding: 9px 13px 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--research) 13%, transparent), transparent);
 }
-.comp-modes .viewpill.rs[aria-checked='true'] {
-  background: color-mix(in srgb, var(--research) 16%, transparent);
-  border-color: var(--research);
+.console.ask .console-head {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent);
+}
+/* One segmented control, not two loose pills: the modes are exclusive, and a segment
+   makes that structural. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.seg button {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button[aria-checked='true'] {
+  background: color-mix(in srgb, var(--research) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--research) 55%, transparent);
   color: var(--research);
+  font-weight: 600;
+}
+.console.ask .seg button[aria-checked='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
+/* What the armed mode may do. A run that reaches the web and writes pages should not
+   announce itself in the same faint grey as a read-only query. */
+.caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--research) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--research) 11%, transparent);
+  color: var(--research);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.console.ask .cap {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* A capability the mode does NOT have, stated in the same row - the absence is the point. */
+.cap.off,
+.console.ask .cap.off {
+  border-color: var(--border);
+  background: none;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.cap svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.console-main {
+  display: flex;
+  align-items: stretch;
+  gap: 9px;
+  padding: 12px 13px 0 16px;
+}
+.console-main textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+.console-main textarea::placeholder {
+  color: var(--text-faint);
+}
+.console-main textarea:focus {
+  outline: none;
+  border-color: var(--research);
+}
+.console.ask .console-main textarea:focus {
+  border-color: var(--accent);
+}
+.btn-run {
+  flex: none;
+  align-self: stretch;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--research);
+  color: #17102b;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.console.ask .btn-run {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-run:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+/* ── The step rail: the console's footer ───────────────────────────────────────
+   One track runs through the marks and fills as the run advances, so progress is a
+   distance rather than five chips changing colour. `--steps` and `--progress` come from
+   the component: marks sit at the centre of equal-width columns, so the track spans
+   centre to centre and both ends inset by half a column. ── */
+.rail {
+  padding: 11px 13px 10px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.rail-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+.rail-track,
+.rail-fill {
+  position: absolute;
+  top: 10px;
+  height: 2px;
+  border-radius: 2px;
+  left: calc(50% / var(--steps));
+}
+.rail-track {
+  right: calc(50% / var(--steps));
+  background: var(--border);
+}
+.rail-fill {
+  width: calc((100% - 100% / var(--steps)) * var(--progress));
+  background: linear-gradient(90deg, var(--ok), var(--research));
+  transition: width 0.35s ease;
+}
+.rail.ask .rail-fill {
+  background: linear-gradient(90deg, var(--ok), var(--accent));
+}
+.rail-step {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.rail-mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.rail-mark svg {
+  width: 11px;
+  height: 11px;
+}
+.rail-nm {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.rail-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.rail-step.done .rail-mark {
+  border-color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.rail-step.done .rail-nm {
+  color: var(--text-dim);
+}
+.rail-step.now .rail-mark {
+  border-color: var(--research);
+  background: color-mix(in srgb, var(--research) 22%, transparent);
+  color: var(--research);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--research) 14%, transparent);
+}
+.rail.ask .rail-step.now .rail-mark {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rail-step.now .rail-nm,
+.rail-step.now .rail-note {
+  color: var(--research);
+  font-weight: 600;
+}
+.rail.ask .rail-step.now .rail-nm,
+.rail.ask .rail-step.now .rail-note {
+  color: var(--accent);
+}
+/* Only the mark in flight breathes, and only its ring - pulsing the whole mark dims the
+   number every other beat. */
+@media (prefers-reduced-motion: no-preference) {
+  .rail.live .rail-step.now .rail-mark {
+    animation: rail-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes rail-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 4%, transparent);
+  }
+}
+.rail-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--border);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.rail-now {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail.live .rail-now {
+  color: var(--text-dim);
+}
+.rail-el {
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.rail-el b {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
 }
 
 /* Threads and run details live in the same scrolling body. */
@@ -5377,126 +5645,7 @@ kbd {
   width: 78px;
 }
 
-/* The Ask counterpart of the research plan line: same shape, the accent instead of the
-   research violet, because nothing here has side effects. */
-.planline .pl-lens.ask {
-  color: var(--accent);
-}
 
-/* ── The composer's step strip ─────────────────────────────────────────────
-   Dimmed while nothing runs, lit as it happens - one row, so both modes are the same
-   height and starting a run never moves the screen. */
-.agentsteps {
-  flex: none;
-  padding: 9px 14px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
-}
-.as-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.as-step {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 9px 0 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-faint);
-  font-size: 11.5px;
-  white-space: nowrap;
-  opacity: 0.6;
-}
-.as-step + .as-step::before {
-  content: '';
-  position: relative;
-  left: -9px;
-  width: 6px;
-  height: 1px;
-  background: var(--border-strong);
-}
-.as-mark {
-  display: grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--bg-elev-2);
-  color: var(--text-faint);
-  font-family: var(--mono);
-  font-size: 9.5px;
-}
-.as-mark svg {
-  width: 10px;
-  height: 10px;
-}
-.as-dot {
-  width: var(--dot-sm);
-  height: var(--dot-sm);
-  border-radius: 50%;
-  background: currentColor;
-  animation: badge-pulse 1.4s ease-in-out infinite;
-}
-/* The step's own name, between its mark and its note. */
-.as-nm {
-  font-weight: 500;
-}
-.as-note {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--text-dim);
-}
-/* Live states. The tone follows the mode: research violet, ask accent. */
-.agentsteps.live .as-step.done {
-  opacity: 1;
-  color: var(--text-dim);
-  border-color: var(--border-strong);
-}
-.agentsteps.live .as-step.done .as-mark {
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.agentsteps.live .as-step.now {
-  opacity: 1;
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.agentsteps.research.live .as-step.now {
-  border-color: var(--research);
-  color: var(--research);
-  background: color-mix(in srgb, var(--research) 14%, transparent);
-}
-.agentsteps.live .as-step.now .as-mark {
-  background: transparent;
-  color: inherit;
-}
-.as-foot {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-top: 7px;
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-.as-now {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agentsteps.live .as-now {
-  color: var(--text-dim);
-}
-.as-el b {
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  margin-left: 4px;
-}
 /* The outcome of the run that just finished, in the same fixed head as the strip. */
 .runbanner {
   flex: none;
@@ -5506,11 +5655,20 @@ kbd {
   border-right: 0;
 }
 
-/* ── Research start view: runs and backlog split the height, each scrolls ── */
+/* ── Research start view: runs and backlog split the height, each scrolls ──
+   One step DOWN from the console's ground (2026-08-26): the console floats, the history
+   recedes, and the eye lands on the thing you act with before the thing you already did. */
 .box-body.start-view {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+/* The sticky table head has to be painted in the ground it sits on, or the rows scroll
+   through it. */
+.start-view .dtable thead th {
+  background: var(--bg);
 }
 .sv-sec {
   display: flex;

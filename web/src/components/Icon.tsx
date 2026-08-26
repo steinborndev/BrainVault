@@ -35,6 +35,7 @@ export type IconName =
   | 'bolt'
   | 'expand'
   | 'shrink'
+  | 'globe'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   expand: (
@@ -101,6 +102,14 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     <>
       <circle cx="11" cy="11" r="7" />
       <path d="M16.5 16.5L21 21" />
+    </>
+  ),
+  // Web egress, on the research console's capability chip.
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.4 2.5 3.6 5.4 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.4-3.6-8.5S9.6 6 12 3.5z" />
     </>
   ),
   graph: (

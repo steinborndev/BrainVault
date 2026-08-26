@@ -1,6 +1,7 @@
 /**
- * The composer's step strip: what the agent will do, in the order it will do it - dimmed
- * while nothing is running, lit as it happens.
+ * The console's step rail: what the agent will do, in the order it will do it - dimmed
+ * while nothing is running, lit as it happens, with one track running through the marks
+ * that fills as the run advances.
  *
  * The point of showing it idle is that the run does not rearrange the screen when it starts.
  * The steps are already there, in the same place, at the same height; starting a run only
@@ -72,24 +73,38 @@ function Strip({
   elapsed: string
   tone: 'research' | 'ask'
 }): React.ReactElement {
+  // The fill reaches the mark of the step in flight, or the last finished one once nothing
+  // is running any more. Marks sit at the centre of equal-width columns, so the track spans
+  // centre-to-centre and both ends inset by half a column - `--steps` carries the count into
+  // the stylesheet, which is the only place that knows the column geometry.
+  const nowIndex = steps.findIndex((s) => s.state === 'now')
+  const doneCount = steps.filter((s) => s.state === 'done').length
+  const reached = nowIndex >= 0 ? nowIndex : Math.max(0, doneCount - 1)
+  const progress = steps.length > 1 ? reached / (steps.length - 1) : 0
+
   return (
-    <div className={`agentsteps ${tone}${running ? ' live' : ''}`}>
-      <div className="as-row">
+    <div
+      className={`rail ${tone}${running ? ' live' : ''}`}
+      style={{ '--steps': steps.length, '--progress': progress } as React.CSSProperties}
+    >
+      <div className="rail-row">
+        <span className="rail-track" aria-hidden />
+        {(running || doneCount > 0) && <span className="rail-fill" aria-hidden />}
         {steps.map((s, i) => (
-          <div key={s.key} className={`as-step ${s.state}`} title={s.title}>
-            <span className="as-mark" aria-hidden>
-              {s.state === 'done' ? <Icon name="check" /> : s.state === 'now' ? <span className="as-dot" /> : i + 1}
+          <div key={s.key} className={`rail-step ${s.state}`} title={s.title}>
+            <span className="rail-mark" aria-hidden>
+              {s.state === 'done' ? <Icon name="check" /> : i + 1}
             </span>
-            <span className="as-nm">{s.short}</span>
-            {s.note !== '' && <span className="as-note">{s.note}</span>}
+            <span className="rail-nm">{s.short}</span>
+            {s.note !== '' && <span className="rail-note">{s.note}</span>}
           </div>
         ))}
       </div>
-      <div className="as-foot">
-        <span className="as-now">{running ? (now ?? 'Starting…') : idleHint}</span>
+      <div className="rail-foot">
+        <span className="rail-now">{running ? (now ?? 'Starting…') : idleHint}</span>
         <span className="spacer" />
         {elapsed !== '' && (
-          <span className="as-el">
+          <span className="rail-el">
             elapsed <b>{elapsed}</b>
           </span>
         )}

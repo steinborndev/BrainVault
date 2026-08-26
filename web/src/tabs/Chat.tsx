@@ -351,32 +351,56 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
       </aside>
 
       <div className="box">
-        <div className={`composer${mode === 'research' ? ' research-mode' : ''}`}>
-          <div className="comp-modes" role="radiogroup" aria-label="Mode">
-            <button
-              className="viewpill rs"
-              role="radio"
-              aria-checked={mode === 'research'}
-              onClick={() => setMode('research')}
-              title="Research a topic on the web and create new vault pages"
-            >
-              Research the web
-            </button>
-            <button
-              className="viewpill"
-              role="radio"
-              aria-checked={mode === 'ask'}
-              onClick={() => setMode('ask')}
-              title="Ask the vault (read-only)"
-            >
-              Ask the vault
-            </button>
+        {/* The console (2026-08-26): mode, topic, what the run will cost and the phases it
+            goes through, in ONE raised card. These were four strips of equal value stacked
+            on the same ground as the run table below them, and the tab had no visible place
+            to start. The card is inset, lifted a step, and carries a rail in the mode's own
+            colour - so which mode is armed is legible from the shape, not just the label. */}
+        <div className={`console${mode === 'ask' ? ' ask' : ''}`}>
+          <div className="console-head">
+            <div className="seg" role="radiogroup" aria-label="Mode">
+              <button
+                role="radio"
+                aria-checked={mode === 'research'}
+                onClick={() => setMode('research')}
+                title="Research a topic on the web and create new vault pages"
+              >
+                Research the web
+              </button>
+              <button
+                role="radio"
+                aria-checked={mode === 'ask'}
+                onClick={() => setMode('ask')}
+                title="Ask the vault (read-only)"
+              >
+                Ask the vault
+              </button>
+            </div>
             <span className="spacer" />
-            <span className="faintc">
-              {mode === 'research' ? 'web access on · writes pages' : 'reads the vault only'}
+            {/* What the armed mode is ALLOWED to do. The two modes differ in exactly these
+                two capabilities, and a run that can reach the web and write pages should not
+                announce itself in the same faint grey as a read-only query. */}
+            <span className="caps">
+              {mode === 'research' ? (
+                <>
+                  <span className="cap">
+                    <Icon name="globe" /> Web access
+                  </span>
+                  <span className="cap">
+                    <Icon name="file" /> Writes pages
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="cap">
+                    <Icon name="book" /> Reads the vault
+                  </span>
+                  <span className="cap off">No commit</span>
+                </>
+              )}
             </span>
           </div>
-          <div className="comp-main">
+          <div className="console-main">
             <textarea
               ref={composerRef}
               value={draft}
@@ -394,61 +418,76 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               }
               rows={1}
             />
-            <button
-              className={`btn primary${mode === 'research' ? ' research' : ''}`}
-              disabled={draft.trim() === '' || busy}
-              onClick={send}
-            >
+            <button className="btn-run" disabled={draft.trim() === '' || busy} onClick={send}>
               {sendLabel}
             </button>
           </div>
           {/* Both modes state what the send button will do, in the same line and the same
-              shape - otherwise switching modes moved everything below by the height of
-              this row. Ask has no lens, no target page and no commit; saying so is the
-              honest counterpart to the research plan. */}
+              shape - otherwise switching modes moved everything below by the height of this
+              row. Each fact carries its own key now, so the row is scanned rather than read
+              as a sentence of separators. Ask has no lens, no target page and no commit;
+              saying so is the honest counterpart to the research plan. */}
           {mode === 'research' ? (
             selectedProfile !== undefined && (
               <div className="planline">
-                <span className="pl-lens">{selectedProfile.label}</span>
-                <span className="pl-sep">·</span>
-                <span className="pl-k">files as</span>
-                <span className="pl-title" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
-                  {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                <span className="pl-fact">
+                  <span className="pl-key">Lens</span>
+                  <span className="pl-val pl-hi">{selectedProfile.label}</span>
                 </span>
-                <span className="pl-sep">·</span>
-                <span className="pl-cost">
-                  up to <b>{selectedProfile.fetchEstimate}</b> fetches · 1 commit
+                <span className="pl-fact">
+                  <span className="pl-key">Files as</span>
+                  <span className="pl-val pl-page" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
+                    {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                  </span>
+                </span>
+                <span className="pl-fact">
+                  <span className="pl-key">Budget</span>
+                  <span className="pl-val">
+                    up to <b>{selectedProfile.fetchEstimate}</b> fetches
+                  </span>
+                </span>
+                <span className="pl-fact">
+                  <span className="pl-key">Commits</span>
+                  <span className="pl-val">
+                    <b>1</b>
+                  </span>
                 </span>
               </div>
             )
           ) : (
             <div className="planline">
-              <span className="pl-lens ask">Read-only</span>
-              <span className="pl-sep">·</span>
-              <span className="pl-k">answers cite</span>
-              <span className="pl-title">the vault pages they came from</span>
-              <span className="pl-sep">·</span>
-              <span className="pl-cost">no web access · no commit</span>
+              <span className="pl-fact">
+                <span className="pl-key">Mode</span>
+                <span className="pl-val pl-hi">Read-only</span>
+              </span>
+              <span className="pl-fact">
+                <span className="pl-key">Answers</span>
+                <span className="pl-val">cite the vault pages they came from</span>
+              </span>
+              <span className="pl-fact">
+                <span className="pl-key">Writes</span>
+                <span className="pl-val">nothing - no web access, no commit</span>
+              </span>
             </div>
           )}
+          {/* The rail is the console's FOOTER, not a sibling: it describes the run this
+              console starts. Always here, in both modes - dimmed while nothing runs, lit as
+              it happens, so a run starting never moves the screen. */}
+          {mode === 'research' ? (
+            <ResearchSteps
+              running={research.running || liveEntry !== undefined}
+              startedAt={runStartedAt ?? liveEntry?.startedAt ?? null}
+              profile={runProfile ?? selectedProfile}
+            />
+          ) : (
+            <AskSteps
+              pending={ask.isPending}
+              streamed={streamed}
+              citations={lastCitations}
+              answered={messages.some((m) => m.role === 'assistant')}
+            />
+          )}
         </div>
-
-        {/* Always here, in both modes: dimmed while nothing runs, lit as it happens. The
-            run does not move the screen when it starts. */}
-        {mode === 'research' ? (
-          <ResearchSteps
-            running={research.running || liveEntry !== undefined}
-            startedAt={runStartedAt ?? liveEntry?.startedAt ?? null}
-            profile={runProfile ?? selectedProfile}
-          />
-        ) : (
-          <AskSteps
-            pending={ask.isPending}
-            streamed={streamed}
-            citations={lastCitations}
-            answered={messages.some((m) => m.role === 'assistant')}
-          />
-        )}
 
         {mode === 'research' && research.error !== null && (
           <div className="toast err runbanner">
@@ -609,7 +648,7 @@ function StartView({
         <h3 className="sub-title">Runs</h3>
         <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
         <span className="spacer" />
-        <span className="box-sub">{entries.length}</span>
+        <span className="count">{entries.length}</span>
       </div>
       <div className="sv-scroll">
       {runState ?? (entries.length === 0 ? (
@@ -665,7 +704,7 @@ function StartView({
         <h3 className="sub-title">Worth a run</h3>
         <span className="box-sub">missing pages your vault already links to</span>
         <span className="spacer" />
-        <span className="box-sub">{gaps.length}</span>
+        <span className="count">{gaps.length}</span>
       </div>
       <div className="sv-scroll">
       {gapState ?? (gaps.length === 0 ? (
