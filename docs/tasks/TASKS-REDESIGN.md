@@ -622,3 +622,86 @@ collected and simply never added up anywhere.
 - [x] Decided: "clear history" stays scoped to the job rows. The run log is a separate
       record - it is the cost history, and it should not disappear with a click meant to
       tidy the inbox.
+
+## Phase 10: third pass - the vault as a shape, Research as two ledgers (2026-08-26)
+
+Scope from the approved clickable mockup ("Vault Dashboard Redesign", three rounds of
+review). Four complaints, all structural:
+
+1. Home was the activity table and nothing else; the vault it is about never appeared.
+2. Home's control column read as cramped: seven blocks stacked in one column with nothing
+   but air between them, in an order nobody had chosen.
+3. Research listed its runs twice - a short list in the rail, a full ledger in the box.
+4. The conversations were rail furniture while the runs were a first-class record, though
+   from the user's side they are the same kind of thing.
+
+No server change. Every figure was already collected; nothing new is fetched that another
+screen did not already fetch (`/graph` is the Graph tab's own query key).
+
+### Home
+
+- [x] **Two zones instead of one table.** Zone 1 is the stock (hero page count, the
+      countable facts as a list of doors, and the wikilink graph as a picture); zone 2 is
+      the flow (four operational figures as a strip on the activity table, then the stream).
+      The eye is led by the rhythm between them, not by a rule between equals.
+- [x] **The lead tiles were sorted by what they describe.** `Pages` is stock and leads zone
+      1; in-flight, failures, spend and checks are the run of the machine and sit on the
+      table they describe. `Ingests · 7d` joined them - a rate belongs next to failures.
+- [x] **`components/VaultConstellation.tsx`**: canvas portrait of the graph, reusing the
+      Graph tab's layout worker so both screens show one arrangement. It does NOT reuse
+      GraphCanvas - that module carries d3-force, and Home is the first screen rendered; the
+      domain grouping the worker needs is five lines and is computed locally.
+- [x] **It draws knowledge pages only.** With the scaffolding in, the index hub links to
+      every page there is and one 800-edge node pulls every domain into a single star.
+      `knowledgeSubgraph()` drops the scaffolding and remaps the surviving edges. Tested.
+- [x] **Nothing is measured off a force layout**, so every measurable thing is text beside
+      it, and the legend counts the DOTS rather than the page census - otherwise it lists
+      kinds the picture does not draw.
+- [x] **`lib/vaultShape.ts` is the single derivation** behind Home's facts and System's
+      vault statistics: links, median degree, domains, unfiled, orphans, stubs, unresolved,
+      gaps. System read its own copy of four of them. Tested (8 cases).
+- [x] **"Unfiled" fixed while it was being shared.** A page parked in the vault's catch-all
+      domain is exactly as unfiled as one with no `domain:` field, so the catch-all no
+      longer counts as a domain of its own: the vault reported 18 domains and zero unfiled
+      pages while eleven pages sat in the catch-all. Now 17 and 11, on both screens.
+- [x] **The rail is in the order the work happens**: intake, then filter / state / channel /
+      time, then the queue as a sticky status foot on its own ground - it is not a filter,
+      it is the answer to "why is nothing moving".
+- [x] The seven job states are a closed set and sit in two columns, one glance instead of a
+      scroll; the height that buys goes to the channel list, the one list that grows with
+      the vault. The kind hints became pill titles - same information, no column height.
+- [x] Verified on the live service at 1760x1010: panel scrollHeight 938 vs client 932, so
+      the column fits its window with the foot visible, and no screen scrolls the page.
+
+### Research
+
+- [x] **One place per object.** The rail's run list is gone; the ledger in the box is the
+      list, and the detail view has a Back button. The duplicate existed only because
+      opening a run replaced the ledger and left no way back - a navigation bug wearing a
+      duplicate's clothes.
+- [x] **Two ledgers of one shape**: *Web Research* (runs) and *Vault Research*
+      (conversations) split the height and scroll on their own. Same table, different
+      columns: one files pages and costs fetches, the other cites pages and commits nothing.
+- [x] **The modes carry the ledger names** ("Web Research" / "Vault Research"), so the mode
+      you arm and the ledger it lands in are named identically.
+- [x] **Conversations kept both their actions** in the move: inline rename (no
+      `window.prompt` - blocked in installed PWAs) and the two-step delete, revealed on
+      hover AND focus-within so a keyboard can still reach them.
+- [x] **The backlog stays a band of offers** under the ledgers - cards with a verb on them,
+      not a third table - and keeps its own height instead of taking a third of theirs.
+- [x] **The rail holds what shapes a run and what the runs add up to**: lens, a lens filter
+      over the web ledger, the running totals, and the same queue foot Home has (a run takes
+      a queue slot, the same as a drop). Runs whose cost was never recorded are excluded
+      from the spend total rather than counted as free; the tile says across how many runs
+      the figure holds.
+- [x] Dead styles for the two replaced rail lists removed (`.sess*`, `.runrow`, `.backlog`).
+
+### Open
+
+- [ ] **SPEC.md §6 is one pass behind again.** The correction table describes Home as five
+      figures plus the stream, and Research as a console plus a run list; Home now leads
+      with the vault's own shape, and Research has two ledgers with new mode names. The spec
+      is not edited here (it is edited on request only) - proposed as a follow-up, the same
+      shape as the 2026-08-26 correction.
+- [ ] The hero page count and the last line of the metric list both read 805. That is what
+      the approved mockup asked for; worth revisiting if it reads as a duplicate in daily use.
