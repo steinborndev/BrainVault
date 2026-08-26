@@ -1,19 +1,18 @@
 /**
- * Home (redesign 2026-08-25, second pass) - the Inbox folded in, so the two screens that
- * described the same events with two different vocabularies became one workspace of the same
- * shape as Graph and Library: controls in the left column, one content box beside it.
+ * Home (redesign 2026-08-26, third pass) - two questions, two treatments.
  *
- *   LEFT    intake (the reason to open the app at all), then the filters that shape the
- *           stream - kind, state, channel, time - and the queue's own state, which is the
- *           answer to "why is nothing moving".
- *   RIGHT   five numbers that are doors, then ONE table: in-flight rows tinted at the top,
- *           settled rows below. A job moves down the list when it commits instead of
- *           teleporting from Home's feed to the Inbox's history.
+ *   ZONE 1  THE VAULT, the stock: one hero number, the countable facts beside it, and the
+ *           wikilink graph as a picture. Large type, few words. What you own.
+ *   ZONE 2  ACTIVITY, the flow: the operational figures as a strip on top of the table they
+ *           belong to, then the stream itself. Dense rows, small type. What is moving.
  *
- * What Home gave up: the growth chart, the pages-by-type bars, the hot-cache line and the
- * most-wanted list. Growth and page types are vault statistics and live under System → Vault
- * stats; the most-wanted list is a research backlog and lives on Research, where the button
- * next to it starts the run.
+ * The eye is led by the rhythm between them - quiet-and-large above, dense-and-small below -
+ * rather than by two panels of equal weight separated by a rule. The five lead tiles used to
+ * mix the two: `Pages` describes the stock, the other four describe the run of the machine.
+ *
+ *   LEFT    the control column, in the order the work happens: intake first (the reason to
+ *           open the app), then the four ways to narrow the stream, then the queue as a
+ *           status foot - it is not a filter, it is the answer to "why is nothing moving".
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -21,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
 import type { Job, JobStatus } from '../api/types.ts'
 import { Dropzone } from '../components/Dropzone.tsx'
+import { VaultConstellation } from '../components/VaultConstellation.tsx'
 import { JobDrawer } from '../components/JobDrawer.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { queryState, merge } from '../components/QueryState.tsx'
@@ -49,6 +49,8 @@ import {
   type ActivityState,
 } from '../lib/activity.ts'
 import { navigate } from '../lib/router.ts'
+import { knowledgeSubgraph, vaultShape } from '../lib/vaultShape.ts'
+import { TYPE_VARS } from '../lib/domains.ts'
 
 /** The event kinds as one choice - the same four the model distinguishes, plus "all". */
 const KINDS: Array<{ id: ActivityKind | 'all'; label: string; hint: string }> = [
@@ -119,6 +121,9 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
     queryKey: ['maintenance-history', 'all'],
     queryFn: () => api.maintenanceHistory({ limit: 200 }),
   })
+  // The vault zone reads the graph. Same query key as the Graph tab, so opening that tab
+  // costs nothing extra - and the picture and its numbers come from one payload.
+  const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const runs = useActiveRuns()
   const maint = useMaintenanceStatus()
 
@@ -224,20 +229,50 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   // instead of sitting on their placeholder forever.
   const statPlaceholder = stats.isError ? '-' : '…'
 
-  const kindHint = KINDS.find((k) => k.id === filter.kind)!.hint
+  const shape = vaultShape(graphQ.data)
+  // The picture draws knowledge pages only. With the scaffolding in, `index.md` links to
+  // everything there is, and one 800-edge hub pulls every domain into a single star.
+  const constellation = useMemo(
+    () => (graphQ.data === undefined ? null : knowledgeSubgraph(graphQ.data)),
+    [graphQ.data],
+  )
+  // Growth is cumulative and sparse; the eighth-from-last point is a week back, and the
+  // first point is the honest fallback for a vault younger than that (System reads it the
+  // same way).
+  const growth = stats.data?.growth ?? []
+  const weekAgo = growth[growth.length - 8]?.total ?? growth[0]?.total ?? stats.data?.pages.total ?? 0
+  const grew = (stats.data?.pages.total ?? 0) - weekAgo
+  // The legend doubles as the composition read, and it counts the DOTS - deriving it from
+  // the page census instead would list kinds the picture does not draw.
+  const kinds = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const n of constellation?.nodes ?? []) counts.set(n.type, (counts.get(n.type) ?? 0) + 1)
+    return [...counts].sort((a, b) => b[1] - a[1])
+  }, [constellation])
+  const legend = kinds.slice(0, 4)
+  const legendRest = kinds.slice(4).reduce((sum, [, n]) => sum + n, 0)
   const historyCount = jobs.filter((j) => AT_REST.includes(j.status)).length
   const allTime = AT_REST.reduce((sum, st) => sum + (totals[st] ?? 0), 0)
 
   return (
     <div className="workspace">
       <aside className="gpanel" aria-label="Home controls">
-        {/* The reset lives in the head of the panel's FIRST section on every screen that has
-            one - here and on Library that is the search, on Graph it is the view lens. It
-            used to sit in whichever section happened to come third, so it moved between
-            screens. */}
-        <div className="gp-sec gp-find">
+        {/* Intake first: it is the reason to open the app at all, and the two other ways in
+            (watch folder, bot) state themselves right under it. Everything below narrows the
+            stream; the queue closes the column. */}
+        <div className="gp-sec">
           <div className="gp-head">
-            <span className="gp-eyebrow">Find</span>
+            <span className="gp-eyebrow">Add to vault</span>
+          </div>
+          <Dropzone />
+        </div>
+
+        {/* The reset lives in the head of the panel's first FILTERING section - here that is
+            this one, on Library the search, on Graph the view lens. It used to sit in
+            whichever section happened to come first, which is now intake. */}
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Filter</span>
             <span className="spacer" />
             {filtered && (
               <button className="btn ghost" onClick={reset} title="Back to everything, last 30 days">
@@ -255,19 +290,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               onChange={(e) => setFilter({ ...filter, query: e.target.value })}
             />
           </div>
-        </div>
-
-        <div className="gp-sec">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Add to vault</span>
-          </div>
-          <Dropzone />
-        </div>
-
-        <div className="gp-sec">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Show</span>
-          </div>
           <div className="pillrow" role="radiogroup" aria-label="Event kind">
             {KINDS.map((k) => (
               <button
@@ -275,22 +297,24 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                 className="viewpill"
                 role="radio"
                 aria-checked={filter.kind === k.id}
+                title={k.hint}
                 onClick={() => setFilter({ ...filter, kind: k.id })}
               >
                 {k.label}
               </button>
             ))}
           </div>
-          <div className="pillhint wrap">{kindHint}</div>
         </div>
 
+        {/* Seven states, a closed set: two columns keep them one glance instead of a scroll,
+            and the height that buys goes to the channel list, which grows with the vault. */}
         <div className="gp-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">State</span>
             <span className="spacer" />
             <span className="gp-state">{filter.state ?? 'all'}</span>
           </div>
-          <div className="domlist static">
+          <div className="domlist static stategrid">
             {STATES.map((s) => {
               const active = filter.state === s.id
               return (
@@ -313,10 +337,12 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
           <div className="gp-head">
             <span className="gp-eyebrow">Channel</span>
             <span className="spacer" />
-            {filter.channel !== null && (
+            {filter.channel !== null ? (
               <button className="btn ghost" onClick={() => setFilter({ ...filter, channel: null })}>
                 <Icon name="x" /> Clear
               </button>
+            ) : (
+              <span className="gp-count">{channels.length}</span>
             )}
           </div>
           <div className="domlist">
@@ -356,13 +382,12 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               </button>
             ))}
           </div>
-          <div className="pillhint wrap">
-            Applies to settled rows. The store keeps the newest {WINDOW_MAX}; older ones are counted, not
-            listed.
-          </div>
+          <div className="pillhint wrap">Settled rows only; the newest {WINDOW_MAX} are listed.</div>
         </div>
 
-        <div className="gp-sec">
+        {/* The status foot: the queue is the machine's own state, not a filter, and it is the
+            last thing you look at when nothing is moving. */}
+        <div className="gp-sec gp-foot">
           <div className="gp-head">
             <span className="gp-eyebrow">Queue</span>
           </div>
@@ -376,62 +401,141 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
         </div>
       </aside>
 
-      <div className="box">
-        <Facts size="lead">
-          <Fact
-            k="Pages"
-            v={stats.data?.pages.total ?? statPlaceholder}
-            sub="Browse the library"
-            size="lead"
-            onOpen={() => navigate('/library')}
-          />
-          <Fact
-            k="In flight"
-            v={events.filter((e) => e.live).length}
-            sub={`${events.filter((e) => e.live && e.state === 'running').length} running, ${events.filter((e) => e.state === 'queued').length} queued`}
-            size="lead"
-            onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'running', days: null })}
-          />
-          <Fact
-            k="Failures · 7d"
-            v={stats.data?.kpis7d.failures ?? statPlaceholder}
-            tone={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'err' : undefined}
-            sub={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'retry from the row' : 'nothing failed this week'}
-            size="lead"
-            onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'failed', days: null })}
-          />
-          <Fact
-            k="Spend today"
-            v={
-              stats.data !== undefined ? (
-                <Cost value={stats.data.usage.today.costUsd} authMode={authMode} />
+      <div className="home-main">
+        {/* ZONE 1 - the stock. No section header: the number IS the header, and a caption
+            above it would only say what the number already says. */}
+        <section className="vaultzone">
+          <div className="vz-hero">
+            <div className="vz-n">{stats.data?.pages.total ?? statPlaceholder}</div>
+            <div className="vz-k">pages in the wiki</div>
+            {stats.data !== undefined && growth.length > 1 && (
+              <div className={`vz-delta${grew < 0 ? ' down' : ''}`}>
+                {grew >= 0 ? '▲' : '▼'} {Math.abs(grew)} in the last 7 days
+              </div>
+            )}
+            <div className="vz-facts">
+              <button className="vzf" onClick={() => navigate('/graph')}>
+                <b>{shape !== null ? shape.links.toLocaleString('en-US') : statPlaceholder}</b>
+                <span>links between pages</span>
+              </button>
+              <button className="vzf" onClick={() => navigate('/graph')}>
+                <b>{shape !== null ? shape.medianDegree : statPlaceholder}</b>
+                <span>median links per page</span>
+              </button>
+              <button className="vzf" onClick={() => navigate('/library')}>
+                <b>{shape !== null ? shape.domains : statPlaceholder}</b>
+                <span>
+                  domains
+                  {shape !== null && shape.undomained > 0 ? `, ${shape.undomained} pages unfiled` : ''}
+                </span>
+              </button>
+              <button className="vzf" onClick={() => navigate('/graph?gaps=1')}>
+                <b>{shape !== null ? shape.unresolved : statPlaceholder}</b>
+                <span>links to pages that do not exist</span>
+              </button>
+              <button className="vzf" onClick={() => navigate('/library')}>
+                <b>{stats.data?.pages.total ?? statPlaceholder}</b>
+                <span>pages in the wiki</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="vz-plot">
+            <div className="vz-plothead">
+              <span className="gp-eyebrow">Shape</span>
+              <span className="box-sub">the wikilink graph, clustered by domain</span>
+              <span className="spacer" />
+              <button className="btn ghost" onClick={() => navigate('/graph')}>
+                Open Graph
+              </button>
+            </div>
+            {/* A force layout is a decorative read - nothing can be counted off it, which is
+                why every countable thing is stated as text to the left of it. */}
+            <div className="vz-canvas">
+              {constellation !== null ? (
+                <VaultConstellation
+                  nodes={constellation.nodes}
+                  edges={constellation.edges}
+                  onOpen={() => navigate('/graph')}
+                />
               ) : (
-                statPlaceholder
-              )
-            }
-            sub={
-              stats.data?.budget.limit != null
-                ? `${Math.min(100, Math.round((stats.data.budget.spent / stats.data.budget.limit) * 100))}% of the daily budget`
-                : 'no daily budget set'
-            }
-            size="lead"
-            onOpen={() => navigate('/system?section=usage')}
-          />
-          <Fact
-            k="Checks due"
-            v={maint.data?.status.due ?? statPlaceholder}
-            tone={(maint.data?.status.due ?? 0) > 0 ? 'warn' : undefined}
-            sub={
-              maint.data === null
-                ? 'checking…'
-                : (maint.data?.status.recommended ?? 0) > 0
-                  ? `${maint.data?.status.recommended} recommended soon`
-                  : 'nothing else pending'
-            }
-            size="lead"
-            onOpen={() => navigate('/system')}
-          />
-        </Facts>
+                (queryState(graphQ, 'the vault graph') ?? <div className="empty">No pages yet.</div>)
+              )}
+            </div>
+            <div className="vz-legend">
+              {legend.map(([dir, n]) => (
+                <span key={dir} className="vzl">
+                  <span className="dot" style={{ background: `var(${TYPE_VARS[dir] ?? '--type-meta'})` }} aria-hidden />
+                  {dir} <b>{n}</b>
+                </span>
+              ))}
+              {legendRest > 0 && (
+                <span className="vzl">
+                  <span className="dot" style={{ background: 'var(--type-meta)' }} aria-hidden />
+                  other <b>{legendRest}</b>
+                </span>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* ZONE 2 - the flow. The operational figures sit on top of the table they describe. */}
+        <div className="box">
+          <Facts size="lead">
+            <Fact
+              k="In flight"
+              v={events.filter((e) => e.live).length}
+              sub={`${events.filter((e) => e.live && e.state === 'running').length} running, ${events.filter((e) => e.state === 'queued').length} queued`}
+              size="lead"
+              onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'running', days: null })}
+            />
+            <Fact
+              k="Failures · 7d"
+              v={stats.data?.kpis7d.failures ?? statPlaceholder}
+              tone={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'err' : undefined}
+              sub={(stats.data?.kpis7d.failures ?? 0) > 0 ? 'retry from the row' : 'nothing failed this week'}
+              size="lead"
+              onOpen={() => setFilter({ ...DEFAULT_FILTER, state: 'failed', days: null })}
+            />
+            <Fact
+              k="Ingests · 7d"
+              v={stats.data?.kpis7d.ingests ?? statPlaceholder}
+              sub={`${stats.data?.usage.today.ingests ?? 0} today`}
+              size="lead"
+              onOpen={() => setFilter({ ...DEFAULT_FILTER, kind: 'ingest', days: 7 })}
+            />
+            <Fact
+              k="Spend today"
+              v={
+                stats.data !== undefined ? (
+                  <Cost value={stats.data.usage.today.costUsd} authMode={authMode} />
+                ) : (
+                  statPlaceholder
+                )
+              }
+              sub={
+                stats.data?.budget.limit != null
+                  ? `${Math.min(100, Math.round((stats.data.budget.spent / stats.data.budget.limit) * 100))}% of the daily budget`
+                  : 'no daily budget set'
+              }
+              size="lead"
+              onOpen={() => navigate('/system?section=usage')}
+            />
+            <Fact
+              k="Checks due"
+              v={maint.data?.status.due ?? statPlaceholder}
+              tone={(maint.data?.status.due ?? 0) > 0 ? 'warn' : undefined}
+              sub={
+                maint.data === null
+                  ? 'checking…'
+                  : (maint.data?.status.recommended ?? 0) > 0
+                    ? `${maint.data?.status.recommended} recommended soon`
+                    : 'nothing else pending'
+              }
+              size="lead"
+              onOpen={() => navigate('/system')}
+            />
+          </Facts>
 
         <div className="box-head">
           <h2 className="box-title">Activity</h2>
@@ -543,6 +647,7 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             </button>
           )}
           <span className="dim">Click a row for the full record: log, commit, pages, retry, revert.</span>
+        </div>
         </div>
       </div>
 

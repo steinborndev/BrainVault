@@ -31,7 +31,7 @@ import { Icon } from '../components/Icon.tsx'
 import { queryState, merge } from '../components/QueryState.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceStatus } from '../hooks/useMaintenanceStatus.ts'
-import { STUB_BYTES } from '../lib/domains.ts'
+import { isUnfiled, knowledgePages, vaultShape } from '../lib/vaultShape.ts'
 import { timeAgo, tokens, usd } from '../lib/format.ts'
 import { navigate } from '../lib/router.ts'
 import { runTitle } from '../lib/runLabels.ts'
@@ -437,14 +437,17 @@ function VaultStatsSection(): React.ReactElement {
     return <div className="sys-pane">{state ?? <div className="empty">No vault statistics yet.</div>}</div>
   }
   const s = stats.data
+  // One derivation for both screens (lib/vaultShape.ts): Home's vault zone shows the same
+  // figures, and a number computed twice is a number that eventually disagrees with itself.
   const nodes = graph.data?.nodes ?? []
-  const knowledge = nodes.filter((n) => (n.kind ?? 'knowledge') === 'knowledge')
-  const orphans = knowledge.filter((n) => n.in === 0 && n.out === 0).length
-  const stubs = knowledge.filter((n) => (n.size ?? Infinity) < STUB_BYTES).length
-  const gaps = graph.data?.gaps.length ?? null
-  const undomained = knowledge.filter((n) => n.domain === null).length
+  const knowledge = knowledgePages(nodes)
+  const shape = vaultShape(graph.data)
+  const orphans = shape?.orphans ?? 0
+  const stubs = shape?.stubs ?? 0
+  const gaps = shape?.gaps ?? null
+  const undomained = shape?.undomained ?? 0
   const domainCounts = new Map<string, number>()
-  for (const n of knowledge) if (n.domain !== null) domainCounts.set(n.domain, (domainCounts.get(n.domain) ?? 0) + 1)
+  for (const n of knowledge) if (!isUnfiled(n)) domainCounts.set(n.domain as string, (domainCounts.get(n.domain as string) ?? 0) + 1)
   const unversioned = s.unversioned
   const growth = s.growth
   const weekAgo = growth[growth.length - 8]?.total ?? growth[0]?.total ?? s.pages.total

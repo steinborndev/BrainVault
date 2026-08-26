@@ -2329,7 +2329,7 @@ details.hot-cache[open] summary {
   border-bottom: 0;
 }
 .gp-sec {
-  padding: 12px 14px 13px;
+  padding: 11px 14px 12px;
   border-bottom: 1px solid var(--border);
 }
 .gp-sec:last-child {
@@ -4740,6 +4740,186 @@ kbd {
   font-size: 12px;
   color: var(--text-faint);
 }
+/* ---- Home: the vault zone (redesign 2026-08-26) ----
+   Two zones stacked in the content column: the stock above (quiet, large, few words) and
+   the flow below (dense, small, many words). The contrast between them is the thing that
+   leads the eye - a rule between two panels of equal weight never did. */
+.home-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.vaultzone {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  flex: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.vz-hero {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  border-right: 1px solid var(--border);
+}
+.vz-n {
+  font-family: var(--display);
+  font-size: 54px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.vz-k {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.vz-delta {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--ok);
+}
+.vz-delta.down {
+  color: var(--warn);
+}
+/* The countable facts. A force layout cannot be measured, so everything measurable is
+   written next to it - and each line is a door to the screen that shows it in full. */
+.vz-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.vzf {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.vzf b {
+  min-width: 54px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.vzf:hover b,
+.vzf:focus-visible b {
+  color: var(--accent);
+}
+.vz-plot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+.vz-plothead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vz-plothead .spacer {
+  flex: 1;
+}
+/* Tall on purpose, and it scales with the window rather than with the graph: a squashed
+   force layout reads as noise. */
+.vz-canvas {
+  height: clamp(220px, 32vh, 380px);
+  min-height: 0;
+}
+.vz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.vzl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.vzl .dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  flex: none;
+}
+.vzl b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.constell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* The whole picture is the button: it is a door to the Graph tab, and a door you can only
+   open by hitting a 3px dot is not a door. */
+.constell-hit {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.constell canvas {
+  display: block;
+}
+.constell-cap {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+/* ---- Home rail: the state grid and the status foot ----
+   Seven states are a closed set, so they read as one glance in two columns; the height that
+   saves goes to the channel list, which is the one list that grows with the vault. */
+.stategrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+}
+.stategrid .domrow {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+/* The queue is the machine's own state, not a filter: it sits at the foot of the column on
+   its own ground, the way a status bar does. Sticky, because the panel is allowed to scroll
+   on a short window - and "why is nothing moving" is exactly the question you ask when you
+   cannot be bothered to scroll for the answer. */
+.gp-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: auto;
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border-strong);
+}
+
 /* A section heading INSIDE the body, for screens that stack two lists (research runs
    and the backlog) - not a second box, just a labelled break. It carries real weight now
    (2026-08-26): under the console it is the only thing separating two lists, and at

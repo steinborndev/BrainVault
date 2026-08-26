@@ -119,26 +119,11 @@ export interface GraphCanvasProps {
   overlay?: React.ReactNode
 }
 
-/**
- * Bucket → CSS variable. A CATEGORICAL scale of its own (--type-*): reusing the status
- * tokens painted every source amber and every question red, so a healthy graph read as a
- * field of warnings - and the orphans lens (red) collided with the question color. Falls
- * back to --muted for unknown buckets. Exported so the type legend renders swatches from
- * the same mapping the canvas colors nodes with.
- */
-export const TYPE_VARS: Record<string, string> = {
-  concepts: '--type-concept',
-  entities: '--type-entity',
-  sources: '--type-source',
-  meta: '--type-meta',
-  root: '--type-root',
-  questions: '--type-question',
-}
-
-// Domain colors + the stub threshold moved to lib/domains.ts (the library shares them and
-// must not pull this d3-carrying module into the main bundle). Re-exported for callers.
-import { domainColor, domainHue, STUB_BYTES } from '../lib/domains.ts'
-export { domainColor, domainHue, STUB_BYTES }
+// Domain colors, the page-kind color map and the stub threshold live in lib/domains.ts (the
+// library, and now Home's constellation, share them and must not pull this d3-carrying
+// module into the main bundle). Re-exported for callers.
+import { domainColor, domainHue, STUB_BYTES, TYPE_VARS } from '../lib/domains.ts'
+export { domainColor, domainHue, STUB_BYTES, TYPE_VARS }
 
 /** The available color lenses. `domain`/`type` are categorical; the rest re-encode a metric. */
 export type Lens = 'domain' | 'type' | 'authority' | 'orphans' | 'stubs' | 'recency'
