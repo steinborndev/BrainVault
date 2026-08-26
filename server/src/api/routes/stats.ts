@@ -64,7 +64,9 @@ export function registerStatsRoute(app: FastifyInstance, ctx: AppContext): void 
     const pages = pageCounts(config.vaultRoot)
     // git can fail (no commits, not a repo) — never let it sink the whole Overview.
     const [commits, growthPoints, unversionedPages] = await Promise.all([
-      recentCommits(config.vaultRoot, 8).catch(() => [] as Commit[]),
+      // 12, not 8: the System tab lists these as the vault's history, and eight rows of a
+      // busy day is not a history. Home reads the same array for its activity stream.
+      recentCommits(config.vaultRoot, 12).catch(() => [] as Commit[]),
       growth(config.vaultRoot, GROWTH_DAYS, pages.total).catch(() => [] as GrowthPoint[]),
       // One `git status` (~8ms on a 750-page vault), and it rides this cache like the rest.
       unversionedWikiPages(config.vaultRoot).catch(() => ({ untracked: [], modified: [] })),

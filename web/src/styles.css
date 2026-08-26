@@ -5589,6 +5589,16 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The commit list in Vault stats: the subject takes what is left, the rest is fixed. */
+.committable th:nth-child(2) { width: 82px; }
+.committable th:nth-child(3) { width: 116px; }
+.committable th:nth-child(4) { width: 92px; }
+.committable .ct-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A table that lists everything it has, inside a card that cannot grow with it: it scrolls
    in place. The head stays put and is painted in the card's own ground, or the rows scroll
    straight through it. */
@@ -5612,6 +5622,15 @@ kbd {
   height: 100%;
   min-height: 0;
   padding-bottom: 14px;
+  /* The safety valve. `fill` budgets the height between fixed blocks and one growing list,
+     which only works while the fixed blocks fit - add a sixth card and every one of them
+     gets silently squeezed instead (the figures row lost its top edge that way). Scrolling
+     the pane is the honest outcome when the section is simply taller than the viewport. */
+  overflow-y: auto;
+}
+/* Fixed blocks keep their natural height; only `.grow` gives any of it back. */
+.sys-pane.fill > * {
+  flex: none;
 }
 .sys-pane.fill > .subcard.grow {
   display: flex;

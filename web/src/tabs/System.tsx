@@ -35,6 +35,7 @@ import { STUB_BYTES } from '../lib/domains.ts'
 import { timeAgo, tokens, usd } from '../lib/format.ts'
 import { navigate } from '../lib/router.ts'
 import { runTitle } from '../lib/runLabels.ts'
+import { contentPages } from '../lib/activity.ts'
 import { spendByChannel, spendItems, topSpend, totalSpend, withinDays } from '../lib/usage.ts'
 
 type SectionId = 'checks' | 'usage' | 'vault' | 'service' | 'integrations'
@@ -495,6 +496,59 @@ function VaultStatsSection(): React.ReactElement {
           </div>
         </section>
       </div>
+
+      {/* What actually changed, next to the chart that says how much. The Home stream shows
+          commits mixed with jobs and runs over the last 30 days; this is the git history of
+          the vault itself, newest first. */}
+      <section className="subcard">
+        <div className="sc-head">
+          <h3 className="sc-title">
+            Recent commits
+            <Tip text="Every write to this vault is one commit - agent runs, maintenance and your own page edits alike. Page counts exclude the index hubs (index, hot, log, overview and the _index pages) that almost every commit touches." />
+          </h3>
+          <span className="spacer" />
+          <span className="badge">{s.commits.length} newest</span>
+        </div>
+        <div className="sc-body flush">
+          {s.commits.length === 0 ? (
+            <div className="empty">Nothing is committed in this vault yet.</div>
+          ) : (
+            /* Four rows deep, the rest one scroll away: this card sits between the figures
+               and the domain list, and neither may lose its place to it. */
+            <div className="cardscroll" style={{ maxHeight: 168 }}>
+            <table className="dtable committable">
+              <thead>
+                <tr>
+                  <th>Commit</th>
+                  <th className="num">Pages</th>
+                  <th>When</th>
+                  <th>Hash</th>
+                </tr>
+              </thead>
+              <tbody>
+                {s.commits.map((c) => {
+                  const pages = contentPages(c.pages)
+                  return (
+                    <tr key={c.hash}>
+                      <td className="ct-subject" title={c.subject}>
+                        {c.subject}
+                      </td>
+                      <td className="num dimc" title={pages.join('\n')}>
+                        {pages.length > 0 ? `+${pages.length}` : '-'}
+                      </td>
+                      <td className="faintc">{timeAgo(c.date)}</td>
+                      <td>
+                        <span className="mono-meta">{c.hash.slice(0, 7)}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </div>
+      </section>
 
       <div className="sys-grid">
         <section className="subcard">
