@@ -4235,15 +4235,12 @@ kbd {
   text-align: right;
   width: 76px;
 }
-/* The row's hover actions must not make the row taller than a row of plain text. */
+/* The row's hover actions must not make the row taller than a row of plain text. Showing
+   and hiding them is the GROUP's job now (`.lt-actgroup`), not each button's - two
+   mechanisms for one behaviour is how they end up disagreeing. */
 .lt-acts .btn.ghost {
   height: 24px;
   padding: 0 6px;
-  opacity: 0;
-}
-.dtable tr:hover .lt-acts .btn.ghost,
-.lt-acts .btn.ghost:focus-visible {
-  opacity: 1;
 }
 /* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
 .gp-search:focus-within,
@@ -5647,11 +5644,19 @@ kbd {
 /* The library table keeps ONE layout across every filter. Fixed columns mean the domain,
    link and date columns never move because a domain happens to hold shorter titles; the
    page column takes whatever is left, which is the layout the longest titles need. */
-.lib-table th:nth-child(2) { width: 150px; }
+/* Measured against the real vault, not guessed (2026-08-26). Domain was 150px while the
+   longest domain name needs 194, which clipped 21 of 50 rows on screen; Source was 104px
+   for a link that is never wider than 54. The actions column reserved 78px in every row
+   for two buttons that only appear on hover - it is zero-width now and they float (see
+   `.lt-actgroup`), which is what buys the title column its width back. */
+.lib-table {
+  --lib-source-w: 84px;
+}
+.lib-table th:nth-child(2) { width: 194px; }
 .lib-table th:nth-child(3) { width: 96px; }
 .lib-table th:nth-child(4) { width: 132px; }
-.lib-table th:nth-child(5) { width: 104px; }
-.lib-table th:nth-child(6) { width: 78px; }
+.lib-table th:nth-child(5) { width: var(--lib-source-w); }
+.lib-table th:nth-child(6) { width: 0; padding: 0; }
 /* Bucket and flags keep their size; only the title itself gives way, on one line, so the
    row height stays constant too. The full title is in the cell's tooltip. */
 /* The flex box is a span INSIDE the cell: a `td` with `display: flex` drops out of the
@@ -5678,10 +5683,35 @@ kbd {
   flex: none;
   margin: 0;
 }
-/* The action buttons appear on hover; the column is reserved either way, so nothing shifts
-   under the pointer. */
+/* The action buttons appear on hover, floating out of a zero-width cell at the end of the
+   row. `overflow: visible` is required - `.dtable td` hides overflow, which would clip them
+   away entirely. They are offset by the width of the Source column so they cover "Changed"
+   instead: Source is the column you reach for, and hiding it under the buttons the moment
+   you point at the row would defeat it. */
 .lib-table .lt-acts {
-  width: 78px;
+  width: 0;
+  padding: 0;
+  position: relative;
+  overflow: visible;
+}
+.lt-actgroup {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--lib-source-w) + 4px);
+  transform: translateY(-50%);
+  display: flex;
+  gap: 3px;
+  padding: 3px 4px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  box-shadow: -10px 0 12px -8px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+.lib-table tr:hover .lt-actgroup,
+.lt-actgroup:focus-within {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ── The Source column (2026-08-26) ────────────────────────────────────────────

@@ -405,25 +405,31 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                   <td className="lt-source" onClick={(e) => e.stopPropagation()}>
                     <SourceCell node={n} refs={sources.data?.pages} />
                   </td>
+                  {/* Zero-width cell: the buttons float out of it on hover instead of
+                      reserving 78px in every row for something that is invisible most of
+                      the time. They land over "Changed", never over Source - covering the
+                      link the column exists for would be a poor trade. */}
                   <td className="lt-acts" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn ghost"
-                      aria-label={`Focus ${n.title} in the graph`}
-                      title="Focus in graph"
-                      onClick={() => navigate(`/graph?focus=${encodeURIComponent(n.path)}`)}
-                    >
-                      <Icon name="spotlight" />
-                    </button>
-                    <button
-                      className="btn ghost"
-                      aria-label={`Open ${n.title} in Obsidian`}
-                      title="Open in Obsidian"
-                      onClick={() => {
-                        window.location.href = obsidianUri(vaultName, n.path)
-                      }}
-                    >
-                      <Icon name="link" />
-                    </button>
+                    <span className="lt-actgroup">
+                      <button
+                        className="btn ghost"
+                        aria-label={`Focus ${n.title} in the graph`}
+                        title="Focus in graph"
+                        onClick={() => navigate(`/graph?focus=${encodeURIComponent(n.path)}`)}
+                      >
+                        <Icon name="spotlight" />
+                      </button>
+                      <button
+                        className="btn ghost"
+                        aria-label={`Open ${n.title} in Obsidian`}
+                        title="Open in Obsidian"
+                        onClick={() => {
+                          window.location.href = obsidianUri(vaultName, n.path)
+                        }}
+                      >
+                        <Icon name="link" />
+                      </button>
+                    </span>
                   </td>
                 </tr>
               ))}
