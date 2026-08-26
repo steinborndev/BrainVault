@@ -273,3 +273,94 @@ describe('buildResearchRuns with the persistent run log', () => {
     expect(entries[0]!.source).toBe('history')
   })
 })
+
+describe('what a run is recorded as having written', () => {
+  /**
+   * The run log records what the run's COMMIT carried, which always includes the index hubs
+   * a run touches in passing. Counting those told the reader a run of two pages wrote six,
+   * and listed `index`, `hot`, `log` and the `_index` MOCs among its results.
+   */
+  it('leaves the index hubs out of a run\'s pages', () => {
+    const entries = buildResearchRuns({
+      history: [
+        history({
+          pages: [
+            'wiki/questions/Research: Topic.md',
+            'wiki/concepts/A Real Page.md',
+            'wiki/concepts/_index.md',
+            'wiki/sources/_index.md',
+            'wiki/index.md',
+            'wiki/hot.md',
+            'wiki/log.md',
+            'wiki/overview.md',
+          ],
+        }),
+      ],
+      runs: [],
+      lastRuns: [],
+      nodes: [],
+      profiles: PROFILES,
+    })
+    expect(entries[0]!.pages).toEqual(['wiki/questions/Research: Topic.md', 'wiki/concepts/A Real Page.md'])
+  })
+
+  /**
+   * A file name drops the characters the filesystem dislikes; the page's own title keeps
+   * them, and the run log records the topic as typed. Comparing by file name alone, a run
+   * about "implantable/wearable" did not recognise its own page and was reconstructed a
+   * second time - so the ledger showed the run twice, the copy claiming a single page.
+   */
+  it('does not reconstruct a run whose page name lost a character to the filesystem', () => {
+    const topic = 'Nanoparticle-based implantable/wearable drug delivery'
+    const entries = buildResearchRuns({
+      history: [history({ id: 'h1', label: topic, profileKey: 'sota', pages: ['wiki/concepts/Some Page.md'] })],
+      runs: [],
+      lastRuns: [],
+      nodes: [
+        node({
+          path: 'wiki/questions/Research: Nanoparticle-based implantable_wearable drug delivery - State of the Art.md',
+          title: 'Research: Nanoparticle-based implantable_wearable drug delivery - State of the Art',
+          names: [`Research: ${topic} - State of the Art`],
+          mtimeMs: Date.parse('2026-08-20T10:00:00.000Z'),
+        }),
+      ],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.source).toBe('history')
+  })
+
+  it('still reconstructs a page no run in the log accounts for', () => {
+    const entries = buildResearchRuns({
+      history: [],
+      runs: [],
+      lastRuns: [],
+      nodes: [
+        node({
+          path: 'wiki/questions/Research: Older Topic - State of the Art.md',
+          title: 'Research: Older Topic - State of the Art',
+        }),
+      ],
+      profiles: PROFILES,
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ topic: 'Older Topic', source: 'page', profileKey: 'sota' })
+  })
+
+  it('names a reconstructed run by the page\'s own title, not by its file name', () => {
+    const entries = buildResearchRuns({
+      history: [],
+      runs: [],
+      lastRuns: [],
+      nodes: [
+        node({
+          path: 'wiki/questions/Research: a_b - State of the Art.md',
+          title: 'Research: a_b - State of the Art',
+          names: ['Research: a/b - State of the Art'],
+        }),
+      ],
+      profiles: PROFILES,
+    })
+    expect(entries[0]!.topic).toBe('a/b')
+  })
+})

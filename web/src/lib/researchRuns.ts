@@ -25,6 +25,7 @@ import type {
   MaintenanceRun,
   ResearchProfile,
 } from '../api/types.ts'
+import { contentPages } from './activity.ts'
 
 export interface ResearchRunEntry {
   readonly id: string
@@ -112,7 +113,11 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
       status: h.ok ? 'done' : 'failed',
       startedAt: h.startedAt,
       finishedAt: h.finishedAt,
-      pages: h.pages,
+      // What the run wrote FOR THE READER. The log records every path the run's commit
+      // carried, which always includes the index hubs an ingest or a run touches in passing
+      // (`index`, `hot`, `log`, the `_index` MOCs) - counting and listing those told the
+      // reader a run of five pages wrote nine. Same filter the activity stream applies.
+      pages: contentPages(h.pages),
       costUsd: h.costUsd,
       error: h.error,
       source: 'history',
@@ -128,6 +133,8 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
       r.status === 'running' ? 'running' : r.status === 'error' || r.result?.ok === false ? 'failed' : 'done'
     seenIds.add(r.id)
     const pages = r.result?.pages ?? []
+    // Claimed by the RAW list - a hub page this run touched is still one no page-derived
+    // entry should reconstruct. Only what the reader is shown gets filtered, below.
     for (const p of pages) claimedPages.add(p)
     const finishedAt = r.finishedAt ?? null
     if (finishedAt !== null) {
@@ -144,7 +151,7 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
       status,
       startedAt: r.startedAt,
       finishedAt,
-      pages,
+      pages: contentPages(pages),
       costUsd: r.result?.usage.costUsd ?? null,
       error: r.error ?? r.result?.error ?? null,
       source: 'run',
@@ -154,15 +161,28 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
 
   for (const n of input.nodes) {
     if (claimedPages.has(n.path)) continue
-    const split = splitResearchTitle(n.title, input.profiles)
-    if (split === null) continue
+    /**
+     * Every name the page answers to, its own title first. A file name drops the characters
+     * the filesystem dislikes while the frontmatter title keeps them, and the run log records
+     * the topic as it was typed - so a run about "implantable/wearable" is filed as
+     * "implantable_wearable" and, compared by file name alone, failed to recognise itself.
+     * It was then reconstructed a second time and sat in the ledger beside the real run,
+     * claiming one page where the run wrote fourteen (2026-08-26).
+     */
+    const splits = [...(n.names ?? []), n.title]
+      .map((name) => splitResearchTitle(name, input.profiles))
+      .filter((split): split is NonNullable<typeof split> => split !== null)
+    const split = splits[0]
+    if (split === undefined) continue
     const mtime = n.mtimeMs
     const finishedAt = mtime !== undefined ? new Date(mtime).toISOString() : null
-    const duplicate = runFingerprints.some(
-      (f) =>
-        f.topic === split.topic.trim().toLowerCase() &&
-        f.profileKey === split.profileKey &&
-        (mtime === undefined || Math.abs(f.at - mtime) < SAME_RUN_MS),
+    const duplicate = splits.some((s) =>
+      runFingerprints.some(
+        (f) =>
+          f.topic === s.topic.trim().toLowerCase() &&
+          f.profileKey === s.profileKey &&
+          (mtime === undefined || Math.abs(f.at - mtime) < SAME_RUN_MS),
+      ),
     )
     if (duplicate) continue
     out.push({
