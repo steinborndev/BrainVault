@@ -19,50 +19,13 @@ import { GraphCanvas, domainColor, TYPE_VARS, type Lens } from '../components/Gr
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { queryState } from '../components/QueryState.tsx'
+import { frontmatter } from '../lib/frontmatter.ts'
 import { Shortcuts } from '../components/Shortcuts.tsx'
 import { linkifyText } from '../lib/linkify.tsx'
 import { navigate, pageRoute, pageFromPath, originPath } from '../lib/router.ts'
 import { detectClusters } from '../lib/communities.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { timeAgo } from '../lib/format.ts'
-
-/**
- * Splits YAML frontmatter off a page. Obsidian renders it as a properties panel rather than
- * body text, and so do we - dumping `type: concept created: …` into the prose is just noise.
- * Deliberately shallow (top-level `key: value` and `- item` lists); anything it can't read
- * stays in the body rather than being silently dropped.
- */
-function frontmatter(markdown: string): { fields: Array<[string, string]>; body: string } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(markdown)
-  if (!m) return { fields: [], body: markdown }
-  const fields: Array<[string, string]> = []
-  let currentKey: string | null = null
-  let listItems: string[] = []
-  const flush = (): void => {
-    if (currentKey !== null && listItems.length > 0) fields.push([currentKey, listItems.join(', ')])
-    listItems = []
-  }
-  for (const line of m[1]!.split('\n')) {
-    const item = /^\s*-\s+(.*)$/.exec(line)
-    if (item && currentKey !== null) {
-      listItems.push(item[1]!.replace(/^["']|["']$/g, '').trim())
-      continue
-    }
-    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line)
-    if (!kv) continue
-    flush()
-    const key = kv[1]!
-    const value = kv[2]!.replace(/^["']|["']$/g, '').trim()
-    if (value === '') {
-      currentKey = key // a list or block follows
-    } else {
-      fields.push([key, value])
-      currentKey = null
-    }
-  }
-  flush()
-  return { fields, body: markdown.slice(m[0].length) }
-}
 
 /**
  * Renders a frontmatter value: wikilinks become in-app navigation, and the plain text around

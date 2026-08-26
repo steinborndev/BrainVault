@@ -5414,6 +5414,26 @@ tr:focus-within .rowacts {
   gap: 14px;
   padding: 14px 16px 20px;
 }
+/* The run's synthesis page, rendered under its facts. Bounded and scrolling in place: it is
+   a full wiki page, and letting it push the run's facts off the top would turn the detail
+   into an article viewer with a header nobody can see. */
+.article {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+.article > .sub-head {
+  padding: 9px 13px;
+  background: var(--bg-elev);
+}
+.article-body {
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 4px 14px 14px;
+}
+
 /* The way out of a detail view. It leads the row rather than trailing it, and it is a
    BOX: as a `.btn.ghost` at the far right of a 1600px bar it was dim text with no border
    until hovered, which is a label, not a control - the first reader looked straight past

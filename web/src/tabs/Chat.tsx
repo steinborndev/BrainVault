@@ -30,7 +30,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
-import type { AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
+import type { GraphNode, AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
@@ -47,6 +47,7 @@ import { chatStream } from '../lib/chatStream.ts'
 import { duration, timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { buildResearchRuns, targetTitle, type ResearchRunEntry } from '../lib/researchRuns.ts'
+import { frontmatter } from '../lib/frontmatter.ts'
 
 type ComposerMode = 'research' | 'ask'
 
@@ -631,6 +632,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
             <RunDetail
               entry={entries.find((e) => e.id === view.id)}
               profiles={profiles}
+              nodes={graphQ.data?.nodes ?? []}
               vaultName={vaultName}
               authMode={authMode}
               onBack={() => setView({ kind: 'start' })}
@@ -901,6 +903,7 @@ function StartView({
 function RunDetail({
   entry,
   profiles,
+  nodes,
   vaultName,
   authMode,
   onBack,
@@ -908,6 +911,8 @@ function RunDetail({
 }: {
   entry: ResearchRunEntry | undefined
   profiles: ResearchProfile[]
+  /** The graph's pages, to resolve the synthesis page by the name it calls itself. */
+  nodes: readonly GraphNode[]
   vaultName: string
   authMode: AuthMode
   onBack: () => void
@@ -915,6 +920,48 @@ function RunDetail({
 }): React.ReactElement {
   if (entry === undefined) return <div className="empty">That run is no longer in the list.</div>
   const profile = profiles.find((p) => p.key === entry.profileKey)
+  return <RunDetailBody entry={entry} profile={profile} nodes={nodes} vaultName={vaultName} authMode={authMode} onBack={onBack} onRerun={onRerun} />
+}
+
+/**
+ * The body, split off so the article below it may use hooks - the guard above returns early
+ * and hooks cannot live after that.
+ */
+function RunDetailBody({
+  entry,
+  profile,
+  nodes,
+  vaultName,
+  authMode,
+  onBack,
+  onRerun,
+}: {
+  entry: ResearchRunEntry
+  profile: ResearchProfile | undefined
+  nodes: readonly GraphNode[]
+  vaultName: string
+  authMode: AuthMode
+  onBack: () => void
+  onRerun: (topic: string, profileKey: string | null) => void
+}): React.ReactElement {
+  /**
+   * The page this run was for. Resolved by NAME rather than taken from the run's page list:
+   * the log records what the run's commit carried, and for this class of run the synthesis
+   * page has been observed missing from it (2026-08-26) while the page itself sits in the
+   * vault. The name is deterministic - prefix, topic, lens suffix - and a page's `names`
+   * carry its own title, which is the form that keeps the characters a file name drops.
+   */
+  const wanted = targetTitle(entry.topic, profile)
+  const articlePath =
+    entry.pagePath ??
+    nodes.find((n) => n.title === wanted || (n.names?.includes(wanted) ?? false))?.path ??
+    null
+  const article = useQuery({
+    queryKey: ['page-full', articlePath],
+    queryFn: () => api.pageFull(articlePath as string),
+    enabled: articlePath !== null,
+  })
+  const body = article.data ? frontmatter(article.data.markdown).body : ''
   return (
     <div className="detail-pad">
       <div className="detail-head">
@@ -953,6 +1000,31 @@ function RunDetail({
               <PageLink key={p} vaultName={vaultName} path={p} />
             ))}
           </span>
+        </div>
+      )}
+
+      {/* The run's own page, in full. A list of chips says WHICH pages it wrote; this is the
+          one it was for, and reading it was otherwise a trip to another screen. It scrolls
+          inside its own box so the facts above it stay put. */}
+      {articlePath !== null && (
+        <div className="article">
+          <div className="sub-head">
+            <h3 className="sub-title">The article</h3>
+            <span className="box-sub" title={articlePath}>
+              {wanted}
+            </span>
+            <span className="spacer" />
+            <PageLink vaultName={vaultName} path={articlePath} />
+          </div>
+          <div className="article-body">
+            {article.isPending ? (
+              <div className="empty">Loading the page…</div>
+            ) : article.isError ? (
+              <div className="empty">That page could not be read: {(article.error as Error).message}</div>
+            ) : (
+              <Markdown source={body} />
+            )}
+          </div>
         </div>
       )}
 
