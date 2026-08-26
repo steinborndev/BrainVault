@@ -198,11 +198,21 @@ export function newWikiPaths(before: ReadonlySet<string>, after: ReadonlySet<str
   return [...after].filter((p) => !before.has(p) && p.startsWith('wiki/')).sort()
 }
 
-/** Wiki markdown paths from a newline list of files, vault-relative POSIX. */
+/**
+ * Wiki markdown paths from a NUL-separated list of files, vault-relative POSIX.
+ *
+ * NUL-separated, and every caller must pass `-z`. Git's default output QUOTES any path
+ * holding a byte outside plain ASCII and escapes it octally, so
+ * `wiki/questions/… — State of the Art.md` arrives as
+ * `"wiki/questions/… \342\200\224 State of the Art.md"` - which starts with a quote, not
+ * with `wiki/`, and was silently dropped here (2026-08-26). Every page with an em dash or an
+ * umlaut in its name went unrecorded, which in this vault is every research synthesis page:
+ * a run that wrote fifteen pages reported fourteen, and the one page it was FOR was the one
+ * missing. The same trap is already documented one function up for `dirtyPaths`.
+ */
 function wikiPagesFrom(files: string): string[] {
   return files
-    .split('\n')
-    .map((p) => p.trim())
+    .split('\0')
     .filter((p) => p.startsWith('wiki/') && p.endsWith('.md'))
     .map((p) => p.split(path.sep).join(path.posix.sep))
 }
@@ -235,7 +245,7 @@ export async function commitTouching(
   // fractionally OLDER than the run, and a strict comparison throws away the very commit
   // this function exists to find.
   if (since !== null && Date.parse(iso) < since.getTime() - 1000) return null
-  const files = await gitRead(vaultRoot, ['show', '--name-only', '--pretty=format:', hash])
+  const files = await gitRead(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', hash])
   return { hash, date: iso, pages: wikiPagesFrom(files) }
 }
 
@@ -260,7 +270,7 @@ export async function commitPaths(
   // `commit -- <paths>` commits only these paths, leaving anything else staged untouched.
   await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message, '--', ...paths])
   const hash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
-  const files = await git(vaultRoot, ['show', '--name-only', '--pretty=format:', 'HEAD'])
+  const files = await git(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', 'HEAD'])
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }
 
@@ -407,6 +417,6 @@ export async function commitVault(
   }
   await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message])
   const hash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
-  const files = await git(vaultRoot, ['show', '--name-only', '--pretty=format:', 'HEAD'])
+  const files = await git(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', 'HEAD'])
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }

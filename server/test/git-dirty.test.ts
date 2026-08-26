@@ -268,3 +268,44 @@ describe('commitVault — no add -A sweep on an explicit pathspec', () => {
     expect(committed).toEqual(expect.arrayContaining(['wiki/concepts/A.md', 'wiki/concepts/B.md']))
   })
 })
+
+/**
+ * Git QUOTES any path holding a byte outside plain ASCII, escaping it octally:
+ * `wiki/x — y.md` comes back as `"wiki/x \342\200\224 y.md"`. A reader that filters on
+ * `startsWith('wiki/')` drops it, so the page silently vanished from what a run reported
+ * having written - and in this vault every research synthesis page has an em dash in its
+ * name (2026-08-26). Every reader passes `-z` now, which never quotes.
+ */
+describe('paths git would quote', () => {
+  const NON_ASCII = 'wiki/questions/Research: Topic — State of the Art.md'
+
+  it('reports a page whose name holds an em dash', async () => {
+    write(NON_ASCII, '# synthesis')
+    write('wiki/concepts/Plain.md', '# plain')
+    const res = await commitVault(repo, 'maintenance: research', {
+      pathspec: [NON_ASCII, 'wiki/concepts/Plain.md'],
+    })
+
+    expect(res.committed).toBe(true)
+    expect(res.committedPages).toEqual(expect.arrayContaining([NON_ASCII, 'wiki/concepts/Plain.md']))
+  })
+
+  it('reports one whose name holds an umlaut, through the pathspec-limited commit too', async () => {
+    const UMLAUT = 'wiki/concepts/Größe und Maß.md'
+    write(UMLAUT, '# size')
+    const res = await commitPaths(repo, 'edit: size', [UMLAUT])
+
+    expect(res.committed).toBe(true)
+    expect(res.committedPages).toEqual([UMLAUT])
+  })
+
+  it('still reports nothing but wiki markdown', async () => {
+    write(NON_ASCII, '# synthesis')
+    write('.vault-meta/address-counter.txt', '42')
+    const res = await commitVault(repo, 'maintenance: research', {
+      pathspec: [NON_ASCII, '.vault-meta/address-counter.txt'],
+    })
+
+    expect(res.committedPages).toEqual([NON_ASCII])
+  })
+})
