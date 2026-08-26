@@ -5,6 +5,7 @@ import { useEvents } from './hooks/useEvents.ts'
 import { useMaintenanceStatus } from './hooks/useMaintenanceStatus.ts'
 import { useActiveRuns } from './hooks/useActiveRuns.ts'
 import { StatusPopover } from './components/StatusPopover.tsx'
+import { HoverTip } from './components/Tip.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
 import { Home } from './tabs/Home.tsx'
@@ -124,6 +125,10 @@ export function App(): React.ReactElement {
   // bot" is a settings fact, not a header one.
   const telegram = useQuery({ queryKey: ['telegram-status'], queryFn: api.telegramStatus, staleTime: 300_000 })
   const setupMode = health.data ? !health.data.credentialConfigured : false
+  // Both header chips show their channel's state rather than hiding when it is off: a
+  // Telegram chip that vanishes when no bot is configured cannot tell you that none is.
+  const watcherActive = stats.data?.watcher.active === true
+  const telegramOn = telegram.data?.configured === true
 
   const [paletteOpen, setPaletteOpen] = useState(false)
   useEffect(() => {
@@ -225,23 +230,46 @@ export function App(): React.ReactElement {
               </button>
             ))}
           </nav>
+          {/* Three status chips of one shape (2026-08-26): a dot that carries the state and
+              a noun that names the channel. "Watcher active" said its state twice - once in
+              the dot, once in the word - and the page count was not a status at all, just a
+              figure that already leads the Home screen. What each chip means is one hover
+              away, which is where the detail belongs. */}
           <div className="topright">
-            <span className="tstat" title={stats.data?.watcher.folder}>
-              <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
-              Watcher {stats.data?.watcher.active === true ? 'active' : 'off'}
-            </span>
-            {telegram.data?.configured === true && (
-              <span className="tstat" title="The Telegram bot is connected and accepting messages">
-                <span className="d ok" />
-                Telegram active
-              </span>
-            )}
-            {stats.data !== undefined && (
-              <span className="tstat">
-                <span className="d acc" />
-                {stats.data.pages.total} pages
-              </span>
-            )}
+            <HoverTip
+              className="tstat"
+              label={`Watch folder ${watcherActive ? 'active' : 'inactive'}`}
+              text={
+                stats.data === undefined ? (
+                  'Waiting for the service to report on the watch folder.'
+                ) : watcherActive ? (
+                  <>
+                    Watching <code>{stats.data.watcher.folder}</code>. Anything dropped in there is
+                    ingested on its own, with nothing else to do.
+                  </>
+                ) : (
+                  <>
+                    Not watching. Files left in <code>{stats.data.watcher.folder}</code> stay where
+                    they are until the watcher runs again.
+                  </>
+                )
+              }
+            >
+              <span className={`d ${watcherActive ? 'ok' : 'warn'}`} />
+              Watcher
+            </HoverTip>
+            <HoverTip
+              className="tstat"
+              label={`Telegram ${telegramOn ? 'connected' : 'not configured'}`}
+              text={
+                telegramOn
+                  ? 'The bot is connected and accepting messages. Anything you send it - a link, a file, a note - is queued for ingest like a drop.'
+                  : 'No bot configured, so nothing arrives this way. Set one up under System → Integrations.'
+              }
+            >
+              <span className={`d ${telegramOn ? 'ok' : ''}`} />
+              Telegram
+            </HoverTip>
             <StatusPopover connected={connected} />
           </div>
         </header>

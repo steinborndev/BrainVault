@@ -263,23 +263,49 @@ button {
   gap: 10px;
   flex: none;
 }
-.tstat {
+/* The three chips in the header are one shape: a status dot and a noun. `.status-pill` is
+   the third (it opens a panel rather than a tooltip), and it shares these rules so "the same
+   dot" is literally the same declaration rather than two that drift. */
+.tstat,
+.status-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  height: var(--control-h);
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 12px;
   color: var(--text-faint);
   white-space: nowrap;
+  border-radius: 999px;
+  line-height: 1;
 }
-.tstat .d {
+.tstat:hover,
+.tstat:focus-visible,
+.tstat[aria-expanded='true'] {
+  color: var(--text);
+}
+.tstat .d,
+.status-pill .dot {
   width: var(--dot);
   height: var(--dot);
   border-radius: 50%;
   background: var(--muted);
+  flex: none;
 }
-.tstat .d.ok { background: var(--ok); }
-.tstat .d.warn { background: var(--warn); }
-.tstat .d.acc { background: var(--accent); }
+/* The ring is what makes a dot read as a live state rather than a bullet in front of a
+   label - so every channel that IS live wears it, not just the connection. */
+.tstat .d.ok,
+.status-pill.live .dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+}
+.tstat .d.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent);
+}
 /* The status figures are the first thing to go when the row gets tight - the tabs and the
    live pill are load-bearing, these are ambient. */
 @media (max-width: 1240px) {
@@ -422,38 +448,14 @@ button {
 .statuswrap {
   position: relative;
 }
-/* Shaped like the ambient `.tstat` labels beside it, not like a control: no border, no
-   raised ground, no chevron (2026-08-26). It is still a button - hover and focus open the
-   panel, click pins it - but in that row it is one status among four, and the only thing
-   that has to stand out is the live dot. */
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--control-h);
-  border: 0;
-  background: none;
-  color: var(--text-faint);
-  font-size: 12px;
-  border-radius: 999px;
-  padding: 0 2px;
-  line-height: 1;
-  white-space: nowrap;
-}
+/* Shaped like the status chips beside it, not like a control: no border, no raised ground,
+   no chevron (2026-08-26). It is still a button - hover and focus open the panel, click pins
+   it - but in that row it is one status among three. Its shape comes from the shared
+   `.tstat, .status-pill` rule above; only the hover state is its own. */
 .status-pill:hover,
 .status-pill:focus-visible,
 .status-pill[aria-expanded='true'] {
   color: var(--text);
-}
-.status-pill .dot {
-  width: var(--dot);
-  height: var(--dot);
-  border-radius: 50%;
-  background: var(--muted);
-}
-.status-pill.live .dot {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
 }
 .status-pop {
   position: absolute;
