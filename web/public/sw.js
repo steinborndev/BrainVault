@@ -43,7 +43,18 @@ self.addEventListener('fetch', (event) => {
         }
         return res
       })
-      .catch(() => caches.match(event.request).then((r) => r ?? caches.match('/index.html'))),
+      .catch(() =>
+        caches.match(event.request).then((r) => {
+          if (r) return r
+          // Only a NAVIGATION may fall back to the shell. Answering a module request with
+          // index.html is the exact shape of the bug the server side just lost: the browser
+          // rejects HTML as a module and the screen goes blank instead of saying "offline".
+          // This is not hypothetical - the server is unreachable for a moment during every
+          // restart, which is precisely when a rebuilt tab goes looking for its new chunks.
+          if (event.request.mode === 'navigate') return caches.match('/index.html')
+          return Response.error()
+        }),
+      ),
   )
 })
 

@@ -23,7 +23,9 @@ export interface QueryLike {
   refetch: () => unknown
 }
 
-function message(error: unknown): string {
+/** The human-readable half of an unknown thrown value. Shared with the render-error
+ *  boundary (components/ErrorBoundary.tsx), which has the same problem to solve. */
+export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
   return 'unknown error'
@@ -62,7 +64,7 @@ export function queryState(q: QueryLike, what: string): React.ReactElement | nul
     return (
       <div className="empty">
         <p className="qs-line">Could not load {what}.</p>
-        <p className="qs-detail">{message(q.error)}</p>
+        <p className="qs-detail">{errorMessage(q.error)}</p>
         <button className="btn" onClick={() => void q.refetch()}>
           Try again
         </button>

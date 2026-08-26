@@ -8,6 +8,7 @@ import { StatusPopover } from './components/StatusPopover.tsx'
 import { HoverTip } from './components/Tip.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
+import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { Home } from './tabs/Home.tsx'
 import { Chat } from './tabs/Chat.tsx'
 import { System } from './tabs/System.tsx'
@@ -289,12 +290,16 @@ export function App(): React.ReactElement {
               box, no bar spanning both - so switching screens never shifts the edges. */}
           <section className="screen flush" hidden={screen !== 'home'} aria-label="Home">
             <div className="lane wide">
-              <Home statusFilter={screen === 'home' ? (query.get('filter') ?? '') : ''} />
+              <ErrorBoundary label="Home">
+                <Home statusFilter={screen === 'home' ? (query.get('filter') ?? '') : ''} />
+              </ErrorBoundary>
             </div>
           </section>
           <section className="screen flush" hidden={screen !== 'research'} aria-label="Research">
             <div className="lane wide">
-              <Chat researchPrefill={screen === 'research' ? (query.get('prefill') ?? '') : ''} />
+              <ErrorBoundary label="Research">
+                <Chat researchPrefill={screen === 'research' ? (query.get('prefill') ?? '') : ''} />
+              </ErrorBoundary>
             </div>
           </section>
           {/* The vault screen hosts two very different things. The graph is a workspace: it
@@ -306,21 +311,29 @@ export function App(): React.ReactElement {
             aria-label="Vault"
           >
             <div className="lane wide">
+              {/* The boundary sits ABOVE the Suspense on purpose: the lazy chunk failing to
+                  load throws during render, and Suspense only ever handles pending. */}
               {vaultPath !== null && (
-                <Suspense fallback={<div className="empty">Loading vault view…</div>}>
-                  <Vault path={vaultPath} />
-                </Suspense>
+                <ErrorBoundary label="Graph">
+                  <Suspense fallback={<div className="empty">Loading vault view…</div>}>
+                    <Vault path={vaultPath} />
+                  </Suspense>
+                </ErrorBoundary>
               )}
             </div>
           </section>
           <section className="screen flush" hidden={screen !== 'library'} aria-label="Library">
             <div className="lane wide">
-              <Library vaultName={vaultName} />
+              <ErrorBoundary label="Library">
+                <Library vaultName={vaultName} />
+              </ErrorBoundary>
             </div>
           </section>
           <section className="screen flush" hidden={screen !== 'system'} aria-label="System">
             <div className="lane wide">
-              <System section={screen === 'system' ? (query.get('section') ?? '') : ''} />
+              <ErrorBoundary label="System">
+                <System section={screen === 'system' ? (query.get('section') ?? '') : ''} />
+              </ErrorBoundary>
             </div>
           </section>
         </div>
