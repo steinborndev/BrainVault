@@ -5612,7 +5612,8 @@ kbd {
 .lib-table th:nth-child(2) { width: 150px; }
 .lib-table th:nth-child(3) { width: 96px; }
 .lib-table th:nth-child(4) { width: 132px; }
-.lib-table th:nth-child(5) { width: 78px; }
+.lib-table th:nth-child(5) { width: 104px; }
+.lib-table th:nth-child(6) { width: 78px; }
 /* Bucket and flags keep their size; only the title itself gives way, on one line, so the
    row height stays constant too. The full title is in the cell's tooltip. */
 /* The flex box is a span INSIDE the cell: a `td` with `display: flex` drops out of the
@@ -5645,6 +5646,44 @@ kbd {
   width: 78px;
 }
 
+/* ── The Source column (2026-08-26) ────────────────────────────────────────────
+   Where the page came from, as an inline link to the document itself - a text link with an
+   icon, not a chip: it sits in a table of quiet cells, and a bordered pill in every row
+   would out-shout the page titles it belongs to. Dim until the pointer is on it, then it
+   behaves like the link it is. */
+.lt-source {
+  white-space: nowrap;
+}
+.src-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: none;
+}
+.src-link svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.8;
+}
+.src-link:hover,
+.src-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.src-link:hover svg,
+.src-link:focus-visible svg {
+  opacity: 1;
+}
+/* No source, or the index has not arrived yet. Reserves the row height either way. */
+.src-none {
+  display: inline-block;
+  min-height: 1em;
+  color: var(--text-faint);
+  opacity: 0.6;
+}
 
 /* The outcome of the run that just finished, in the same fixed head as the strip. */
 .runbanner {

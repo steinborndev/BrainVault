@@ -200,6 +200,27 @@ export interface VaultGraph {
   builtAt: string
 }
 
+/**
+ * Where one wiki page came from (GET /api/v1/sources). Built from the vault's own `.raw/`
+ * folders, not from the job DB - the vault is the copy that survives losing SQLite.
+ */
+export interface SourceRef {
+  /** The ingest's folder, vault-relative (`.raw/<job-id>`). */
+  dir: string
+  /** The original document's file name inside `dir`, or null when it is gone. */
+  file: string | null
+  /** `pdf` | `web` | `image` | `text` | `office` | `av` | `other`. */
+  type: string
+  /** Where a web ingest came from; null for anything dropped in as a file. */
+  url: string | null
+}
+
+export interface SourceIndex {
+  /** Vault-relative page path to the document that created it. */
+  pages: Record<string, SourceRef>
+  builtAt: string
+}
+
 /** Full page content for the vault viewer (GET /api/v1/pages?full=1). */
 export interface PageFull {
   path: string

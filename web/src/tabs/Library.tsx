@@ -14,9 +14,10 @@ import { openableRow } from '../lib/tableRow.ts'
 import { timeAgo } from '../lib/format.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { domainColor, STUB_BYTES } from '../lib/domains.ts'
+import { sourceLink } from '../lib/sources.ts'
 import { Icon } from '../components/Icon.tsx'
 import { queryState } from '../components/QueryState.tsx'
-import type { GraphNode } from '../api/types.ts'
+import type { GraphNode, SourceRef } from '../api/types.ts'
 
 /** Bucket display labels, shared vocabulary with the graph's type filter. */
 const BUCKET_LABELS: Record<string, string> = {
@@ -64,6 +65,10 @@ function isStub(n: GraphNode): boolean {
 
 export function Library({ vaultName }: { vaultName: string }): React.ReactElement {
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  // Provenance rides its OWN query, not the graph payload: the canvas, Home and the Library
+  // all fetch ['graph'], and only one of them has a Source column. A failure here costs the
+  // column, never the table.
+  const sources = useQuery({ queryKey: ['sources'], queryFn: api.sources })
 
   const [query, setQuery] = useState('')
   const [type, setType] = useState<string | null>(null)
@@ -363,6 +368,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                 <th>Domain</th>
                 <th className="num">In / out</th>
                 <th>Changed</th>
+                <th>Source</th>
                 <th aria-hidden />
               </tr>
             </thead>
@@ -394,6 +400,11 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
                     {n.in} / {n.out}
                   </td>
                   <td className="lt-when">{n.mtimeMs !== undefined ? timeAgo(new Date(n.mtimeMs).toISOString()) : ''}</td>
+                  {/* The document this page came from. The click must not also open the
+                      page - the whole row is a link to it. */}
+                  <td className="lt-source" onClick={(e) => e.stopPropagation()}>
+                    <SourceCell node={n} refs={sources.data?.pages} />
+                  </td>
                   <td className="lt-acts" onClick={(e) => e.stopPropagation()}>
                     <button
                       className="btn ghost"
@@ -437,5 +448,36 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * One row's provenance: the type of the document the page came from, as an inline link to
+ * the document itself. Pages with nothing behind them - written by hand, or filed by a
+ * research run that never ingested a file - show a dash rather than a guess.
+ */
+function SourceCell({
+  node,
+  refs,
+}: {
+  node: GraphNode
+  refs: Record<string, SourceRef> | undefined
+}): React.ReactElement {
+  // Still loading: nothing at all, not a dash. A dash is a statement ("no source"), and
+  // making it before the index arrives would be a lie that flickers.
+  if (refs === undefined) return <span className="src-none" />
+  const link = sourceLink(refs[node.path])
+  if (link === null) return <span className="src-none">-</span>
+  return (
+    <a
+      className="src-link"
+      href={link.href}
+      title={link.title}
+      target="_blank"
+      rel={link.external ? 'noreferrer noopener' : undefined}
+    >
+      <Icon name={link.icon} />
+      {link.label}
+    </a>
   )
 }

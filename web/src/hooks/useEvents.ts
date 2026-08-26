@@ -34,6 +34,7 @@ export function useEvents(): { connected: boolean } {
       void qc.invalidateQueries({ queryKey: ['stats'] })
       void qc.invalidateQueries({ queryKey: ['sessions'] })
       void qc.invalidateQueries({ queryKey: ['graph'] })
+      void qc.invalidateQueries({ queryKey: ['sources'] })
     }
     let hadGap = false
     es.onopen = () => {
@@ -87,6 +88,9 @@ export function useEvents(): { connected: boolean } {
     // a concurrent change must surface as a 409 on save, not vanish.
     const onVault = (): void => {
       qc.invalidateQueries({ queryKey: ['graph'] })
+      // An ingest rewrites `.raw/.manifest.json` as part of the same commit, so the
+      // Library's provenance column goes stale with the graph, not separately.
+      qc.invalidateQueries({ queryKey: ['sources'] })
     }
 
     es.addEventListener('job', onJob)

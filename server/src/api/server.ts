@@ -34,6 +34,7 @@ import { registerMaintenanceRoute } from './routes/maintenance.js'
 import { registerSettingsRoute } from './routes/settings.js'
 import { registerPagesRoute } from './routes/pages.js'
 import { registerGraphRoute } from './routes/graph.js'
+import { registerSourcesRoute } from './routes/sources.js'
 import { registerDomainsRoute } from './routes/domains.js'
 import { MemoryDismissalStore, type DismissalStore } from '../db/domain-dismissals.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
@@ -115,6 +116,7 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   registerMaintenanceRoute(app, ctx, graphBuilder, dismissals, ctx.maintenanceState, ctx.agentRuns)
   registerPagesRoute(app, ctx, graphBuilder)
   registerGraphRoute(app, ctx, graphBuilder)
+  registerSourcesRoute(app, ctx)
   registerDomainsRoute(app, ctx, graphBuilder, dismissals)
 
   await registerFrontend(app)

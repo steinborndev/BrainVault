@@ -36,6 +36,7 @@ export type IconName =
   | 'expand'
   | 'shrink'
   | 'globe'
+  | 'image'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
   expand: (
@@ -76,6 +77,14 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     <>
       <path d="M14 3v5h5" />
       <path d="M6 3h8l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+    </>
+  ),
+  // An ingested photo or scan, in the Library's source column.
+  image: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="m4.5 17 4.7-4.3 3.4 3.1 3-2.6 3.9 3.4" />
     </>
   ),
   link: (

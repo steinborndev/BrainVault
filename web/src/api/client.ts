@@ -33,6 +33,7 @@ import type {
   PagePreview,
   PageFull,
   VaultGraph,
+  SourceIndex,
   PageWriteResult,
   PageDeleteResult,
 } from './types.ts'
@@ -157,6 +158,9 @@ export const api = {
 
   /** The vault's wikilink graph (server-side cached; cheap to refetch). */
   graph: (): Promise<VaultGraph> => fetch(`${BASE}/graph`).then(json<VaultGraph>),
+
+  /** Where each page came from - the Library's source column joins this onto the graph. */
+  sources: (): Promise<SourceIndex> => fetch(`${BASE}/sources`).then(json<SourceIndex>),
 
   /**
    * User edit of one page (SPEC.md §12.4). `baseMtime` is the optimistic lock: the server
