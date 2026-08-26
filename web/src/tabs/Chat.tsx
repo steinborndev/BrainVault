@@ -1,22 +1,30 @@
 /**
- * Research (SPEC.md §6.3/§6.4, redesign 2026-08-25 second pass) - the screen where you go
- * and find something out, in the same workspace shape as every other screen.
+ * Research (SPEC.md §6.3/§6.4, redesign 2026-08-26 third pass) - the screen where you go and
+ * find something out. Two ways to do that, named the same way in both places they appear:
  *
- *   LEFT   the lens as a standing control (four profiles, a closed set - it used to take
- *          "change lens" plus a scrolling popover to pick one), then the runs, then the
- *          conversations. The lens greys out in Ask mode, because a lens shapes a research
- *          run only: it picks the sources, the fetch budget and the title the run files as.
- *   RIGHT  the composer at the top, and below it whatever you are looking at: the run
- *          history with the vault's own research backlog (the screen is never empty now), a
- *          single run, or a conversation.
+ *   WEB RESEARCH    a run that reads the web and files pages. Costs fetches, commits once.
+ *   VAULT RESEARCH  a question the vault answers from what it already holds. Cites pages,
+ *                   writes nothing.
  *
- * Research is the default mode: it is the reason this screen exists, and asking the vault is
- * the cheaper follow-up rather than the entry point.
+ * They are the same object from the user's side - something you asked, and the record of what
+ * came back - so they are two ledgers of the same shape in the main box, splitting the height
+ * and scrolling on their own. The columns then say how they differ.
  *
- * `/query` is still request/response - the ANSWER of record arrives with the HTTP reply -
- * but the text streams live meanwhile (chatStream). First questions stream too: the client
- * sends a request id and the server echoes it on the deltas, because the session id only
- * exists once the reply lands.
+ *   LEFT   what SHAPES a run and what the runs add up to: the lens as a standing control
+ *          (four profiles, a closed set), a filter over the web ledger, the running totals,
+ *          and the queue as a status foot - a run takes a queue slot, the same as a drop.
+ *   RIGHT  the composer, then the two ledgers, then the vault's own backlog as a band of
+ *          offers. Opening a run or a conversation replaces the ledgers with that one thing
+ *          and a way back.
+ *
+ * Every object is listed ONCE. The runs used to appear twice - a short list in the rail and a
+ * full ledger in the box - which existed only because opening a run replaced the ledger and
+ * left no way back; the detail view has a Back button instead.
+ *
+ * `/query` is still request/response - the ANSWER of record arrives with the HTTP reply - but
+ * the text streams live meanwhile (chatStream). First questions stream too: the client sends
+ * a request id and the server echoes it on the deltas, because the session id only exists
+ * once the reply lands.
  */
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
@@ -30,6 +38,7 @@ import { JobLog } from '../components/JobLog.tsx'
 import { AskSteps, ResearchSteps } from '../components/AgentSteps.tsx'
 import { useMaintenanceRun } from '../hooks/useMaintenanceRun.ts'
 import { Fact, Facts } from '../components/Fact.tsx'
+import { QueueState } from '../components/ActivityRows.tsx'
 import { Icon } from '../components/Icon.tsx'
 import { queryState, merge } from '../components/QueryState.tsx'
 import { navigate } from '../lib/router.ts'
@@ -58,6 +67,8 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const [profileKey, setProfileKey] = useState('broad')
   const [view, setView] = useState<View>({ kind: 'start' })
   const [activeId, setActiveId] = useState<string | null>(null)
+  /** Narrows the web ledger to one lens; null = all of them. */
+  const [lensFilter, setLensFilter] = useState<string | null>(null)
 
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
@@ -243,6 +254,20 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
     composerRef.current?.focus()
   }
 
+  // What the two ledgers add up to. Runs whose cost was never recorded (they predate the run
+  // log) are left out of the total rather than counted as free - the tile says how many.
+  const settled = entries.filter((e) => e.status !== 'running')
+  const failedRuns = entries.filter((e) => e.status === 'failed').length
+  const pagesFiled = entries.reduce((sum, e) => sum + e.pages.length, 0)
+  const costed = settled.filter((e) => e.costUsd !== null)
+  const spend = costed.reduce((sum, e) => sum + (e.costUsd ?? 0), 0)
+  const lensCounts = new Map<string, number>()
+  for (const e of entries) {
+    const key = e.profileKey ?? 'broad'
+    lensCounts.set(key, (lensCounts.get(key) ?? 0) + 1)
+  }
+  const shownEntries = lensFilter === null ? entries : entries.filter((e) => (e.profileKey ?? 'broad') === lensFilter)
+
   const lensDisabled = mode === 'ask'
   const busy = mode === 'ask' ? ask.isPending : research.running
   const sendLabel = mode === 'ask' ? (ask.isPending ? 'Asking…' : 'Ask') : research.running ? 'Running…' : 'Start run'
@@ -285,7 +310,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               <>
                 A lens shapes a research run only.{' '}
                 <button className="linkish" onClick={() => setMode('research')}>
-                  Switch to Research
+                  Switch to Web Research
                 </button>
               </>
             ) : selectedProfile !== undefined ? (
@@ -296,69 +321,98 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
         </div>
 
-        <div className="gp-sec grow">
+        {/* Narrows the web ledger. The backlog under the ledgers is never filtered: it is
+            what the vault is missing, not what you did. */}
+        <div className="gp-sec">
           <div className="gp-head">
-            <span className="gp-eyebrow">Runs</span>
+            <span className="gp-eyebrow">Filter</span>
             <span className="spacer" />
-            <span className="gp-count">{entries.length}</span>
+            {lensFilter !== null && (
+              <button className="btn ghost" onClick={() => setLensFilter(null)}>
+                <Icon name="x" /> Clear
+              </button>
+            )}
           </div>
-          <div className="domlist">
-            {entries.map((e) => {
-              // A running entry is "current" while the start view is up, because that is
-              // where its progress is showing.
-              const on =
-                (view.kind === 'run' && view.id === e.id) ||
-                (view.kind === 'start' && e.status === 'running')
+          <div className="pillrow" role="radiogroup" aria-label="Filter web research by lens">
+            <button
+              className="viewpill"
+              role="radio"
+              aria-checked={lensFilter === null}
+              onClick={() => setLensFilter(null)}
+            >
+              All {entries.length}
+            </button>
+            {profiles.map((p) => {
+              const n = lensCounts.get(p.key) ?? 0
               return (
                 <button
-                  key={e.id}
-                  className={`runrow${on ? ' active' : ''}`}
-                  aria-pressed={on}
-                  onClick={() => openEntry(e)}
+                  key={p.key}
+                  className="viewpill"
+                  role="radio"
+                  aria-checked={lensFilter === p.key}
+                  disabled={n === 0}
+                  title={n === 0 ? `No run has used the ${p.label} lens yet` : undefined}
+                  onClick={() => setLensFilter(lensFilter === p.key ? null : p.key)}
                 >
-                  <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
-                  <span className="rr-body">
-                    <span className="rr-t" title={e.topic}>
-                      {e.topic}
-                    </span>
-                    <span className="rr-m">
-                      {e.profileKey !== null && e.profileKey !== 'broad' && (
-                        <span>{profiles.find((p) => p.key === e.profileKey)?.label ?? e.profileKey}</span>
-                      )}
-                      <span>{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</span>
-                    </span>
-                  </span>
+                  {p.label} {n}
                 </button>
               )
             })}
-            {entries.length === 0 && <div className="gp-none">No research run yet.</div>}
           </div>
         </div>
 
+        {/* What the two ledgers add up to, in the same metric-list shape Home uses. */}
         <div className="gp-sec grow">
           <div className="gp-head">
-            <span className="gp-eyebrow">Conversations</span>
-            <span className="spacer" />
-            <button className="linkish" onClick={() => openThread(null)}>
-              + New
+            <span className="gp-eyebrow">Research so far</span>
+          </div>
+          <div className="railfacts">
+            <button
+              className="vzf"
+              onClick={() => {
+                setLensFilter(null)
+                setView({ kind: 'start' })
+              }}
+            >
+              <b>{entries.length}</b>
+              <span>{failedRuns > 0 ? `runs, ${failedRuns} failed` : 'web research runs'}</span>
+            </button>
+            <button className="vzf" onClick={() => navigate('/library')}>
+              <b>{pagesFiled}</b>
+              <span>pages filed</span>
+            </button>
+            <button className="vzf" onClick={() => setView({ kind: 'start' })}>
+              <b>{sessions.length}</b>
+              <span>vault conversations</span>
+            </button>
+            <div className="vzf static">
+              <b>
+                <Cost value={spend} authMode={authMode} />
+              </b>
+              <span>
+                recorded across {costed.length} run{costed.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <button className="vzf" onClick={() => navigate('/graph?gaps=1')}>
+              <b>{gaps.length}</b>
+              <span>gaps worth a run</span>
             </button>
           </div>
-          <div className="sess-list">
-            {sessions.map((s) => (
-              <SessionRow
-                key={s.id}
-                session={s}
-                active={view.kind === 'thread' && s.id === activeId}
-                onSelect={() => openThread(s.id)}
-                onRenamed={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
-                onDeleted={() => {
-                  if (s.id === activeId) openThread(null)
-                  qc.invalidateQueries({ queryKey: ['sessions'] })
-                }}
-              />
-            ))}
-            {sessions.length === 0 && <div className="gp-none">No conversation yet.</div>}
+        </div>
+
+        {/* A run takes a queue slot, the same as a drop - so Research states the queue in the
+            same place, and the same shape, that Home does. */}
+        <div className="gp-sec gp-foot">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Queue</span>
           </div>
+          <QueueState
+            paused={stats.data?.queue.paused === true}
+            reason={stats.data?.queue.pauseReason ?? null}
+            concurrency={stats.data?.queue.concurrency}
+            active={stats.data?.queue.active ?? 0}
+            queued={stats.data?.queue.queued ?? 0}
+          />
         </div>
       </aside>
 
@@ -377,7 +431,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 onClick={() => setMode('research')}
                 title="Research a topic on the web and create new vault pages"
               >
-                Research the web
+                Web Research
               </button>
               <button
                 role="radio"
@@ -385,7 +439,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 onClick={() => setMode('ask')}
                 title="Ask the vault (read-only)"
               >
-                Ask the vault
+                Vault Research
               </button>
             </div>
             <span className="spacer" />
@@ -530,14 +584,20 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
         <div className={`box-body${view.kind === 'start' ? ' start-view' : ''}`} ref={bodyRef}>
           {view.kind === 'start' && (
             <StartView
-              entries={entries}
+              entries={shownEntries}
+              totalRuns={entries.length}
               profiles={profiles}
+              sessions={sessions}
               gaps={gaps.slice(0, BACKLOG_SIZE)}
               authMode={authMode}
               runState={queryState(merge(historyQ, runsQ, stateQ), 'the run history')}
+              sessionState={queryState(sessionsQ, 'the conversations')}
               gapState={queryState(graphQ, 'the knowledge gaps')}
+              activeSessionId={activeId}
               onOpen={openEntry}
+              onOpenThread={openThread}
               onResearch={startAbout}
+              onSessionsChanged={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
             />
           )}
 
@@ -630,113 +690,182 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
  */
 function StartView({
   entries,
+  totalRuns,
   profiles,
+  sessions,
   gaps,
   authMode,
   runState,
+  sessionState,
   gapState,
+  activeSessionId,
   onOpen,
+  onOpenThread,
   onResearch,
+  onSessionsChanged,
 }: {
   entries: ResearchRunEntry[]
+  /** Runs before the lens filter, so the count can say "6 of 13" rather than lying. */
+  totalRuns: number
   profiles: ResearchProfile[]
+  sessions: Session[]
   gaps: Array<{ title: string; refBy: number[] }>
   authMode: AuthMode
   /** Loading/failed for the three queries the run list is built from; null once ready. */
   runState: React.ReactElement | null
+  sessionState: React.ReactElement | null
   /** Same for the graph query behind the backlog. */
   gapState: React.ReactElement | null
+  activeSessionId: string | null
   onOpen: (e: ResearchRunEntry) => void
+  onOpenThread: (id: string | null) => void
   onResearch: (topic: string) => void
+  onSessionsChanged: () => void
 }): React.ReactElement {
   const lensLabel = (key: string | null): string =>
     key === null ? '-' : (profiles.find((p) => p.key === key)?.label ?? key)
   return (
     <>
-      {/* Two sections that split the height and scroll on their own: the run list grows with
-          every run now that they are recorded, and the backlog grows with the vault. */}
+      {/* Two ledgers of the same shape, splitting the height: what you sent to the web, and
+          what you asked the vault. Same object from the user's side; the columns are where
+          they differ - one files pages and costs fetches, the other cites pages and commits
+          nothing. */}
       <div className="sv-sec">
-      <div className="sub-head">
-        <h3 className="sub-title">Runs</h3>
-        <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
-        <span className="spacer" />
-        <span className="count">{entries.length}</span>
-      </div>
-      <div className="sv-scroll">
-      {runState ?? (entries.length === 0 ? (
-        <div className="empty">
-          No research run yet. Name a topic above, pick a lens on the left, and the run files one synthesis
-          page.
+        <div className="sub-head">
+          <h3 className="sub-title">Web Research</h3>
+          <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
+          <span className="spacer" />
+          <span className="count">
+            {entries.length}
+            {entries.length !== totalRuns ? ` of ${totalRuns}` : ''}
+          </span>
         </div>
-      ) : (
-        <table className="dtable runs-table">
-          <thead>
-            <tr>
-              <th>Topic</th>
-              <th>Lens</th>
-              <th className="num">Pages</th>
-              <th className="num">Cost</th>
-              <th>When</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((e) => (
-              <tr key={e.id} {...openableRow(() => onOpen(e), `Open the run about ${e.topic}`)}>
-                <td>
-                  <span className="hrow-name">
-                    <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
-                    <span className="nm" title={e.topic}>
-                      {e.topic}
-                    </span>
-                    {e.source === 'page' && (
-                      <span className="badge" title="Reconstructed from the synthesis page in the vault">
-                        from vault
-                      </span>
-                    )}
-                  </span>
-                  {e.error !== null && <span className="rowerr">{e.error}</span>}
-                </td>
-                <td className="dimc">{lensLabel(e.profileKey)}</td>
-                <td className="num dimc">{e.pages.length > 0 ? `+${e.pages.length}` : '-'}</td>
-                <td className="num dimc">
-                  {e.costUsd !== null ? <Cost value={e.costUsd} authMode={authMode} /> : '-'}
-                </td>
-                <td className="faintc">{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</td>
-              </tr>
+        <div className="sv-scroll">
+          {runState ??
+            (entries.length === 0 ? (
+              <div className="empty">
+                {totalRuns === 0
+                  ? 'No research run yet. Name a topic above, pick a lens on the left, and the run files one synthesis page.'
+                  : 'No run used that lens. Clear the filter on the left to see the rest.'}
+              </div>
+            ) : (
+              <table className="dtable runs-table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Lens</th>
+                    <th className="num">Pages</th>
+                    <th className="num">Cost</th>
+                    <th>When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((e) => (
+                    <tr key={e.id} {...openableRow(() => onOpen(e), `Open the run about ${e.topic}`)}>
+                      <td>
+                        <span className="hrow-name">
+                          <span className={`hrow-dot ${e.status === 'running' ? 'running' : e.status}`} aria-hidden />
+                          <span className="nm" title={e.topic}>
+                            {e.topic}
+                          </span>
+                          {e.source === 'page' && (
+                            <span className="badge" title="Reconstructed from the synthesis page in the vault">
+                              from vault
+                            </span>
+                          )}
+                        </span>
+                        {e.error !== null && <span className="rowerr">{e.error}</span>}
+                      </td>
+                      <td className="dimc">{lensLabel(e.profileKey)}</td>
+                      <td className="num dimc">{e.pages.length > 0 ? `+${e.pages.length}` : '-'}</td>
+                      <td className="num dimc">
+                        {e.costUsd !== null ? <Cost value={e.costUsd} authMode={authMode} /> : '-'}
+                      </td>
+                      <td className="faintc">{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             ))}
-          </tbody>
-        </table>
-      ))}
-
-      </div>
+        </div>
       </div>
 
       <div className="sv-sec">
-      <div className="sub-head">
-        <h3 className="sub-title">Worth a run</h3>
-        <span className="box-sub">missing pages your vault already links to</span>
-        <span className="spacer" />
-        <span className="count">{gaps.length}</span>
-      </div>
-      <div className="sv-scroll">
-      {gapState ?? (gaps.length === 0 ? (
-        <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
-      ) : (
-        <div className="backlog">
-          {gaps.map((g) => (
-            <div key={g.title} className="bl-row">
-              <span className="bl-t" title={g.title}>
-                {g.title}
-              </span>
-              <span className="bl-n">{g.refBy.length} links</span>
-              <button className="btn sm research" onClick={() => onResearch(g.title)}>
-                Research
-              </button>
-            </div>
-          ))}
+        <div className="sub-head">
+          <h3 className="sub-title">Vault Research</h3>
+          <span className="box-sub">questions the vault answered from what it already holds</span>
+          <span className="spacer" />
+          <button className="btn sm" onClick={() => onOpenThread(null)}>
+            + New
+          </button>
+          <span className="count">{sessions.length}</span>
         </div>
-      ))}
+        <div className="sv-scroll">
+          {sessionState ??
+            (sessions.length === 0 ? (
+              <div className="empty">
+                Nothing asked yet. Switch the composer to Vault Research and ask - the answer cites the pages
+                it came from, and nothing is written.
+              </div>
+            ) : (
+              <table className="dtable sess-table">
+                <thead>
+                  <tr>
+                    <th>Question</th>
+                    <th className="num">Turns</th>
+                    <th>Last reply</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((s) => (
+                    <SessionLedgerRow
+                      key={s.id}
+                      session={s}
+                      active={s.id === activeSessionId}
+                      onSelect={() => onOpenThread(s.id)}
+                      onChanged={onSessionsChanged}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            ))}
+        </div>
       </div>
+
+      {/* The backlog is not history, it is an offer - so it is a band of cards with a verb on
+          them rather than a third table, and it keeps its own height instead of taking a
+          third of the two ledgers'. */}
+      <div className="sv-sec sv-band">
+        <div className="sub-head">
+          <h3 className="sub-title">Worth a run</h3>
+          <span className="box-sub">pages your vault links to but has never written</span>
+          <span className="spacer" />
+          <span className="count">{gaps.length}</span>
+        </div>
+        <div className="sv-scroll">
+          {gapState ??
+            (gaps.length === 0 ? (
+              <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
+            ) : (
+              <div className="offers">
+                {gaps.map((g) => (
+                  <button key={g.title} className="offer" onClick={() => onResearch(g.title)}>
+                    <span className="of-t" title={g.title}>
+                      {g.title}
+                    </span>
+                    <span className="of-m">
+                      <span className="of-n">
+                        {g.refBy.length} page{g.refBy.length === 1 ? '' : 's'} link{g.refBy.length === 1 ? 's' : ''}{' '}
+                        here
+                      </span>
+                      <span className="of-go">Research</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+        </div>
       </div>
     </>
   )
@@ -814,22 +943,22 @@ function RunDetail({
 }
 
 /**
- * One session as a control-column row: title + meta (message count, last activity), with
- * rename (inline input - no `window.prompt`, blocked/ugly in installed PWAs) and a two-step
- * delete.
+ * One conversation as a ledger row: the question, how many turns it took, when it last
+ * answered, and the two actions it owns. Rename is an inline input (no `window.prompt` -
+ * blocked and ugly in installed PWAs) and delete is two-step, both unchanged from the rail
+ * row this replaces; what changed is that a conversation is now listed in the same shape as
+ * a research run, because from the user's side they are the same kind of thing.
  */
-function SessionRow({
+function SessionLedgerRow({
   session,
   active,
   onSelect,
-  onRenamed,
-  onDeleted,
+  onChanged,
 }: {
   session: Session
   active: boolean
   onSelect: () => void
-  onRenamed: () => void
-  onDeleted: () => void
+  onChanged: () => void
 }): React.ReactElement {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState('')
@@ -847,7 +976,7 @@ function SessionRow({
     const trimmed = title.trim()
     if (trimmed !== '' && trimmed !== (session.title ?? '')) {
       await api.renameSession(session.id, trimmed)
-      onRenamed()
+      onChanged()
     }
   }
 
@@ -859,38 +988,40 @@ function SessionRow({
     }
     if (confirmTimer.current) clearTimeout(confirmTimer.current)
     await api.deleteSession(session.id)
-    onDeleted()
-  }
-
-  if (editing) {
-    return (
-      <div className={`sess${active ? ' active' : ''}`}>
-        <input
-          className="session-rename"
-          value={title}
-          autoFocus
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={() => void commitRename()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void commitRename()
-            if (e.key === 'Escape') setEditing(false)
-          }}
-          aria-label="Rename session"
-        />
-      </div>
-    )
+    onChanged()
   }
 
   return (
-    <div className={`sess${active ? ' active' : ''}`}>
-      <button className="sess-main" onClick={onSelect} title={session.title ?? 'untitled'}>
-        <span className="st">{session.title ?? 'New session'}</span>
-        <span className="sm">
-          {session.message_count !== undefined && <span>{session.message_count} msgs</span>}
-          <span>{timeAgo(session.last_ts ?? session.created_at)}</span>
-        </span>
-      </button>
-      <span className="sess-acts">
+    <tr className={active ? 'active' : undefined}>
+      <td>
+        {editing ? (
+          <input
+            className="session-rename"
+            value={title}
+            autoFocus
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => void commitRename()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commitRename()
+              if (e.key === 'Escape') setEditing(false)
+            }}
+            aria-label="Rename conversation"
+          />
+        ) : (
+          <span
+            className="hrow-name"
+            {...openableRow(onSelect, `Open the conversation ${session.title ?? 'untitled'}`)}
+          >
+            <span className="hrow-dot done" aria-hidden />
+            <span className="nm" title={session.title ?? 'untitled'}>
+              {session.title ?? 'New conversation'}
+            </span>
+          </span>
+        )}
+      </td>
+      <td className="num dimc">{session.message_count ?? '-'}</td>
+      <td className="faintc">{timeAgo(session.last_ts ?? session.created_at)}</td>
+      <td className="rowacts">
         <button
           className="session-act"
           onClick={() => {
@@ -898,7 +1029,7 @@ function SessionRow({
             setEditing(true)
           }}
           title="Rename"
-          aria-label="Rename session"
+          aria-label="Rename conversation"
         >
           <Icon name="edit" />
         </button>
@@ -906,12 +1037,12 @@ function SessionRow({
           className={`session-act${confirming ? ' danger' : ''}`}
           onClick={() => void del()}
           title={confirming ? 'Really delete?' : 'Delete'}
-          aria-label={confirming ? 'Confirm delete' : 'Delete session'}
+          aria-label={confirming ? 'Confirm delete' : 'Delete conversation'}
         >
           {confirming ? 'Really?' : <Icon name="x" />}
         </button>
-      </span>
-    </div>
+      </td>
+    </tr>
   )
 }
 

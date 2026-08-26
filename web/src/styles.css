@@ -1370,68 +1370,6 @@ details.hot-cache[open] summary {
   width: 100%;
   min-height: 0;
 }
-.sess-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sess {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 2px 4px 2px 0;
-}
-.sess:hover {
-  background: var(--bg-elev);
-}
-.sess.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.sess-main {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.sess-main .st {
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sess.active .sess-main .st {
-  color: var(--accent);
-}
-.sess-main .sm {
-  font-size: 11px;
-  color: var(--text-faint);
-  display: flex;
-  gap: 8px;
-}
-.sess-acts {
-  display: none;
-  align-items: center;
-  flex-shrink: 0;
-}
-.sess:hover .sess-acts,
-.sess.active .sess-acts,
-.sess:focus-within .sess-acts {
-  display: inline-flex;
-}
 .session-act {
   border: none;
   background: transparent;
@@ -2214,22 +2152,6 @@ details.hot-cache[open] summary {
   margin-left: 8px;
   cursor: help;
 }
-/* Small screens: the session sidebar becomes a horizontal strip above the thread. */
-@media (max-width: 860px) {  .sess-list {
-    flex-direction: row;
-    overflow-y: visible;
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-  .sess {
-    flex-shrink: 0;
-    max-width: 220px;
-  }
-  /* On the strip, the meta line is noise - title + actions are enough. */
-  .sess-main .sm {
-    display: none;
-  }
-}
 .budget-fill.over { background: var(--warn); }
 
 /* ---- Citation chip with inline page preview (SPEC.md §6.3) ---- */
@@ -2346,8 +2268,7 @@ details.hot-cache[open] summary {
   flex: 1 1 0;
   min-height: 120px;
 }
-.gp-sec.grow > .domlist,
-.gp-sec.grow > .sess-list {
+.gp-sec.grow > .domlist {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -4740,6 +4661,106 @@ kbd {
   font-size: 12px;
   color: var(--text-faint);
 }
+/* ---- Research: the rail's running totals and the two ledgers ---- */
+/* The same metric-list shape Home's vault zone uses, at rail width. */
+.railfacts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.railfacts .vzf {
+  font-size: 11.5px;
+}
+.railfacts .vzf b {
+  min-width: 44px;
+  font-size: 12px;
+}
+/* A figure with nowhere to go stays a figure - no hover, no tab stop. */
+.vzf.static {
+  cursor: default;
+}
+/* The backlog band keeps its own height instead of taking a third of the two ledgers'. */
+.sv-band {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 196px;
+}
+/* An offer, not a record: a card with a verb on it. Two rows of them fit the band; the rest
+   is a scroll away, which is honest for a backlog that grows with the vault. */
+.offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 8px;
+  align-content: start;
+  padding: 10px 14px 12px;
+}
+.offer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.offer:hover,
+.offer:focus-visible {
+  border-color: var(--research);
+}
+.of-t {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--text);
+}
+.of-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.of-n {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.of-go {
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--research);
+  border: 1px solid var(--research);
+  border-radius: 999px;
+}
+.offer:hover .of-go {
+  background: var(--research);
+  color: var(--accent-ink);
+}
+/* The conversation ledger: same table as the run ledger, its own columns. */
+.sess-table th:nth-child(1) { width: 58%; }
+.sess-table th:nth-child(2) { width: 12%; }
+.sess-table th:nth-child(3) { width: 20%; }
+.sess-table th:nth-child(4) { width: 10%; }
+.sess-table tr.active td {
+  background: var(--accent-soft);
+}
+/* Row actions appear on hover and on keyboard focus - a row whose actions only exist under
+   a pointer is a row a keyboard cannot rename. */
+.rowacts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  opacity: 0;
+}
+tr:hover .rowacts,
+tr:focus-within .rowacts {
+  opacity: 1;
+}
+
 /* ---- Home: the vault zone (redesign 2026-08-26) ----
    Two zones stacked in the content column: the stock above (quiet, large, few words) and
    the flow below (dense, small, many words). The contrast between them is the thing that
@@ -5035,52 +5056,6 @@ kbd {
 .ip-actions .ch .d.ok { background: var(--ok); }
 .ip-actions .ch .d.warn { background: var(--warn); }
 
-/* ── Research: the run list in the control column ──────────────────────────── */
-.runrow {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text-dim);
-  text-align: left;
-}
-.runrow:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.runrow.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-  color: var(--text);
-}
-.runrow .hrow-dot {
-  margin-top: 5px;
-}
-.runrow .rr-body {
-  min-width: 0;
-  flex: 1;
-}
-.runrow .rr-t {
-  display: block;
-  font-size: 12.5px;
-  line-height: 1.35;
-  color: var(--text);
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.runrow .rr-m {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-faint);
-}
 /* A greyed-out control section: the lens has no effect while asking the vault. */
 .gp-sec.off {
   opacity: 0.5;
@@ -5444,35 +5419,6 @@ kbd {
   font-weight: 600;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-/* The research backlog: gaps the vault itself is asking for. */
-.backlog {
-  display: flex;
-  flex-direction: column;
-}
-.bl-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
-}
-.bl-row:last-child {
-  border-bottom: 0;
-}
-.bl-t {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.bl-n {
-  font-size: 11.5px;
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── System: sections, facts, subcards ─────────────────────────────────────── */
