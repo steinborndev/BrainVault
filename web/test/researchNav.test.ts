@@ -27,6 +27,22 @@ function branch(kind: string): string {
   return next === -1 ? rest : rest.slice(0, next)
 }
 
+/**
+ * A route back to the overview: the call itself, or a handler named in the branch that makes
+ * it one level down. Following the name matters - pinning the literal call would fail the
+ * moment the same navigation moves into a named function, which says nothing about whether
+ * the way back still exists.
+ */
+function goesBackToStart(source: string): boolean {
+  if (source.includes("setView({ kind: 'start' })")) return true
+  return [...source.matchAll(/onClick=\{(\w+)\}/g)]
+    .map((m) => m[1]!)
+    .some((fn) => {
+      const decl = chat.indexOf(`const ${fn} = (`)
+      return decl > -1 && chat.slice(decl, decl + 500).includes("setView({ kind: 'start' })")
+    })
+}
+
 describe('the Research screen can always be left', () => {
   it('has exactly the three views this test knows about', () => {
     const kinds = [...chat.matchAll(/\{view\.kind === '(\w+)'/g)].map((m) => m[1])
@@ -36,11 +52,11 @@ describe('the Research screen can always be left', () => {
   it('gets back to the overview from a conversation', () => {
     // The bar is rendered next to the body rather than inside it, so look at the whole
     // guarded region: what is pinned is that the branch carries a route back.
-    expect(branch('thread')).toContain("setView({ kind: 'start' })")
+    expect(goesBackToStart(branch('thread'))).toBe(true)
   })
 
   it('gets back to the overview from a run detail', () => {
-    expect(branch('run')).toContain("setView({ kind: 'start' })")
+    expect(goesBackToStart(branch('run'))).toBe(true)
   })
 
   it('keeps the conversation bar out of the scrolling thread', () => {

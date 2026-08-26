@@ -236,6 +236,17 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const save = useMaintenanceRun(() => api.saveSession(activeId as string))
   const canSave = activeId !== null && messages.some((m) => m.role === 'assistant')
 
+  /**
+   * Leaving a conversation ends it as the ACTIVE one. Without this the composer would keep
+   * appending to a thread the reader has walked away from - and since the ledger's "+ New"
+   * button is gone (a new question is asked in the composer above, like every other run),
+   * that would leave no way to start a second conversation at all.
+   */
+  const leaveThread = (): void => {
+    setActiveId(null)
+    setView({ kind: 'start' })
+  }
+
   const openThread = (id: string | null): void => {
     setActiveId(id)
     setMode('ask')
@@ -596,7 +607,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
             that it stays in view. */}
         {view.kind === 'thread' && (
           <div className="thread-bar">
-            <button className="backlink" onClick={() => setView({ kind: 'start' })}>
+            <button className="backlink" onClick={leaveThread}>
               <Icon name="back" />
               All conversations
             </button>
@@ -837,9 +848,6 @@ function StartView({
           <h3 className="sub-title">Vault Research</h3>
           <span className="box-sub">questions the vault answered from what it already holds</span>
           <span className="spacer" />
-          <button className="btn sm" onClick={() => onOpenThread(null)}>
-            + New
-          </button>
           <span className="count">{sessions.length}</span>
         </div>
         <div className="sv-scroll">

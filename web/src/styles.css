@@ -1406,8 +1406,12 @@ details.hot-cache[open] summary {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
+/* The answer is the content of the screen, not one side of a chat: it takes the full width.
+   A question still sits to the right at its own size, so the two are told apart by where
+   they are rather than by a strip of empty ground beside the answer. */
 .bubble.assistant {
-  align-self: flex-start;
+  align-self: stretch;
+  max-width: none;
   background: var(--bg-elev);
 }
 .bubble.system {
