@@ -208,6 +208,38 @@ function wikiPagesFrom(files: string): string[] {
 }
 
 /**
+ * The newest commit that touched `pathspec`, with the wiki pages it changed - or null when
+ * nothing did, or the newest one predates `since`.
+ *
+ * This exists because the service is not the only thing that commits this vault. The wiki
+ * ingest skill commits its own work, and when it wins the race the service's own
+ * `commitVault` finds an empty index and reports `committed: false` - which used to mean the
+ * job recorded no pages and no commit hash at all, even though its work was safely in git
+ * (2026-08-26). Passing this job's `.raw/<job-id>/` as the pathspec is what makes the answer
+ * attributable: that directory belongs to exactly one job, so a commit touching it is that
+ * job's commit and no other's, even at concurrency 2. `since` guards the remaining case -
+ * a run that committed NOTHING would otherwise adopt the older commit that first carried
+ * its raw payload.
+ */
+export async function commitTouching(
+  vaultRoot: string,
+  pathspec: string,
+  since: Date | null = null,
+): Promise<{ hash: string; date: string; pages: string[] } | null> {
+  const line = (await gitRead(vaultRoot, ['log', '-1', '--format=%H %cI', '--', pathspec])).trim()
+  if (line === '') return null
+  const [hash, iso] = line.split(' ')
+  if (hash === undefined || iso === undefined) return null
+  // A second of slack, because git timestamps have second resolution and `since` has
+  // millisecond resolution: a commit made in the same second the run started reads as
+  // fractionally OLDER than the run, and a strict comparison throws away the very commit
+  // this function exists to find.
+  if (since !== null && Date.parse(iso) < since.getTime() - 1000) return null
+  const files = await gitRead(vaultRoot, ['show', '--name-only', '--pretty=format:', hash])
+  return { hash, date: iso, pages: wikiPagesFrom(files) }
+}
+
+/**
  * Commits EXACTLY the given paths — used by user-initiated page edits/deletes from the
  * dashboard (SPEC.md §12.4 editing). Unlike commitVault there is deliberately NO
  * `git add -A` fallback and the commit itself is pathspec-limited: these commits can run

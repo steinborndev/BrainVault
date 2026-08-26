@@ -414,6 +414,30 @@ export class JobStore {
   }
 
   /**
+   * Finished ingests that never recorded what they produced: no commit hash AND no page
+   * list, but a raw payload, so they really did run. That pair is the exact signature of a
+   * run whose work was committed by the ingest skill rather than by the service - the
+   * service's own commit then staged nothing and recorded nothing (2026-08-26). The queue
+   * re-derives both from git at startup; once it does, a row stops matching.
+   *
+   * Bounded on purpose: a run that committed nothing at all stays unfixable and would
+   * otherwise be re-examined forever.
+   */
+  settledWithoutPages(limit = 10): JobRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM jobs
+          WHERE status = 'done'
+            AND raw_path IS NOT NULL
+            AND commit_hash IS NULL
+            AND (created_pages IS NULL OR created_pages = '' OR created_pages = '[]')
+          ORDER BY created_at DESC
+          LIMIT ?`,
+      )
+      .all(limit) as JobRow[]
+  }
+
+  /**
    * Bulk-fails every stranded active job with an interrupted reason. A store-level primitive
    * kept for callers with no vault access (the CLI, tests); the service's queue instead uses
    * {@link interruptedJobs} + a vault-aware reconcile so a run that HAD finished writing is

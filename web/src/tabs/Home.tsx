@@ -501,7 +501,11 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                     authMode={authMode}
                     onOpen={() => setDrawerJob(e.job!.id)}
                   />
-                ) : e.kind === 'edit' ? (
+                ) : e.commit !== null ? (
+                  /* A commit no job claims. The test used to be `kind === 'edit'`, which sent
+                     an unclaimed `ingest:` commit to SettleRow - and that prefixes the run's
+                     name onto a subject that already starts with "ingest: ". Only jobs and
+                     commits carry a hash, and jobs are handled above, so this is exact. */
                   <CommitRow key={e.id} event={e} vaultName={vaultName} />
                 ) : (
                   <SettleRow key={e.id} event={e} vaultName={vaultName} authMode={authMode} />

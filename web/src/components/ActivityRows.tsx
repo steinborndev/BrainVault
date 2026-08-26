@@ -248,7 +248,11 @@ export function SettleRow({
   )
 }
 
-/** A commit no job or run explains: a page saved or deleted by hand. */
+/**
+ * A commit no job or run claims: a page saved or deleted by hand, or an ingest whose own
+ * commit the service never recorded. Its title is the commit subject verbatim - the row
+ * that puts a run's name in front of it is `SettleRow`, and a commit has no run.
+ */
 export function CommitRow({
   event,
   vaultName,
