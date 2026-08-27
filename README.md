@@ -4,6 +4,8 @@
 
 # BrainVault
 
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
+
 Drop a PDF into a folder - a few minutes later it is a set of linked, cited wiki pages in your
 personal knowledge vault.
 
