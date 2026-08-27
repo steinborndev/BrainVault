@@ -161,6 +161,39 @@ describe('ChatStore', () => {
     expect(chat.getSession(s2.id)).toBeUndefined()
   })
 
+  /**
+   * The Research ledger lists a run's cost and a conversation's cost in the same column
+   * (2026-08-27), so a conversation has to be able to state its own. Summed here rather
+   * than in the client: the list response is the only place that sees every message.
+   */
+  it('sums what a conversation cost, and reports null when nothing recorded usage', () => {
+    const paid = chat.createSession({ title: 'paid' })
+    chat.addMessage({ sessionId: paid.id, role: 'user', content: 'q' })
+    chat.addMessage({
+      sessionId: paid.id,
+      role: 'assistant',
+      content: 'a',
+      usage: { tokensIn: 1000, tokensOut: 200, costUsd: 0.02 },
+    })
+    chat.addMessage({
+      sessionId: paid.id,
+      role: 'assistant',
+      content: 'b',
+      usage: { tokensIn: 500, tokensOut: 100, costUsd: 0.01 },
+    })
+    const free = chat.createSession({ title: 'no usage recorded' })
+    chat.addMessage({ sessionId: free.id, role: 'user', content: 'q' })
+
+    const list = chat.listSessions()
+    const withCost = list.find((s) => s.id === paid.id)!
+    expect(withCost.cost_usd).toBeCloseTo(0.03, 10)
+    expect(withCost.tokens).toBe(1800)
+
+    // Not 0: a conversation whose answers predate per-message usage did not cost nothing,
+    // and a ledger that adds those up as free reports a total that is quietly wrong.
+    expect(list.find((s) => s.id === free.id)!.cost_usd).toBeNull()
+  })
+
   it('persists per-message usage on assistant messages (v6), null elsewhere', () => {
     const s = chat.createSession({ title: 'usage' })
     chat.addMessage({ sessionId: s.id, role: 'user', content: 'q' })

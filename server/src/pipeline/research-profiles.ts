@@ -52,7 +52,7 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
   {
     key: 'broad',
     label: 'Broad sweep',
-    blurb: 'General authoritative coverage — the standard research loop.',
+    blurb: 'General authoritative coverage - the standard research loop.',
     badge: 'default',
     sources: ['peer-reviewed papers', 'official documentation', 'primary sources'],
     fetchEstimate: '30-45',
@@ -62,7 +62,7 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
   {
     key: 'sota',
     label: 'State of the art',
-    blurb: 'Latest developments, results and benchmarks — weighted to the last ~2 years.',
+    blurb: 'Latest developments, results and benchmarks - weighted to the last ~2 years.',
     sources: ['arXiv', 'official releases and changelogs', 'recent conference / peer-reviewed papers'],
     fetchEstimate: '30-40',
     titleSuffix: ' — State of the Art',
@@ -73,7 +73,7 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
   {
     key: 'patents',
     label: 'Recent patents',
-    blurb: 'The IP landscape — filings, assignees and claim scope.',
+    blurb: 'The IP landscape - filings, assignees and claim scope.',
     sources: ['Google Patents', 'USPTO', 'EPO Espacenet'],
     fetchEstimate: '25-35',
     titleSuffix: ' — Patent Landscape',

@@ -10,6 +10,15 @@
  * view's vertical plan: research has five phases and a query has three, and a vertical list
  * would be two different heights.
  *
+ * The row is a grid of RAIL_COLUMNS equal columns, never one column per step (2026-08-27).
+ * Sharing the width between three marks put an ask's "Answer" nowhere near a run's second
+ * step and stretched the three of them across a track built for five. On a fixed grid an
+ * ask fills the first three columns, leaves the rest empty, and step 2 sits under step 2.
+ *
+ * The idle caption is gone: two sentences that said what the marks beside them already say.
+ * What is left of the foot is the LIVE line - the run's own status and its elapsed time -
+ * in a fixed-width slot beside the row, so it can appear without moving a single mark.
+ *
  * Every state here is observed, never estimated: research counts its own tool calls
  * (lib/researchProgress.ts), a query has three observable markers (lib/askProgress.ts), and
  * the "read sources" phase carries the only honest ratio either run has - the lens's fetch
@@ -50,6 +59,12 @@ function useElapsed(startedAt: string | null): string {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
 }
 
+/**
+ * The column count both strips lay out on. The longer of the two step lists, so the longer
+ * one fills every column and the shorter one aligns to its left.
+ */
+const RAIL_COLUMNS = Math.max(RESEARCH_STEPS.length, ASK_STEPS.length)
+
 interface StepView {
   readonly key: string
   readonly short: string
@@ -61,53 +76,41 @@ interface StepView {
 function Strip({
   steps,
   running,
-  idleHint,
   now,
   elapsed,
   tone,
 }: {
   steps: StepView[]
   running: boolean
-  idleHint: string
   now: string | null
   elapsed: string
   tone: 'research' | 'ask'
 }): React.ReactElement {
-  // The fill reaches the mark of the step in flight, or the last finished one once nothing
-  // is running any more. Marks sit at the centre of equal-width columns, so the track spans
-  // centre-to-centre and both ends inset by half a column - `--steps` carries the count into
-  // the stylesheet, which is the only place that knows the column geometry.
-  const nowIndex = steps.findIndex((s) => s.state === 'now')
-  const doneCount = steps.filter((s) => s.state === 'done').length
-  const reached = nowIndex >= 0 ? nowIndex : Math.max(0, doneCount - 1)
-  const progress = steps.length > 1 ? reached / (steps.length - 1) : 0
-
   return (
     <div
       className={`rail ${tone}${running ? ' live' : ''}`}
-      style={{ '--steps': steps.length, '--progress': progress } as React.CSSProperties}
+      style={{ '--steps': RAIL_COLUMNS } as React.CSSProperties}
     >
       <div className="rail-row">
-        <span className="rail-track" aria-hidden />
-        {(running || doneCount > 0) && <span className="rail-fill" aria-hidden />}
         {steps.map((s, i) => (
           <div key={s.key} className={`rail-step ${s.state}`} title={s.title}>
             <span className="rail-mark" aria-hidden>
               {s.state === 'done' ? <Icon name="check" /> : i + 1}
             </span>
             <span className="rail-nm">{s.short}</span>
-            {s.note !== '' && <span className="rail-note">{s.note}</span>}
+            {/* Always rendered, empty or not: a step that starts reporting a count must not
+                be the reason the row gets wider or taller. */}
+            <span className="rail-note">{s.note}</span>
+            {/* The connector belongs to the step it LEAVES, which is what keeps each step
+                inside exactly one grid column. */}
+            {i < steps.length - 1 && <span className="rail-link" aria-hidden />}
           </div>
         ))}
       </div>
-      <div className="rail-foot">
-        <span className="rail-now">{running ? (now ?? 'Starting…') : idleHint}</span>
-        <span className="spacer" />
-        {elapsed !== '' && (
-          <span className="rail-el">
-            elapsed <b>{elapsed}</b>
-          </span>
-        )}
+      {/* A fixed slot, so the live line can fill it without shifting the marks beside it. */}
+      <div className="rail-live">
+        <span className="rail-now">{running ? (now ?? 'Starting…') : ''}</span>
+        {elapsed !== '' && <span className="rail-el">{elapsed}</span>}
       </div>
     </div>
   )
@@ -139,16 +142,7 @@ export function ResearchSteps({
     return { key: step.id, short: RESEARCH_SHORT[step.id] ?? step.title, title: step.title, state, note }
   })
 
-  return (
-    <Strip
-      steps={steps}
-      running={running}
-      idleHint="What a run will do, in order. Name a topic above to start one."
-      now={p.now}
-      elapsed={elapsed}
-      tone="research"
-    />
-  )
+  return <Strip steps={steps} running={running} now={p.now} elapsed={elapsed} tone="research" />
 }
 
 /** The ask strip: three phases, from the only three markers a query actually exposes. */
@@ -171,14 +165,5 @@ export function AskSteps(input: AskProgressInput): React.ReactElement {
     return { key: step.id, short: step.short, title: step.title, state, note }
   })
 
-  return (
-    <Strip
-      steps={steps}
-      running={running}
-      idleHint="What an answer takes. Nothing is written and nothing is fetched from the web."
-      now={p.now}
-      elapsed=""
-      tone="ask"
-    />
-  )
+  return <Strip steps={steps} running={running} now={p.now} elapsed="" tone="ask" />
 }

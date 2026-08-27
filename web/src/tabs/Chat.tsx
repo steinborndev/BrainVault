@@ -30,7 +30,14 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, parseCitations } from '../api/client.ts'
-import type { GraphNode, AuthMode, ChatMessage, ResearchProfile, Session } from '../api/types.ts'
+import type {
+  GraphNode,
+  AuthMode,
+  ChatMessage,
+  MaintenanceResult,
+  ResearchProfile,
+  Session,
+} from '../api/types.ts'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
 import { CitationChip } from '../components/CitationChip.tsx'
@@ -46,7 +53,7 @@ import { openableRow } from '../lib/tableRow.ts'
 import { chatStream } from '../lib/chatStream.ts'
 import { duration, timeAgo, tokens } from '../lib/format.ts'
 import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
-import { buildResearchRuns, targetTitle, type ResearchRunEntry } from '../lib/researchRuns.ts'
+import { buildResearchRuns, listedRuns, synthesisPage, targetTitle, type ResearchRunEntry } from '../lib/researchRuns.ts'
 import { frontmatter } from '../lib/frontmatter.ts'
 
 type ComposerMode = 'research' | 'ask'
@@ -139,13 +146,15 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
   const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const entries = useMemo(
     () =>
-      buildResearchRuns({
-        history: historyQ.data?.runs ?? [],
-        runs: runsQ.data?.runs ?? [],
-        lastRuns: stateQ.data?.areas ?? [],
-        nodes: graphQ.data?.nodes ?? [],
-        profiles,
-      }),
+      listedRuns(
+        buildResearchRuns({
+          history: historyQ.data?.runs ?? [],
+          runs: runsQ.data?.runs ?? [],
+          lastRuns: stateQ.data?.areas ?? [],
+          nodes: graphQ.data?.nodes ?? [],
+          profiles,
+        }),
+      ),
     [historyQ.data, runsQ.data, stateQ.data, graphQ.data, profiles],
   )
   const liveEntry = entries.find((e) => e.status === 'running')
@@ -258,6 +267,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
 
   const openEntry = (entry: ResearchRunEntry): void => {
     // A running entry has no detail to open - the strip under the composer is its view.
+    setMode('research')
     setView(entry.status === 'running' ? { kind: 'start' } : { kind: 'run', id: entry.id })
   }
 
@@ -312,30 +322,26 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 onClick={() => setProfileKey(p.key)}
               >
                 <span className="radio" aria-hidden />
-                <span>
-                  <span className="lname">
-                    {p.label}
-                    {p.badge !== undefined && <span className="badge">{p.badge}</span>}
-                  </span>
-                  <span className="ldesc">{p.blurb}</span>
+                {/* The name only. What the lens DOES is stated in the console, beside the
+                    composer it shapes, where it sits with the target page and the budget. */}
+                <span className="lname" title={p.blurb}>
+                  {p.label}
                 </span>
               </button>
             ))}
             {profiles.length === 0 && <div className="gp-none">Loading lenses…</div>}
           </div>
-          <div className="pillhint wrap">
-            {lensDisabled ? (
+          {/* All this still has to say is the one thing the console cannot: that an ask has
+              no lens. It keeps its height in both modes so nothing under it moves. */}
+          <div className="pillhint">
+            {lensDisabled && (
               <>
-                A lens shapes a research run only.{' '}
+                Not used here.{' '}
                 <button className="linkish" onClick={() => setMode('research')}>
                   Switch to Web Research
                 </button>
               </>
-            ) : selectedProfile !== undefined ? (
-              <>
-                up to {selectedProfile.fetchEstimate} fetches · sources: {selectedProfile.sources.join(', ')}
-              </>
-            ) : null}
+            )}
           </div>
         </div>
 
@@ -351,14 +357,15 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               </button>
             )}
           </div>
-          <div className="pillrow" role="radiogroup" aria-label="Filter web research by lens">
+          <div className="pillrow stacked" role="radiogroup" aria-label="Filter web research by lens">
             <button
               className="viewpill"
               role="radio"
               aria-checked={lensFilter === null}
               onClick={() => setLensFilter(null)}
             >
-              All {entries.length}
+              <span className="pl">All lenses</span>
+              <span className="pn">{entries.length}</span>
             </button>
             {profiles.map((p) => {
               const n = lensCounts.get(p.key) ?? 0
@@ -372,7 +379,8 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                   title={n === 0 ? `No run has used the ${p.label} lens yet` : undefined}
                   onClick={() => setLensFilter(lensFilter === p.key ? null : p.key)}
                 >
-                  {p.label} {n}
+                  <span className="pl">{p.label}</span>
+                  <span className="pn">{n}</span>
                 </button>
               )
             })}
@@ -434,7 +442,10 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
         </div>
       </aside>
 
-      <div className="box">
+      {/* The screen's own column: the console, a region that swaps, and the backlog pinned
+          under it - three stacked cards, the way Home stacks its zones. They used to be one
+          box with hairlines between them, which gave the eye nothing to hold on to. */}
+      <div className="rmain">
         {/* The console (2026-08-26): mode, topic, what the run will cost and the phases it
             goes through, in ONE raised card. These were four strips of equal value stacked
             on the same ground as the run table below them, and the tab had no visible place
@@ -506,52 +517,76 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
               {sendLabel}
             </button>
           </div>
-          {/* Both modes state what the send button will do, in the same line and the same
-              shape - otherwise switching modes moved everything below by the height of this
-              row. Each fact carries its own key now, so the row is scanned rather than read
-              as a sentence of separators. Ask has no lens, no target page and no commit;
-              saying so is the honest counterpart to the research plan. */}
+          {/* Two rows in both modes: what the armed mode IS, then what it will do. Same
+              two rows, same two heights - otherwise switching modes moved everything below
+              by the difference. The lens description lives HERE rather than in the control
+              rail, beside the target page and the budget it belongs with. */}
           {mode === 'research' ? (
             selectedProfile !== undefined && (
               <div className="planline">
-                <span className="pl-fact">
-                  <span className="pl-key">Lens</span>
-                  <span className="pl-val pl-hi">{selectedProfile.label}</span>
-                </span>
-                <span className="pl-fact">
-                  <span className="pl-key">Files as</span>
-                  <span className="pl-val pl-page" title={targetTitle(draft.trim() || 'your topic', selectedProfile)}>
-                    {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                <div className="pl-row">
+                  <span className="pl-fact">
+                    <span className="pl-key">Lens</span>
+                    <span className="pl-val pl-hi">{selectedProfile.label}</span>
                   </span>
+                  <span className="pl-blurb" title={`Sources: ${selectedProfile.sources.join(', ')}`}>
+                    {selectedProfile.blurb}
+                  </span>
+                </div>
+                <div className="pl-row">
+                  <span className="pl-fact">
+                    <span className="pl-key">Files as</span>
+                    <span
+                      className="pl-val pl-page"
+                      title={targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                    >
+                      {targetTitle(draft.trim() || 'your topic', selectedProfile)}
+                    </span>
+                  </span>
+                  <span className="pl-fact">
+                    <span className="pl-key">Budget</span>
+                    <span className="pl-val">
+                      up to <b>{selectedProfile.fetchEstimate}</b> fetches
+                    </span>
+                  </span>
+                  <span className="pl-fact">
+                    <span className="pl-key">Commits</span>
+                    <span className="pl-val">
+                      <b>1</b>
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="planline">
+              <div className="pl-row">
+                <span className="pl-fact">
+                  <span className="pl-key">Mode</span>
+                  <span className="pl-val pl-hi">Read-only</span>
+                </span>
+                <span className="pl-blurb">
+                  Answers come only from pages the vault already holds. No lens applies.
+                </span>
+              </div>
+              <div className="pl-row">
+                <span className="pl-fact">
+                  <span className="pl-key">Cites</span>
+                  <span className="pl-val">the vault pages the answer came from</span>
                 </span>
                 <span className="pl-fact">
-                  <span className="pl-key">Budget</span>
+                  <span className="pl-key">Fetches</span>
                   <span className="pl-val">
-                    up to <b>{selectedProfile.fetchEstimate}</b> fetches
+                    <b>0</b>
                   </span>
                 </span>
                 <span className="pl-fact">
                   <span className="pl-key">Commits</span>
                   <span className="pl-val">
-                    <b>1</b>
+                    <b>0</b>
                   </span>
                 </span>
               </div>
-            )
-          ) : (
-            <div className="planline">
-              <span className="pl-fact">
-                <span className="pl-key">Mode</span>
-                <span className="pl-val pl-hi">Read-only</span>
-              </span>
-              <span className="pl-fact">
-                <span className="pl-key">Answers</span>
-                <span className="pl-val">cite the vault pages they came from</span>
-              </span>
-              <span className="pl-fact">
-                <span className="pl-key">Writes</span>
-                <span className="pl-val">nothing - no web access, no commit</span>
-              </span>
             </div>
           )}
           {/* The rail is the console's FOOTER, not a sibling: it describes the run this
@@ -599,46 +634,22 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           </div>
         )}
 
-        {/* The way back out of a conversation. It sits OUTSIDE the scrolling body on
-            purpose: the thread scrolls itself to the newest message, so a bar inside it
-            would be somewhere above the fold for the whole conversation - which is how a
-            reader ended up with no way back to the overview at all. The run detail keeps
-            its own "All runs" button inside its pane, where the content is short enough
-            that it stays in view. */}
-        {view.kind === 'thread' && (
-          <div className="thread-bar">
-            <button className="backlink" onClick={leaveThread}>
-              <Icon name="back" />
-              All conversations
-            </button>
-            <Icon name="chat" />
-            <h3 className="detail-title" title={threadTitle}>
-              {threadTitle}
-            </h3>
-          </div>
-        )}
-
-        {/* Each view owns its own scrolling. `start` scrolls as a whole; a DETAIL must fit -
-            its head and facts are the frame you read the content against, and letting them
-            scroll away put two scrollbars on one screen and the run's own facts off it. */}
-        <div
-          className={`box-body${view.kind === 'start' ? ' start-view' : view.kind === 'run' ? ' detail-view' : ' thread-view'}`}
-        >
+        {/* The region that swaps: the two ledgers, or ONE detail in their place. The
+            console above and the backlog below stay mounted either way, so opening a run
+            changes what fills one region and moves nothing else on the screen. */}
+        <div className="rstack">
           {view.kind === 'start' && (
             <StartView
               entries={shownEntries}
               totalRuns={entries.length}
               profiles={profiles}
               sessions={sessions}
-              gaps={gaps.slice(0, BACKLOG_SIZE)}
               authMode={authMode}
               runState={queryState(merge(historyQ, runsQ, stateQ), 'the run history')}
               sessionState={queryState(sessionsQ, 'the conversations')}
-              gapState={queryState(graphQ, 'the knowledge gaps')}
               activeSessionId={activeId}
               onOpen={openEntry}
               onOpenThread={openThread}
-              onResearch={startAbout}
               onSessionsChanged={() => qc.invalidateQueries({ queryKey: ['sessions'] })}
             />
           )}
@@ -659,102 +670,89 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
           )}
 
           {view.kind === 'thread' && (
-            <div className="thread" ref={threadRef}>
-              {messages.length === 0 && !ask.isPending && !ask.isError && (
-                <div className="chat-empty">
-                  <div className="icon">
-                    <Icon name="chat" />
-                  </div>
-                  <p>Ask the vault anything - answers cite the underlying wiki pages as clickable chips.</p>
-                  <p className="dim">
-                    Read-only: nothing is written, nothing is fetched from the web. Switch the composer to{' '}
-                    <strong>Research the web</strong> for that.
-                  </p>
-                </div>
-              )}
-
-              {messages.map((m, i) => {
-                // A conversation is NAMED after its first question, and that name is in the
-                // bar above. Repeating it as the opening bubble says the same thing twice -
-                // and it is the one bubble the reader never needs, because they just clicked
-                // it to get here. A renamed conversation no longer matches and keeps it.
-                const isTitleEcho =
-                  i === 0 && m.role === 'user' && sessionTitle !== null && m.content.trim() === sessionTitle.trim()
-                if (isTitleEcho) return null
-                return <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
-              })}
-
-              {ask.isPending && (
-                <>
-                  <div className="bubble user">
-                    <div className="bubble-body">{ask.variables}</div>
-                  </div>
-                  <div className="bubble assistant">
-                    {streamed === '' ? (
-                      <div className="bubble-body typing">thinking…</div>
-                    ) : (
-                      // Plain text while streaming, not Markdown: the buffer is mid-sentence by
-                      // definition, and half-parsed markup would flicker as it completes.
-                      <div className="bubble-body streaming">{streamed}</div>
-                    )}
-                  </div>
-                </>
-              )}
-              {ask.isError && (
-                <div className="bubble system">
-                  <div className="bubble-body">Error: {(ask.error as Error).message}</div>
-                </div>
-              )}
-
-              {save.running && <JobLog jobId="maintenance:save" seed={false} />}
-              {save.error && <div className="toast err">{save.error}</div>}
-              {save.result?.ok && (
-                <div className="toast ok">
-                  Session saved
-                  {save.result.pages.length > 0 ? (
-                    <PageLinks vaultName={vaultName} paths={save.result.pages} />
-                  ) : (
-                    <> - no new pages.</>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Beside the thread, not inside it: an action that scrolls away with the
-              conversation is one you cannot reach while reading it. */}
-          {view.kind === 'thread' && canSave && (
-            <div className="savebar">
-              <button className="btn" disabled={save.running} onClick={save.start}>
-                {save.running ? 'Saving…' : 'Save conversation to vault'}
-              </button>
-              <span className="dim">creates/updates wiki pages from this thread - one git commit</span>
-            </div>
+            <ThreadDetail
+              title={threadTitle}
+              sessionTitle={sessionTitle}
+              messages={messages}
+              streamed={streamed}
+              pending={ask.isPending}
+              pendingQuestion={typeof ask.variables === 'string' ? ask.variables : ''}
+              askError={ask.isError ? (ask.error as Error).message : null}
+              vaultName={vaultName}
+              authMode={authMode}
+              contentRef={threadRef}
+              canSave={canSave}
+              saving={save.running}
+              saveError={save.error}
+              saveResult={save.result}
+              onSave={save.start}
+              onBack={leaveThread}
+              onAskAgain={() => {
+                setMode('ask')
+                composerRef.current?.focus()
+              }}
+            />
           )}
         </div>
+
+        {/* The backlog is an offer, not a record - so it is a band of cards with a verb on
+            them, and it keeps that band whether or not a detail is open. Opening a run
+            should not cost the reader the thing they might do next. */}
+        <section className="box band">
+          <div className="sub-head">
+            <h3 className="sub-title">Worth a run</h3>
+            <span className="box-sub">pages your vault links to but has never written</span>
+            <span className="spacer" />
+            <span className="count">{gaps.length}</span>
+          </div>
+          <div className="box-body">
+            {queryState(graphQ, 'the knowledge gaps') ??
+              (gaps.length === 0 ? (
+                <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
+              ) : (
+                <div className="offers">
+                  {gaps.slice(0, BACKLOG_SIZE).map((g) => (
+                    <button key={g.title} className="offer" onClick={() => startAbout(g.title)}>
+                      <span className="of-t" title={g.title}>
+                        {g.title}
+                      </span>
+                      <span className="of-m">
+                        <span className="of-n">
+                          {g.refBy.length} page{g.refBy.length === 1 ? '' : 's'} link
+                          {g.refBy.length === 1 ? 's' : ''} here
+                        </span>
+                        <span className="of-go">Research</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ))}
+          </div>
+        </section>
       </div>
     </div>
   )
 }
 
 /**
- * The screen with nothing selected: the run record, then the vault's own backlog. Both are
- * starting points, which is what an empty research screen was missing.
+ * The screen with nothing selected: the two ledgers, splitting the region between them.
+ *
+ * They are the same object from the user's side - something you asked, and the record of
+ * what came back - so they are two tables of the SAME SHAPE, on one column template
+ * (`.rtable`): a run's "Cost" sits over a conversation's "Cost", and the title column takes
+ * whatever is left instead of the numbers being crushed against the right edge.
  */
 function StartView({
   entries,
   totalRuns,
   profiles,
   sessions,
-  gaps,
   authMode,
   runState,
   sessionState,
-  gapState,
   activeSessionId,
   onOpen,
   onOpenThread,
-  onResearch,
   onSessionsChanged,
 }: {
   entries: ResearchRunEntry[]
@@ -762,28 +760,20 @@ function StartView({
   totalRuns: number
   profiles: ResearchProfile[]
   sessions: Session[]
-  gaps: Array<{ title: string; refBy: number[] }>
   authMode: AuthMode
   /** Loading/failed for the three queries the run list is built from; null once ready. */
   runState: React.ReactElement | null
   sessionState: React.ReactElement | null
-  /** Same for the graph query behind the backlog. */
-  gapState: React.ReactElement | null
   activeSessionId: string | null
   onOpen: (e: ResearchRunEntry) => void
   onOpenThread: (id: string | null) => void
-  onResearch: (topic: string) => void
   onSessionsChanged: () => void
 }): React.ReactElement {
   const lensLabel = (key: string | null): string =>
     key === null ? '-' : (profiles.find((p) => p.key === key)?.label ?? key)
   return (
     <>
-      {/* Two ledgers of the same shape, splitting the height: what you sent to the web, and
-          what you asked the vault. Same object from the user's side; the columns are where
-          they differ - one files pages and costs fetches, the other cites pages and commits
-          nothing. */}
-      <div className="sv-sec">
+      <section className="box ledger">
         <div className="sub-head">
           <h3 className="sub-title">Web Research</h3>
           <span className="box-sub">topic, lens, the pages it filed and what it cost</span>
@@ -793,7 +783,7 @@ function StartView({
             {entries.length !== totalRuns ? ` of ${totalRuns}` : ''}
           </span>
         </div>
-        <div className="sv-scroll">
+        <div className="box-body">
           {runState ??
             (entries.length === 0 ? (
               <div className="empty">
@@ -802,7 +792,7 @@ function StartView({
                   : 'No run used that lens. Clear the filter on the left to see the rest.'}
               </div>
             ) : (
-              <table className="dtable runs-table">
+              <table className="dtable rtable">
                 <thead>
                   <tr>
                     <th>Topic</th>
@@ -810,6 +800,7 @@ function StartView({
                     <th className="num">Pages</th>
                     <th className="num">Cost</th>
                     <th>When</th>
+                    <th aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -821,11 +812,6 @@ function StartView({
                           <span className="nm" title={e.topic}>
                             {e.topic}
                           </span>
-                          {e.source === 'page' && (
-                            <span className="badge" title="Reconstructed from the synthesis page in the vault">
-                              from vault
-                            </span>
-                          )}
                         </span>
                         {e.error !== null && <span className="rowerr">{e.error}</span>}
                       </td>
@@ -835,22 +821,23 @@ function StartView({
                         {e.costUsd !== null ? <Cost value={e.costUsd} authMode={authMode} /> : '-'}
                       </td>
                       <td className="faintc">{e.status === 'running' ? 'running' : timeAgo(e.finishedAt)}</td>
+                      <td />
                     </tr>
                   ))}
                 </tbody>
               </table>
             ))}
         </div>
-      </div>
+      </section>
 
-      <div className="sv-sec">
+      <section className="box ledger">
         <div className="sub-head">
           <h3 className="sub-title">Vault Research</h3>
           <span className="box-sub">questions the vault answered from what it already holds</span>
           <span className="spacer" />
           <span className="count">{sessions.length}</span>
         </div>
-        <div className="sv-scroll">
+        <div className="box-body">
           {sessionState ??
             (sessions.length === 0 ? (
               <div className="empty">
@@ -858,11 +845,15 @@ function StartView({
                 it came from, and nothing is written.
               </div>
             ) : (
-              <table className="dtable sess-table">
+              <table className="dtable rtable">
                 <thead>
                   <tr>
                     <th>Question</th>
+                    {/* The lens column's counterpart. A conversation has no lens, and saying
+                        so keeps the two tables on one grid instead of two. */}
+                    <th>Mode</th>
                     <th className="num">Turns</th>
+                    <th className="num">Cost</th>
                     <th>Last reply</th>
                     <th aria-label="Actions" />
                   </tr>
@@ -872,6 +863,7 @@ function StartView({
                     <SessionLedgerRow
                       key={s.id}
                       session={s}
+                      authMode={authMode}
                       active={s.id === activeSessionId}
                       onSelect={() => onOpenThread(s.id)}
                       onChanged={onSessionsChanged}
@@ -881,43 +873,85 @@ function StartView({
               </table>
             ))}
         </div>
-      </div>
-
-      {/* The backlog is not history, it is an offer - so it is a band of cards with a verb on
-          them rather than a third table, and it keeps its own height instead of taking a
-          third of the two ledgers'. */}
-      <div className="sv-sec sv-band">
-        <div className="sub-head">
-          <h3 className="sub-title">Worth a run</h3>
-          <span className="box-sub">pages your vault links to but has never written</span>
-          <span className="spacer" />
-          <span className="count">{gaps.length}</span>
-        </div>
-        <div className="sv-scroll">
-          {gapState ??
-            (gaps.length === 0 ? (
-              <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
-            ) : (
-              <div className="offers">
-                {gaps.map((g) => (
-                  <button key={g.title} className="offer" onClick={() => onResearch(g.title)}>
-                    <span className="of-t" title={g.title}>
-                      {g.title}
-                    </span>
-                    <span className="of-m">
-                      <span className="of-n">
-                        {g.refBy.length} page{g.refBy.length === 1 ? '' : 's'} link{g.refBy.length === 1 ? 's' : ''}{' '}
-                        here
-                      </span>
-                      <span className="of-go">Research</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ))}
-        </div>
-      </div>
+      </section>
     </>
+  )
+}
+
+/**
+ * ONE detail shell, two kinds (2026-08-27).
+ *
+ * A run and a conversation are the same object from the reader's side, so they are read in
+ * the same frame: bar, facts, chips, content, foot - five bands in one order, at one set of
+ * heights. Only the words inside them differ. They used to be two constructions, and moving
+ * between them shifted every row on the screen.
+ *
+ * The bands are props rather than children so a kind cannot quietly skip one: a conversation
+ * that stated no facts and listed no cited pages was exactly the asymmetry this replaces.
+ */
+function DetailShell({
+  kind,
+  icon,
+  backLabel,
+  onBack,
+  title,
+  tag,
+  state,
+  action,
+  facts,
+  chipsKey,
+  chips,
+  contentRef,
+  children,
+  provenance,
+  footAction,
+}: {
+  kind: 'web' | 'vault'
+  icon: 'flask' | 'chat'
+  backLabel: string
+  onBack: () => void
+  title: string
+  tag?: React.ReactNode
+  state: React.ReactNode
+  action: React.ReactNode
+  facts: React.ReactNode
+  chipsKey: string
+  chips: React.ReactNode
+  contentRef?: React.RefObject<HTMLDivElement | null>
+  children: React.ReactNode
+  provenance: React.ReactNode
+  footAction: React.ReactNode
+}): React.ReactElement {
+  return (
+    <section className="box detail">
+      <div className={`detail-bar ${kind}`}>
+        <button className="backlink" onClick={onBack}>
+          <Icon name="back" />
+          {backLabel}
+        </button>
+        <Icon name={icon} />
+        <h3 className="detail-title" title={title}>
+          {title}
+        </h3>
+        {tag}
+        {state}
+        <span className="spacer" />
+        {action}
+      </div>
+      <Facts size="lead">{facts}</Facts>
+      <div className="chipband">
+        <span className="bandkey">{chipsKey}</span>
+        {chips}
+      </div>
+      <div className="detail-content" ref={contentRef}>
+        {children}
+      </div>
+      <div className="detail-foot">
+        <span className="prov">{provenance}</span>
+        <span className="spacer" />
+        {footAction}
+      </div>
+    </section>
   )
 }
 
@@ -942,7 +976,18 @@ function RunDetail({
 }): React.ReactElement {
   if (entry === undefined) return <div className="empty">That run is no longer in the list.</div>
   const profile = profiles.find((p) => p.key === entry.profileKey)
-  return <RunDetailBody entry={entry} profile={profile} nodes={nodes} vaultName={vaultName} authMode={authMode} onBack={onBack} onRerun={onRerun} />
+  return (
+    <RunDetailBody
+      entry={entry}
+      profile={profile}
+      profiles={profiles}
+      nodes={nodes}
+      vaultName={vaultName}
+      authMode={authMode}
+      onBack={onBack}
+      onRerun={onRerun}
+    />
+  )
 }
 
 /**
@@ -952,6 +997,7 @@ function RunDetail({
 function RunDetailBody({
   entry,
   profile,
+  profiles,
   nodes,
   vaultName,
   authMode,
@@ -960,106 +1006,249 @@ function RunDetailBody({
 }: {
   entry: ResearchRunEntry
   profile: ResearchProfile | undefined
+  profiles: ResearchProfile[]
   nodes: readonly GraphNode[]
   vaultName: string
   authMode: AuthMode
   onBack: () => void
   onRerun: (topic: string, profileKey: string | null) => void
 }): React.ReactElement {
-  /**
-   * The page this run was for. Resolved by NAME rather than taken from the run's page list:
-   * the log records what the run's commit carried, and for this class of run the synthesis
-   * page has been observed missing from it (2026-08-26) while the page itself sits in the
-   * vault. The name is deterministic - prefix, topic, lens suffix - and a page's `names`
-   * carry its own title, which is the form that keeps the characters a file name drops.
-   */
-  const wanted = targetTitle(entry.topic, profile)
-  const articlePath =
-    entry.pagePath ??
-    nodes.find((n) => n.title === wanted || (n.names?.includes(wanted) ?? false))?.path ??
-    null
+  const articlePath = synthesisPage(entry, profiles, nodes)
   const article = useQuery({
     queryKey: ['page-full', articlePath],
     queryFn: () => api.pageFull(articlePath as string),
     enabled: articlePath !== null,
   })
   const body = article.data ? frontmatter(article.data.markdown).body : ''
+  // What the run FILED, which is not always what the deterministic title predicted - the
+  // agent names the page itself. State the real one; the prediction belongs in the composer.
+  const filedTitle = articlePath !== null ? (articlePath.split('/').pop() ?? '').replace(/\.md$/, '') : null
   return (
-    <div className="detail-pad">
-      <div className="detail-head">
-        <button className="backlink" onClick={onBack}>
-          <Icon name="back" />
-          All runs
-        </button>
-        <Icon name="flask" />
-        <h3 className="detail-title">{entry.topic}</h3>
-        {profile !== undefined && <span className="lens-tag">{profile.label}</span>}
-        <span className={`badge ${entry.status === 'failed' ? 'failed' : 'ok'}`}>{entry.status}</span>
-        <span className="spacer" />
+    <DetailShell
+      kind="web"
+      icon="flask"
+      backLabel="All runs"
+      onBack={onBack}
+      title={entry.topic}
+      tag={profile !== undefined ? <span className="lens-tag">{profile.label}</span> : undefined}
+      state={<span className={`badge ${entry.status === 'failed' ? 'failed' : 'ok'}`}>{entry.status}</span>}
+      action={
         <button className="btn sm" onClick={() => onRerun(entry.topic, entry.profileKey)}>
           Run again
         </button>
-      </div>
-
-      <Facts>
-        <Fact k="Filed as" v={<span className="mono-meta">{targetTitle(entry.topic, profile)}</span>} />
-        <Fact k="When" v={timeAgo(entry.finishedAt)} />
-        <Fact k="Took" v={duration(entry.startedAt, entry.finishedAt)} />
-        <Fact
-          k="Cost"
-          v={entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
-        />
-        <Fact k="Pages" v={entry.pages.length} />
-      </Facts>
-
+      }
+      facts={
+        <>
+          <Fact
+            k="Filed as"
+            v={<span className="mono-meta">{filedTitle ?? targetTitle(entry.topic, profile)}</span>}
+          />
+          <Fact k="When" v={timeAgo(entry.finishedAt)} />
+          <Fact k="Took" v={duration(entry.startedAt, entry.finishedAt)} />
+          <Fact
+            k="Cost"
+            v={entry.costUsd !== null ? <Cost value={entry.costUsd} authMode={authMode} /> : 'not kept'}
+          />
+          <Fact k="Pages written" v={entry.pages.length} />
+        </>
+      }
+      chipsKey="Wrote"
+      chips={
+        entry.pages.length > 0 ? (
+          entry.pages.map((p) => <PageLink key={p} vaultName={vaultName} path={p} />)
+        ) : (
+          <span className="empty">This run wrote no page of its own.</span>
+        )
+      }
+      provenance={
+        entry.source === 'state'
+          ? 'From the restart-proof settle record - the run wrote no page.'
+          : entry.source === 'run'
+            ? 'From the run record the service still holds in memory.'
+            : 'From the run log - recorded when the run settled, and kept across restarts.'
+      }
+      footAction={articlePath !== null ? <PageLink vaultName={vaultName} path={articlePath} /> : null}
+    >
       {entry.error !== null && <div className="toast err">{entry.error}</div>}
-
-      {entry.pages.length > 0 && (
-        <div className="pagesblock">
-          <h4 className="section-title">Pages</h4>
-          <span className="pages">
-            {entry.pages.map((p) => (
-              <PageLink key={p} vaultName={vaultName} path={p} />
-            ))}
-          </span>
+      {articlePath === null ? (
+        <div className="empty">
+          This run has no synthesis page in the vault - nothing it committed is filed under a research
+          title, and no page answers to the name the lens would have given it.
         </div>
+      ) : article.isPending ? (
+        <div className="empty">Loading the page…</div>
+      ) : article.isError ? (
+        <div className="empty">That page could not be read: {(article.error as Error).message}</div>
+      ) : (
+        <Markdown source={body} />
       )}
+    </DetailShell>
+  )
+}
 
-      {/* The run's own page, in full. A list of chips says WHICH pages it wrote; this is the
-          one it was for, and reading it was otherwise a trip to another screen. It scrolls
-          inside its own box so the facts above it stay put. */}
-      {articlePath !== null && (
-        <div className="article">
-          <div className="sub-head">
-            <h3 className="sub-title">The article</h3>
-            <span className="box-sub" title={articlePath}>
-              {wanted}
-            </span>
-            <span className="spacer" />
-            <PageLink vaultName={vaultName} path={articlePath} />
+/**
+ * A conversation, in the same five bands as a run. What differs is what fills them: a run
+ * states what it filed and wrote, a conversation what it asked and cited.
+ */
+function ThreadDetail({
+  title,
+  sessionTitle,
+  messages,
+  streamed,
+  pending,
+  pendingQuestion,
+  askError,
+  vaultName,
+  authMode,
+  contentRef,
+  canSave,
+  saving,
+  saveError,
+  saveResult,
+  onSave,
+  onBack,
+  onAskAgain,
+}: {
+  title: string
+  sessionTitle: string | null
+  messages: ChatMessage[]
+  streamed: string
+  pending: boolean
+  pendingQuestion: string
+  askError: string | null
+  vaultName: string
+  authMode: AuthMode
+  contentRef: React.RefObject<HTMLDivElement | null>
+  canSave: boolean
+  saving: boolean
+  saveError: string | null
+  saveResult: MaintenanceResult | undefined
+  onSave: () => void
+  onBack: () => void
+  onAskAgain: () => void
+}): React.ReactElement {
+  // Every page the conversation cited, once, in the order it first cited them - the
+  // counterpart of the pages a run wrote.
+  const cited = new Map<string, string>()
+  let cost = 0
+  let costed = false
+  for (const m of messages) {
+    if (m.cost_usd !== null) {
+      cost += m.cost_usd
+      costed = true
+    }
+    for (const c of parseCitations(m.citations)) {
+      if (c.path !== null && c.path !== undefined && !cited.has(c.path)) cited.set(c.path, c.label)
+    }
+  }
+  const answers = messages.filter((m) => m.role === 'assistant')
+  const asked = messages.find((m) => m.role === 'user')?.content ?? title
+  const lastTs = messages.length > 0 ? (messages[messages.length - 1]?.ts ?? null) : null
+
+  return (
+    <DetailShell
+      kind="vault"
+      icon="chat"
+      backLabel="All conversations"
+      onBack={onBack}
+      title={title}
+      tag={<span className="lens-tag">Read-only</span>}
+      state={
+        <span className={`badge ${answers.length > 0 ? 'ok' : 'queued-badge'}`}>
+          {answers.length > 0 ? 'answered' : 'new'}
+        </span>
+      }
+      action={
+        <button className="btn sm" onClick={onAskAgain}>
+          Ask again
+        </button>
+      }
+      facts={
+        <>
+          <Fact k="Asked" v={<span className="mono-meta">{asked}</span>} />
+          <Fact k="When" v={timeAgo(lastTs)} />
+          <Fact k="Turns" v={messages.length} />
+          <Fact k="Cost" v={costed ? <Cost value={cost} authMode={authMode} /> : 'not kept'} />
+          <Fact k="Pages cited" v={cited.size} />
+        </>
+      }
+      chipsKey="Cited"
+      chips={
+        cited.size > 0 ? (
+          [...cited.keys()].map((path) => <CitationChip key={path} vaultName={vaultName} path={path} />)
+        ) : (
+          <span className="empty">No answer here cited a page yet.</span>
+        )
+      }
+      contentRef={contentRef}
+      provenance="Read-only. Nothing was written and nothing was fetched from the web."
+      footAction={
+        canSave ? (
+          <button className="btn" disabled={saving} onClick={onSave}>
+            {saving ? 'Saving…' : 'Save conversation to vault'}
+          </button>
+        ) : null
+      }
+    >
+      <div className="thread">
+        {messages.length === 0 && !pending && askError === null && (
+          <div className="chat-empty">
+            <div className="icon">
+              <Icon name="chat" />
+            </div>
+            <p>Ask the vault anything - answers cite the underlying wiki pages as clickable chips.</p>
+            <p className="dim">
+              Read-only: nothing is written, nothing is fetched from the web. Switch the composer to{' '}
+              <strong>Web Research</strong> for that.
+            </p>
           </div>
-          <div className="article-body">
-            {article.isPending ? (
-              <div className="empty">Loading the page…</div>
-            ) : article.isError ? (
-              <div className="empty">That page could not be read: {(article.error as Error).message}</div>
+        )}
+
+        {messages.map((m, i) => {
+          // A conversation is NAMED after its first question, and that name is in the bar
+          // above. Repeating it as the opening bubble says the same thing twice.
+          const isTitleEcho =
+            i === 0 && m.role === 'user' && sessionTitle !== null && m.content.trim() === sessionTitle.trim()
+          if (isTitleEcho) return null
+          return <Bubble key={m.id} message={m} vaultName={vaultName} authMode={authMode} />
+        })}
+
+        {pending && (
+          <>
+            <div className="bubble user">
+              <div className="bubble-body">{pendingQuestion}</div>
+            </div>
+            <div className="bubble assistant">
+              {streamed === '' ? (
+                <div className="bubble-body typing">thinking…</div>
+              ) : (
+                // Plain text while streaming, not Markdown: the buffer is mid-sentence by
+                // definition, and half-parsed markup would flicker as it completes.
+                <div className="bubble-body streaming">{streamed}</div>
+              )}
+            </div>
+          </>
+        )}
+        {askError !== null && (
+          <div className="bubble system">
+            <div className="bubble-body">Error: {askError}</div>
+          </div>
+        )}
+
+        {saving && <JobLog jobId="maintenance:save" seed={false} />}
+        {saveError !== null && <div className="toast err">{saveError}</div>}
+        {saveResult?.ok === true && (
+          <div className="toast ok">
+            Session saved
+            {saveResult.pages.length > 0 ? (
+              <PageLinks vaultName={vaultName} paths={saveResult.pages} />
             ) : (
-              <Markdown source={body} />
+              <> - no new pages.</>
             )}
           </div>
-        </div>
-      )}
-
-      <p className="tab-hint">
-        {entry.source === 'page'
-          ? 'Reconstructed from the synthesis page in the vault - this run predates the run log, so its cost and duration were never recorded.'
-          : entry.source === 'state'
-            ? 'From the restart-proof settle record - the run wrote no page.'
-            : entry.source === 'run'
-              ? 'From the run record the service still holds in memory.'
-              : 'From the run log - recorded when the run settled, and kept across restarts.'}
-      </p>
-    </div>
+        )}
+      </div>
+    </DetailShell>
   )
 }
 
@@ -1072,11 +1261,13 @@ function RunDetailBody({
  */
 function SessionLedgerRow({
   session,
+  authMode,
   active,
   onSelect,
   onChanged,
 }: {
   session: Session
+  authMode: AuthMode
   active: boolean
   onSelect: () => void
   onChanged: () => void
@@ -1140,7 +1331,16 @@ function SessionLedgerRow({
           </span>
         )}
       </td>
+      {/* The lens column's counterpart: a conversation has one mode and no lens. */}
+      <td className="dimc">Read-only</td>
       <td className="num dimc">{session.message_count ?? '-'}</td>
+      <td className="num dimc">
+        {session.cost_usd !== null && session.cost_usd !== undefined ? (
+          <Cost value={session.cost_usd} authMode={authMode} />
+        ) : (
+          '-'
+        )}
+      </td>
       <td className="faintc">{timeAgo(session.last_ts ?? session.created_at)}</td>
       {/* The flex row is a span INSIDE the cell. A `td` set to `display: flex` drops out of
           the table layout: this one stopped taking its 10% column, so the active row's

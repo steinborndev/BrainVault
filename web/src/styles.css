@@ -1501,15 +1501,6 @@ details.hot-cache[open] summary {
   color: var(--text);
 }
 
-/* Save-to-vault at the end of the thread - next to the result it saves. */
-.savebar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-  flex-wrap: wrap;
-  padding: 2px 0;
-}
 .pagelink.unresolved {
   color: var(--text-faint);
   border-style: dashed;
@@ -2342,6 +2333,32 @@ details.hot-cache[open] summary {
   opacity: 0.45;
   cursor: default;
 }
+/* One filter per row. At 252px the labels ("Startups & funding") wrapped into a ragged
+   three-line block whose height changed with the label set; as full-width rows they read as
+   the list they are, and the counts line up on the right. Scoped to the modifier, because
+   Home, Library and the Graph want the same pill as a wrapping chip. */
+.pillrow.stacked {
+  display: grid;
+  gap: 4px;
+}
+.pillrow.stacked .viewpill {
+  display: flex;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+.pillrow.stacked .viewpill > .pl {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pillrow.stacked .viewpill > .pn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .viewpill .pd {
   width: 7px;
   height: 7px;
@@ -2357,16 +2374,21 @@ details.hot-cache[open] summary {
    time the pointer crossed the row. */
 /* The wrapping variant, for hints that explain rather than swap on hover. The fixed-height
    one above exists so the graph's hover hints do not reflow the panel under the pointer. */
+/* Home and the activity rail put a sentence here and want it to wrap. Research wants a
+   fixed one-line slot, which is the base - so the multi-line case is the modifier. */
 .pillhint.wrap {
   height: auto;
   white-space: normal;
   line-height: 1.45;
 }
+/* One line, fixed. The lens explains itself in the console now; what is left here is the
+   one thing the console cannot say - that in ask mode no lens applies - and the slot keeps
+   its height in both modes so the sections under it never move. */
 .pillhint {
-  height: 16px;
-  margin-top: 7px;
+  height: 17px;
+  margin-top: 8px;
   font-size: 11px;
-  line-height: 16px;
+  line-height: 17px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -2376,11 +2398,14 @@ details.hot-cache[open] summary {
   display: grid;
   gap: 2px;
 }
+/* One line per lens. Four two-line descriptions cost ~90px of a rail that also has to hold
+   the filter, the running totals and the queue - and the description belongs next to the
+   composer it shapes, which is where it went. */
 .lensopt {
   display: grid;
   grid-template-columns: 14px 1fr;
   gap: 9px;
-  align-items: start;
+  align-items: center;
   padding: 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -4493,12 +4518,33 @@ kbd {
 /* The plan line: what the send button will do, as labelled facts rather than a sentence
    of separators. Each fact carries its own key, so the row is scanned. Both modes render
    the same shape, so switching modes cannot move anything below it. */
+/* Two rows: what the armed mode IS, then what it will do. The lens description used to sit
+   in the control rail, three columns away from the composer it shapes; it says more here,
+   beside the target page and the fetch budget it belongs with (2026-08-27). Both rows keep
+   their height in both modes - the row heights are what a mode switch would otherwise move. */
+.pl-row {
+  flex: 1 1 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pl-blurb {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .planline {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px 16px;
-  padding: 11px 13px 12px 16px;
+  flex-direction: column;
+  height: 58px;
+  overflow: hidden;
+  padding: 0 13px 0 16px;
   min-width: 0;
 }
 /* Prefixed, all of it: `.fact`/`.fk`/`.fv` are the shared figure tile (Home's glance
@@ -4683,12 +4729,6 @@ kbd {
 .vzf.static {
   cursor: default;
 }
-/* The backlog band keeps its own height instead of taking a third of the two ledgers'. */
-.sv-band {
-  flex: 0 0 auto;
-  min-height: 0;
-  max-height: 196px;
-}
 /* An offer, not a record: a card with a verb on it. Two rows of them fit the band; the rest
    is a scroll away, which is honest for a backlog that grows with the vault. */
 .offers {
@@ -4745,10 +4785,17 @@ kbd {
   color: var(--accent-ink);
 }
 /* The conversation ledger: same table as the run ledger, its own columns. */
-.sess-table th:nth-child(1) { width: 58%; }
-.sess-table th:nth-child(2) { width: 12%; }
-.sess-table th:nth-child(3) { width: 20%; }
-.sess-table th:nth-child(4) { width: 10%; }
+/* ── One column template for both research ledgers ─────────────────────────────
+   A run and a conversation are listed in the same shape, so their columns line up: the
+   title takes whatever is left and the five fixed slots are the same width in both tables.
+   Percentages gave each table its own boundaries, and crushed "Cost" and "When" into the
+   right eighth of a 1300px pane while the title column carried 150px of slack. ── */
+.rtable th:nth-child(1) { width: auto; }
+.rtable th:nth-child(2) { width: 176px; }
+.rtable th:nth-child(3) { width: 84px; }
+.rtable th:nth-child(4) { width: 108px; }
+.rtable th:nth-child(5) { width: 152px; }
+.rtable th:nth-child(6) { width: 76px; }
 .sess-table tr.active td {
   background: var(--accent-soft);
 }
@@ -5234,8 +5281,12 @@ tr:focus-within .rowacts {
 .console.ask .console-main textarea:focus {
   border-color: var(--accent);
 }
+/* One width for every label this button can carry ("Start run", "Running…", "Ask",
+   "Asking…"). Sized to its own text, it was 46px narrower in ask mode, and the composer
+   beside it grew by exactly that much every time the mode changed. */
 .btn-run {
   flex: none;
+  min-width: 132px;
   align-self: stretch;
   padding: 0 20px;
   border: 0;
@@ -5257,54 +5308,52 @@ tr:focus-within .rowacts {
 }
 
 /* ── The step rail: the console's footer ───────────────────────────────────────
-   One track runs through the marks and fills as the run advances, so progress is a
-   distance rather than five chips changing colour. `--steps` and `--progress` come from
-   the component: marks sit at the centre of equal-width columns, so the track spans
-   centre to centre and both ends inset by half a column. ── */
+   ONE line on a FIXED grid of `--steps` equal columns - the longer of the two step lists,
+   so a five-phase run fills every column and a three-phase ask fills the first three and
+   aligns to them. Sharing the width between three marks instead put "Answer" nowhere near
+   the run's second step (2026-08-27).
+
+   The connector belongs to the step it leaves, which is what keeps each step inside exactly
+   one column. The note rides beside its label rather than under it; stacking the two cost
+   43px of a screen that has to hold a readable detail below it.
+
+   The idle caption is gone - it said what the marks beside it already said. The live line
+   keeps a fixed slot to the right, so a starting run fills it without moving a mark. ── */
 .rail {
-  padding: 11px 13px 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 13px 9px 16px;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 55%, transparent);
 }
 .rail-row {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-}
-.rail-track,
-.rail-fill {
-  position: absolute;
-  top: 10px;
-  height: 2px;
-  border-radius: 2px;
-  left: calc(50% / var(--steps));
-}
-.rail-track {
-  right: calc(50% / var(--steps));
-  background: var(--border);
-}
-.rail-fill {
-  width: calc((100% - 100% / var(--steps)) * var(--progress));
-  background: linear-gradient(90deg, var(--ok), var(--research));
-  transition: width 0.35s ease;
-}
-.rail.ask .rail-fill {
-  background: linear-gradient(90deg, var(--ok), var(--accent));
-}
-.rail-step {
-  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--steps, 5), minmax(0, 1fr));
+  align-items: center;
   flex: 1;
   min-width: 0;
+}
+.rail-step {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  min-width: 0;
+}
+.rail-link {
+  flex: 1 1 0;
+  min-width: 8px;
+  height: 2px;
+  margin: 0 9px 0 2px;
+  border-radius: 2px;
+  background: var(--border);
 }
 .rail-mark {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  flex: none;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   border: 2px solid var(--border);
   background: var(--bg-elev-2);
@@ -5318,16 +5367,19 @@ tr:focus-within .rowacts {
 }
 .rail-nm {
   font-size: 11.5px;
+  line-height: 20px;
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
 }
 .rail-note {
+  flex: none;
   font-family: var(--mono);
   font-size: 10px;
+  line-height: 20px;
   color: var(--text-faint);
+  white-space: nowrap;
 }
 .rail-step.done .rail-mark {
   border-color: var(--ok);
@@ -5337,17 +5389,18 @@ tr:focus-within .rowacts {
 .rail-step.done .rail-nm {
   color: var(--text-dim);
 }
+.rail-step.done .rail-link {
+  background: var(--ok);
+}
 .rail-step.now .rail-mark {
   border-color: var(--research);
   background: color-mix(in srgb, var(--research) 22%, transparent);
   color: var(--research);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--research) 14%, transparent);
 }
 .rail.ask .rail-step.now .rail-mark {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent-soft);
   color: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .rail-step.now .rail-nm,
 .rail-step.now .rail-note {
@@ -5358,8 +5411,6 @@ tr:focus-within .rowacts {
 .rail.ask .rail-step.now .rail-note {
   color: var(--accent);
 }
-/* Only the mark in flight breathes, and only its ring - pulsing the whole mark dims the
-   number every other beat. */
 @media (prefers-reduced-motion: no-preference) {
   .rail.live .rail-step.now .rail-mark {
     animation: rail-pulse 1.8s ease-in-out infinite;
@@ -5374,18 +5425,21 @@ tr:focus-within .rowacts {
     box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 4%, transparent);
   }
 }
-.rail-foot {
+/* The live slot. Fixed width in both states: the run's status arrives without shifting the
+   marks it describes. */
+.rail-live {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-top: 11px;
-  padding-top: 9px;
-  border-top: 1px dashed var(--border);
-  font-size: 11.5px;
-  color: var(--text-faint);
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  width: 176px;
+  min-width: 0;
 }
 .rail-now {
   min-width: 0;
+  font-size: 11px;
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5394,104 +5448,133 @@ tr:focus-within .rowacts {
   color: var(--text-dim);
 }
 .rail-el {
+  flex: none;
   font-family: var(--mono);
   font-size: 11px;
-  white-space: nowrap;
-}
-.rail-el b {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-  margin-left: 4px;
 }
 
-/* Threads and run details live in the same scrolling body. */
+/* ── One detail, two kinds ─────────────────────────────────────────────────────
+   A run and a conversation are the same object from the reader's side - something you
+   asked, and the record of what came back - so they get ONE shell (2026-08-27). Five bands
+   in a fixed order at fixed heights:
+
+     bar      back, kind mark, title, tag, state, the kind's own action
+     facts    five slots: what it filed / asked, when, how much work, what it cost, how many
+              pages it wrote / cited
+     chips    the pages it wrote, or the pages it cited
+     content  the synthesis page, or the conversation - the only band that scrolls
+     foot     where the facts came from, and the kind's own second action
+
+   They used to be two constructions: the run detail scrolled its own head away inside the
+   box body, while a conversation had a pinned bar OUTSIDE it and no facts at all - so
+   moving between them shifted every row on the screen. ── */
+.box.detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+/* The kind's mark, in the kind's own colour: violet writes, blue only reads. */
+.detail-bar > svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.detail-bar.web > svg {
+  color: var(--research);
+}
+.detail-bar.vault > svg {
+  color: var(--accent);
+}
+/* The facts strip is the shared component at detail size: five slots, one row, and a value
+   that fits a filed page title instead of a headline figure. */
+.box.detail > .facts.lead {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.box.detail > .facts.lead .fact {
+  padding: 6px 14px;
+  min-width: 0;
+}
+.box.detail > .facts.lead .v {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* What it wrote, or what it cited - the same band in the same place for both kinds, at one
+   height whatever the chip count, so moving between them shifts nothing. */
+.chipband {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 5px;
+  flex: none;
+  height: 57px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.chipband .bandkey {
+  flex: none;
+  align-self: center;
+  margin-right: 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.chipband .empty {
+  padding: 0;
+  font-size: 12px;
+}
+/* The only band that scrolls. Full width in both kinds: a 74ch column left half a 1600px
+   pane empty, and the reader asked for the width they have. */
+.detail-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 14px 18px 18px;
+}
+.detail-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 36px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.detail-foot .prov {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The conversation, inside the content band. It no longer owns a scroll of its own - the
+   band does - so the bar above it and the action below it keep their places by construction. */
 .thread {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
-  min-height: 100%;
-}
-.detail-pad {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 14px 16px 20px;
-}
-/* ── A detail fits the screen; only its content scrolls ────────────────────────
-   Two scrollbars on one pane is one too many, and the outer one took the run's own facts
-   with it. The body stops scrolling and hands its height down: the page chips get a bounded
-   band of their own, and the article takes whatever is left. */
-.box-body.detail-view,
-.box-body.thread-view {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.box-body.detail-view > .detail-pad {
-  flex: 1;
-  min-height: 0;
-  padding-bottom: 14px;
-}
-/* A run with thirty pages must not squeeze the article to nothing, so the chips scroll in
-   their own band rather than growing without limit. */
-.detail-pad > .pagesblock {
-  flex: none;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.detail-pad > .pagesblock > .pages {
-  /* Two rows, then it scrolls. The chips say WHICH pages; the article is what you came to
-     read, so the chips take a band and the article takes the rest. */
-  max-height: 68px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-.box-body.detail-view .article {
-  flex: 1;
-  min-height: 180px;
-  display: flex;
-  flex-direction: column;
-}
-.box-body.detail-view .article-body {
-  flex: 1;
-  min-height: 0;
-  max-height: none;
-}
-/* The conversation scrolls inside itself, so the bar above it and the save action below it
-   keep their places. */
-.box-body.thread-view > .thread {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-.box-body.thread-view > .savebar {
-  flex: none;
-  margin: 0;
-  border-top: 1px solid var(--border);
-  padding: 10px 14px;
-}
-
-/* The run's synthesis page, rendered under its facts. Bounded and scrolling in place: it is
-   a full wiki page, and letting it push the run's facts off the top would turn the detail
-   into an article viewer with a header nobody can see. */
-.article {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  overflow: hidden;
-}
-.article > .sub-head {
-  padding: 9px 13px;
-  background: var(--bg-elev);
-}
-.article-body {
-  max-height: 420px;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding: 4px 14px 14px;
 }
 
 /* The way out of a detail view. It leads the row rather than trailing it, and it is a
@@ -5524,32 +5607,6 @@ tr:focus-within .rowacts {
   height: 13px;
   flex: none;
   color: inherit;
-}
-
-/* The conversation's own bar, above the scrolling thread: the same shape as a detail head,
-   but pinned, because the thread scrolls to its newest message and a bar inside it would sit
-   above the fold from the first answer onward. Ask wears the neutral accent, never the
-   research violet - nothing here writes. */
-.thread-bar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  flex: none;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev);
-}
-.thread-bar svg {
-  width: 17px;
-  height: 17px;
-  flex: none;
-  color: var(--accent);
-}
-.thread-bar .detail-title {
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .detail-head {
@@ -5782,11 +5839,6 @@ tr:focus-within .rowacts {
   max-width: none;
 }
 /* The research run table shares the fixed layout; its columns are its own. */
-.runs-table th:nth-child(1) { width: 42%; }
-.runs-table th:nth-child(2) { width: 18%; }
-.runs-table th:nth-child(3) { width: 10%; }
-.runs-table th:nth-child(4) { width: 12%; }
-.runs-table th:nth-child(5) { width: 18%; }
 
 /* The graph's control bar: the search field is the tallest control in it, so everything
    beside it takes the same box height. */
@@ -6053,27 +6105,36 @@ tr:focus-within .rowacts {
 /* ── Research start view: runs and backlog split the height, each scrolls ──
    One step DOWN from the console's ground (2026-08-26): the console floats, the history
    recedes, and the eye lands on the thing you act with before the thing you already did. */
-.box-body.start-view {
+/* ── The Research screen's right-hand column ───────────────────────────────────
+   Three stacked cards, the way Home stacks its zones - not one box with hairlines inside
+   it. The middle region SWAPS: it holds the two ledgers, or one detail in their place, so
+   opening a run changes what fills one region and moves nothing above or below it.
+
+   The backlog keeps a fixed band at the foot in BOTH states: it is an offer, not history,
+   and opening a run should not cost the reader the thing they might do next. ── */
+/* The screen's right-hand column: console, the region that swaps, the backlog. Same shape
+   as Home's, which is the point - the two screens should not stack their zones differently. */
+.rmain {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
-  border-top: 1px solid var(--border);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
 }
-/* The sticky table head has to be painted in the ground it sits on, or the rows scroll
-   through it. */
-.start-view .dtable thead th {
-  background: var(--bg);
-}
-.sv-sec {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 0;
-  min-height: 132px;
-}
-.sv-scroll {
+.rstack {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Whatever the region has, the two ledgers halve it. */
+.box.ledger {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* Exactly two rows of offers; a third scrolls. */
+.box.band {
+  flex: none;
+  height: 180px;
 }

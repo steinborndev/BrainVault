@@ -300,6 +300,9 @@ export interface Session {
   /** Present on list responses. */
   message_count?: number
   last_ts?: string | null
+  /** Summed over the conversation's answers; null when none of them recorded usage. */
+  cost_usd?: number | null
+  tokens?: number | null
 }
 
 export interface QueryResponse {

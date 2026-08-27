@@ -38,10 +38,18 @@ export interface MessageRow {
   ts: string
 }
 
-/** A session plus lightweight list metadata (message count, last activity). */
+/** A session plus lightweight list metadata (message count, last activity, what it cost). */
 export interface SessionSummary extends SessionRow {
   message_count: number
   last_ts: string | null
+  /**
+   * What the whole conversation cost, summed over its answers. Null when no answer in it
+   * recorded usage - rows from before v6 have none, and counting those as free would be a
+   * lie the ledger then adds up. The research ledger states a run's cost in the same
+   * column, so a conversation has to be able to state its own (2026-08-27).
+   */
+  cost_usd: number | null
+  tokens: number | null
 }
 
 export class ChatStore {
@@ -71,8 +79,10 @@ export class ChatStore {
     return this.db
       .prepare(
         `SELECT s.*,
-                COUNT(m.id)  AS message_count,
-                MAX(m.ts)    AS last_ts
+                COUNT(m.id)         AS message_count,
+                MAX(m.ts)           AS last_ts,
+                SUM(m.cost_usd)     AS cost_usd,
+                SUM(COALESCE(m.tokens_in, 0) + COALESCE(m.tokens_out, 0)) AS tokens
            FROM sessions s
            LEFT JOIN messages m ON m.session_id = s.id
           WHERE s.user_id = ?

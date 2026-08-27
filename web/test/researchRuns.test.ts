@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildResearchRuns, splitResearchTitle, targetTitle } from '../src/lib/researchRuns.ts'
+import {
+  buildResearchRuns,
+  listedRuns,
+  splitResearchTitle,
+  synthesisPage,
+  targetTitle,
+  type ResearchRunEntry,
+} from '../src/lib/researchRuns.ts'
 import type {
   AgentRunRecord,
   GraphNode,
@@ -362,5 +369,126 @@ describe('what a run is recorded as having written', () => {
       profiles: PROFILES,
     })
     expect(entries[0]!.topic).toBe('a/b')
+  })
+})
+
+/**
+ * What the ledger LISTS, as opposed to what the merge can reconstruct (2026-08-27).
+ *
+ * A run rebuilt from its synthesis page is a real run, but the only timestamp it carries is
+ * the page's mtime - and that is not when the run happened. One vault had eleven such pages
+ * sharing a single bulk-touch mtime to the microsecond, and the ledger reported all eleven
+ * as having run at the same instant. The pages stay reachable from the Library and the
+ * Graph; what is dropped is the claim that these rows are dated records.
+ */
+describe('listedRuns', () => {
+  const entry = (over: Partial<ResearchRunEntry> = {}): ResearchRunEntry => ({
+    id: 'e',
+    topic: 'Topic',
+    profileKey: 'broad',
+    status: 'done',
+    startedAt: null,
+    finishedAt: null,
+    pages: [],
+    costUsd: null,
+    error: null,
+    source: 'history',
+    pagePath: null,
+    ...over,
+  })
+
+  it('drops the runs reconstructed from a vault page', () => {
+    const out = listedRuns([
+      entry({ id: 'a', source: 'history' }),
+      entry({ id: 'b', source: 'page', pagePath: 'wiki/questions/Research: Topic.md' }),
+    ])
+    expect(out.map((e) => e.id)).toEqual(['a'])
+  })
+
+  it('keeps everything the service itself recorded', () => {
+    const out = listedRuns([
+      entry({ id: 'a', source: 'history' }),
+      entry({ id: 'b', source: 'run', status: 'running' }),
+      entry({ id: 'c', source: 'state', status: 'failed' }),
+    ])
+    expect(out.map((e) => e.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('leaves two runs of the same topic and lens as two rows', () => {
+    // "Run again" is a button on the detail. Collapsing a re-run into the older run because
+    // it happens to have filed fewer pages would hide the run the reader just started.
+    const out = listedRuns([
+      entry({ id: 'new', pages: ['wiki/concepts/A.md'] }),
+      entry({ id: 'old', pages: ['wiki/concepts/A.md', 'wiki/concepts/B.md'] }),
+    ])
+    expect(out.map((e) => e.id)).toEqual(['new', 'old'])
+  })
+})
+
+/**
+ * Resolving the page a run was FOR. The client used to guess it from the deterministic
+ * title alone; the agent names the page itself and does not always land there, and when the
+ * guess missed, the detail view rendered no article at all (2026-08-27).
+ */
+describe('synthesisPage', () => {
+  const entry = (over: Partial<ResearchRunEntry> = {}): ResearchRunEntry => ({
+    id: 'e',
+    topic: 'quantum computing',
+    profileKey: 'sota',
+    status: 'done',
+    startedAt: null,
+    finishedAt: null,
+    pages: [],
+    costUsd: null,
+    error: null,
+    source: 'history',
+    pagePath: null,
+    ...over,
+  })
+
+  it('takes the questions page the run actually committed', () => {
+    const e = entry({
+      topic: 'expected impact of climate change on property prices in europe',
+      profileKey: 'broad',
+      pages: [
+        'wiki/concepts/Climate Gentrification.md',
+        'wiki/questions/Research: climate change impact on European property prices.md',
+        'wiki/sources/Some Source.md',
+      ],
+    })
+    // The deterministic title would have been "Research: expected impact of climate change
+    // …", which matches no page here - and used to leave the detail with no article.
+    expect(synthesisPage(e, PROFILES, [])).toBe(
+      'wiki/questions/Research: climate change impact on European property prices.md',
+    )
+  })
+
+  it('falls back to the page that answers to the deterministic name', () => {
+    // Observed: the synthesis page is missing from the commit's page list while the page
+    // itself sits in the vault.
+    const e = entry({ pages: ['wiki/concepts/Surface Code.md'] })
+    const nodes = [
+      node({
+        path: 'wiki/questions/Research: quantum computing - State of the Art.md',
+        title: 'Research: quantum computing - State of the Art',
+      }),
+    ]
+    expect(synthesisPage(e, PROFILES, nodes)).toBe(
+      'wiki/questions/Research: quantum computing - State of the Art.md',
+    )
+  })
+
+  it('prefers the page a reconstructed entry already knows about', () => {
+    const e = entry({ source: 'page', pagePath: 'wiki/questions/Research: X.md', pages: [] })
+    expect(synthesisPage(e, PROFILES, [])).toBe('wiki/questions/Research: X.md')
+  })
+
+  it('ignores a questions page that is not a synthesis page', () => {
+    const e = entry({ pages: ['wiki/questions/Why does this happen.md'] })
+    expect(synthesisPage(e, PROFILES, [])).toBeNull()
+  })
+
+  it('is null when the run wrote no page and none answers to the name', () => {
+    expect(synthesisPage(entry(), PROFILES, [])).toBeNull()
   })
 })

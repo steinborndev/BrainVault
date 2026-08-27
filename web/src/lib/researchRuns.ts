@@ -232,3 +232,49 @@ export function buildResearchRuns(input: ResearchRunsInput): ResearchRunEntry[] 
 export function targetTitle(topic: string, profile: ResearchProfile | undefined): string {
   return `${RESEARCH_PREFIX}${topic}${profile?.titleSuffix ?? ''}`
 }
+
+/**
+ * The runs the ledger lists (2026-08-27).
+ *
+ * Everything except the entries reconstructed from a vault page. Those are real runs, but
+ * the only timestamp they have is the page's mtime, which is not when the run happened -
+ * eleven of them in one vault shared a single bulk-touch mtime to the microsecond, and the
+ * ledger reported all eleven as having run at the same moment. Their pages are reachable
+ * from the Library and the Graph; what is dropped is the claim that they are dated records.
+ *
+ * The set cannot grow: every run since the run log landed (schema v12) is in the log.
+ */
+export function listedRuns(entries: readonly ResearchRunEntry[]): ResearchRunEntry[] {
+  return entries.filter((e) => e.source !== 'page')
+}
+
+/**
+ * The synthesis page a run was FOR, in the order the answers are trustworthy (2026-08-27).
+ *
+ * This used to guess only: rebuild the deterministic title and look for a graph node with
+ * that name. But the agent names the page itself, and it does not always land on the title
+ * the client predicted - a run labelled "expected impact of climate change on property
+ * prices in europe" filed "Research: climate change impact on European property prices".
+ * The name lookup missed, the detail view rendered no article at all, and the only thing
+ * left on screen was the provenance footnote.
+ *
+ * What the run COMMITTED is the better source, and it is already in the entry. The name
+ * match stays as the last resort: for one observed class of run the synthesis page is
+ * missing from the commit's page list while the page itself sits in the vault.
+ */
+export function synthesisPage(
+  entry: ResearchRunEntry,
+  profiles: readonly ResearchProfile[],
+  nodes: readonly GraphNode[],
+): string | null {
+  if (entry.pagePath !== null) return entry.pagePath
+  const filed = entry.pages.find(isSynthesisPath)
+  if (filed !== undefined) return filed
+  const wanted = targetTitle(entry.topic, profiles.find((p) => p.key === entry.profileKey))
+  const node = nodes.find((n) => n.title === wanted || (n.names?.includes(wanted) ?? false))
+  return node?.path ?? null
+}
+
+/** A `wiki/questions/Research: ….md` path - the shape a run's own synthesis page has. */
+const isSynthesisPath = (path: string): boolean =>
+  path.startsWith('wiki/questions/') && (path.split('/').pop() ?? '').startsWith(RESEARCH_PREFIX)

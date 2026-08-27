@@ -35,7 +35,9 @@ function branch(kind: string): string {
  */
 function goesBackToStart(source: string): boolean {
   if (source.includes("setView({ kind: 'start' })")) return true
-  return [...source.matchAll(/onClick=\{(\w+)\}/g)]
+  // `onClick` when the branch wires the control itself, `onBack` when it hands the handler
+  // to the shared detail shell - which is where both kinds put their back control now.
+  return [...source.matchAll(/on(?:Click|Back)=\{(\w+)\}/g)]
     .map((m) => m[1]!)
     .some((fn) => {
       const decl = chat.indexOf(`const ${fn} = (`)
@@ -59,12 +61,27 @@ describe('the Research screen can always be left', () => {
     expect(goesBackToStart(branch('run'))).toBe(true)
   })
 
-  it('keeps the conversation bar out of the scrolling thread', () => {
-    // A bar inside `.thread` scrolls away with the conversation, which is the same as not
-    // having one from the first answer onward.
-    const bar = chat.indexOf('className="thread-bar"')
-    const body = chat.indexOf('className={`box-body')
-    expect(bar).toBeGreaterThan(-1)
-    expect(bar).toBeLessThan(body)
+  /**
+   * Both kinds are rendered through ONE shell (2026-08-27), which is what makes the two
+   * assertions below structural rather than a pair of coincidences: neither kind can grow a
+   * detail band the other lacks, and neither can lose its way back on its own.
+   */
+  it('renders both kinds of detail through the one shell', () => {
+    for (const fn of ['RunDetailBody', 'ThreadDetail']) {
+      const start = chat.indexOf(`function ${fn}(`)
+      expect(start, `no ${fn} component`).toBeGreaterThan(-1)
+      expect(chat.slice(start)).toContain('<DetailShell')
+    }
+  })
+
+  it('keeps the back control out of the band that scrolls', () => {
+    // A back button inside the scrolling band is gone from the first screenful onward, which
+    // is the same as not having one. In the shell the bar is a SIBLING above that band.
+    const shell = chat.slice(chat.indexOf('function DetailShell('))
+    const bar = shell.indexOf('className={`detail-bar')
+    const content = shell.indexOf('className="detail-content"')
+    expect(bar, 'no detail bar in the shell').toBeGreaterThan(-1)
+    expect(content, 'no scrolling content band in the shell').toBeGreaterThan(-1)
+    expect(bar).toBeLessThan(content)
   })
 })
