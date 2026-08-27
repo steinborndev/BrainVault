@@ -705,3 +705,109 @@ screen did not already fetch (`/graph` is the Graph tab's own query key).
       shape as the 2026-08-26 correction.
 - [ ] The hero page count and the last line of the metric list both read 805. That is what
       the approved mockup asked for; worth revisiting if it reads as a duplicate in daily use.
+
+## Phase 11: fourth pass - the panel, the rows, the entrance (2026-08-27)
+
+Six changes asked for from daily use, plus one measurement. No server change; every figure
+comes from a payload the screen already fetches.
+
+### Home - the stock zone
+
+- [x] **Domains is the default second panel**, and Growth is gone as a view. A number per
+      window is not a picture: the two figures its foot carried are now two more lines in
+      the hero's metric list (`new pages (7d)`, `new pages (30d)`), and the chart they came
+      from is still in System → Vault stats, where it always was. `GrowthChart` loses its
+      `panel` variant with it (and `.plotbox`, `.chart.fill/.spark`, `.gx*` with that).
+- [x] **`lib/homePanels.ts: newPagesIn()`** replaces two index-based reads of the growth
+      series ("the eighth-from-last point is a week back"). The server emits a point per day
+      the vault MOVED, so on a quiet week that point can be a month old; the baseline is now
+      the newest point on or before `today - days`. The hero delta and both new lines read
+      the one derivation, so they cannot drift apart. Tested in `web/test/homePanels.test.ts`.
+- [x] **The second panel sits in the graph's own dark inset** (`.vz-body.inset`) - all three
+      views, so switching them changes the content and nothing else. Border and padding sit
+      inside the fixed body height, so nothing below the zone moves.
+- [x] **The constellation is drawn finer**: dot radius `0.8 + min(2.1, √degree · 0.3)`, down
+      from `1.4 + min(3.2, √degree · 0.42)`, and hairline links. Eight hundred pages in a
+      460px box is a dot every fifteen pixels - at the old radii a cluster merged into one
+      blob and the picture claimed less than it knows.
+
+### Home - the control column and the rows
+
+- [x] **The queue foot and the stream search are gone.** The lead tiles already answer "what
+      is in flight, and why is nothing moving"; the search was never used. The height goes to
+      the two pill groups, which now read the way Research files its lens filter: one row per
+      option, label left, count right - and the count is what that pill would leave on the
+      table, every other axis of the filter still applied.
+- [x] **Order follows the narrowing**: kind, from when, in what state, over which channel.
+      The channel list is last because it is the one section that grows with the vault: it
+      takes the leftover height and scrolls, and nothing under it can be pushed out of sight.
+      The four time ranges are two per row (`.pillrow.stacked.two`) - four short labels are
+      not worth four rows of a column the channel list is measured out of.
+- [x] **A row opens where you click it.** The page-chip band stopped every click that landed
+      on it, and on a three-chip ingest that band is most of the row - so "click a row" meant
+      "hit the title line". The chips stop their own clicks now (in `PageLink`, where the
+      links are), and the air around them belongs to the row.
+- [x] **A settled run opens its record in place**, like every other row in the table. It used
+      to navigate - research to the run list, everything else to System - which answered a
+      question the row had not been asked. Live runs still navigate: a run in flight has no
+      record yet, and the tab it came from is where its progress is.
+
+### Graph
+
+- [x] **The entrance runs on every rebuild, not just the first.** Clearing a filter re-lays
+      the graph out AND re-fits it, and the fit was applied to the still-cooling layout: the
+      half-settled graph was on screen for the second or so of cooling, then cut to the
+      build-in - the graph appeared twice. The fit effect now arms the same hold the first
+      layout arms, so a rebuild always starts from an empty canvas and builds itself in.
+      Live vault updates are deliberately NOT armed: they keep the camera and reheat gently,
+      and blanking the whole graph because one page arrived is a worse flicker than the one
+      this fixes. Measured on the live service by sampling canvas ink: `12.5% → 0 → 2.1 →
+      5.9 → 8.2 → 12.4%` across a filter toggle, with no full-ink frame before the zero.
+
+### Finding: "links to pages that do not exist" counts something else than the gaps view
+
+Home's metric list reads **54**; the gaps view in the Graph tab reads **12 unresolved links ·
+10 distinct targets**; the Graph tab's own top bar offers "54 gaps". Two of those three are
+the same number under a name that does not fit it.
+
+Both come from `GET /api/v1/graph`: `unresolved` counts every wikilink occurrence that
+resolves to no page, while `gaps` only lists targets worth WRITING. Reproduced against the
+live vault (833 pages, 8,735 links), the 54 break down as:
+
+| what | count | why it is not a gap |
+| --- | --- | --- |
+| `.raw/…` provenance links from source pages | 21 | path-qualified staging references, not pages |
+| links quoted by artifact pages (lint reports, session logs, folds) | 17 | they report dangling links, they do not want them written |
+| plugin-shipped doc pages linking into upstream docs | 4 | upstream's gaps; agent runs may not edit those pages |
+| embeds (`![[…]]`) | 0 | a missing image is not a page to write |
+| **real content gaps** | **12** | 10 distinct targets - what the gaps view lists |
+
+So the server is right and the two labels are wrong: 54 is "dangling wikilinks", of which 42
+are structural and nobody's backlog. Applied on request (2026-08-27) - the server is
+unchanged, only what the three places COUNT and call it:
+
+- [x] Home's line reads `10 pages linked but not written`, with the raw 54 and why it differs
+      in its title. It is a door to the gaps view; a door may not disagree with the room.
+- [x] The Graph top bar's "54 gaps" reads `graph.gaps.length` - it opens the gap list, and it
+      said 54 over a list of ten.
+- [x] The gaps panel's foot says `10 pages linked but not written`, not "links" - the head of
+      the gaps view next door counts the links behind them separately (12 links · 10 pages).
+- [x] System's Gaps figure already read `shape.gaps`; all four now agree.
+
+### Also in this pass (2026-08-27)
+
+- [x] **The hero delta is gone.** "▲ 151 in the last 7 days" said exactly what the metric
+      list under it now says by name (`151 new pages (7d)`), six pixels away. `.vz-delta`
+      removed with it.
+- [x] **The detail view's WROTE band holds two rows without scrolling** (69px = 2 × 26px chip
+      + 5px row gap + 12px padding, was 57px). Two rows is the common case for an ingest that
+      wrote four or five pages, and it always carried a scrollbar for the twelve pixels it was
+      short. A third row scrolls, which is where scrolling belongs.
+- [x] **A domain bar opens the Library filtered to that domain** (`/library?domain=…`,
+      consumed and dropped from the URL like the graph's `?gaps=1`, for the same reasons).
+      The other narrowing filters are cleared with it - they are whatever the screen was last
+      left at, and a leftover type or search would answer a different question than the bar
+      was clicked to ask. The active row is scrolled into view: a filter set from another
+      screen has to be visible as a filter, not just as a shorter table.
+- [x] Fixed while there: Home's gap cards navigated to `/research?topic=`, which nothing
+      reads - the composer opened empty. Research reads `?prefill=`.

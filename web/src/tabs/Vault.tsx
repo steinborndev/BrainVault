@@ -1000,7 +1000,7 @@ function GraphView({
                 </strong>{' '}
                 pages and <strong>{realEdgeCount}</strong> links
                 {scopeTail}
-                {graph.unresolved > 0 && !showGaps && (
+                {graph.gaps.length > 0 && !showGaps && (
                   <>
                     {' · '}
                     <button
@@ -1008,9 +1008,15 @@ function GraphView({
                       // Same landing as the Gaps toggle in the panel: the gaps view with the
                       // explorer's ranked list. The two entry points used to diverge.
                       onClick={() => setShowGaps(true)}
-                      title="Explore the unresolved links as knowledge gaps"
+                      // The GAP count, not `graph.unresolved`: this button opens the gap list,
+                      // and that list is shorter. `unresolved` counts every dangling wikilink,
+                      // most of which nominate nothing to write - `.raw/…` staging references,
+                      // links a lint report or a session log quotes while reporting on them,
+                      // and the plugin's own doc pages pointing into upstream docs. It said
+                      // "54 gaps" over a list of ten.
+                      title="Explore the links that point at pages nobody has written yet"
                     >
-                      {graph.unresolved} gaps
+                      {graph.gaps.length} gaps
                     </button>
                   </>
                 )}

@@ -325,7 +325,10 @@ export function App(): React.ReactElement {
           <section className="screen flush" hidden={screen !== 'library'} aria-label="Library">
             <div className="lane wide">
               <ErrorBoundary label="Library">
-                <Library vaultName={vaultName} />
+                <Library
+                  vaultName={vaultName}
+                  domainParam={screen === 'library' ? (query.get('domain') ?? '') : ''}
+                />
               </ErrorBoundary>
             </div>
           </section>

@@ -455,9 +455,22 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                   {shape !== null && shape.undomained > 0 ? `, ${shape.undomained} pages unfiled` : ''}
                 </span>
               </button>
-              <button className="vzf" onClick={() => navigate('/graph?gaps=1')}>
-                <b>{shape !== null ? shape.unresolved : statPlaceholder}</b>
-                <span>links to pages that do not exist</span>
+              {/* The GAPS, not `unresolved`. This line is a door to the gaps view, and that
+                  view lists ten while the line said 54: `unresolved` counts every dangling
+                  wikilink, and most of them nominate nothing to write (`.raw/…` staging
+                  references, links a lint report quotes while reporting on them, the
+                  plugin's own doc pages). The raw figure stays, in the title. */}
+              <button
+                className="vzf"
+                onClick={() => navigate('/graph?gaps=1')}
+                title={
+                  shape === null
+                    ? undefined
+                    : `${shape.gaps} page names other pages link to but that nobody has written. The graph counts ${shape.unresolved} dangling wikilinks in all - the rest point at staging files, or are quoted by lint reports, session logs and the plugin's own doc pages, and are nobody's backlog.`
+                }
+              >
+                <b>{shape !== null ? shape.gaps : statPlaceholder}</b>
+                <span>pages linked but not written</span>
               </button>
               <button className="vzf" onClick={() => navigate('/library')}>
                 <b>{stats.data?.pages.total ?? statPlaceholder}</b>
@@ -530,9 +543,9 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             gaps={graphQ.data?.gaps ?? []}
             vaultName={vaultName}
             now={Date.now()}
-            onOpenLibrary={() => navigate('/library')}
+            onOpenDomain={(domain) => navigate(`/library?domain=${encodeURIComponent(domain)}`)}
             onOpenGaps={() => navigate('/graph?gaps=1')}
-            onResearch={(topic) => navigate(`/research?topic=${encodeURIComponent(topic)}`)}
+            onResearch={(topic) => navigate(`/research?prefill=${encodeURIComponent(topic)}`)}
           />
         </section>
 

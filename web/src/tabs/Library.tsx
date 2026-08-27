@@ -63,7 +63,17 @@ function isStub(n: GraphNode): boolean {
   return (n.size ?? Infinity) < STUB_BYTES && (n.kind ?? 'knowledge') === 'knowledge'
 }
 
-export function Library({ vaultName }: { vaultName: string }): React.ReactElement {
+export function Library({
+  vaultName,
+  domainParam = '',
+}: {
+  vaultName: string
+  /**
+   * `?domain=` from Home's domain bars: list this domain. A one-shot COMMAND, not view
+   * state - see the effect below, which consumes it the way the graph consumes `?gaps=1`.
+   */
+  domainParam?: string
+}): React.ReactElement {
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   // Provenance rides its OWN query, not the graph payload: the canvas, Home and the Library
   // all fetch ['graph'], and only one of them has a Source column. A failure here costs the
@@ -80,6 +90,33 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
   /** Hover previews an option's meaning; leaving falls back to the one in force. */
   const [subsetHover, setSubsetHover] = useState<Subset | null>(null)
   const [sortHover, setSortHover] = useState<SortKey | null>(null)
+  const domListRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * "Show me this domain", from Home's domain bars. The other narrowing filters are cleared
+   * with it: they are whatever this screen was last left at, and a leftover type or search
+   * would silently answer a different question than the one the bar was clicked to ask.
+   *
+   * The param is consumed and dropped from the URL right away, the same one-shot the graph
+   * makes of `?gaps=1` and for the same two reasons: the screens stay mounted behind
+   * [hidden], so seeding state would only fire on the app's first visit here - and without
+   * dropping it, clicking the SAME domain again would pass an identical path string, this
+   * effect would not re-run, and the click would do nothing.
+   */
+  useEffect(() => {
+    if (domainParam === '') return
+    setDomain(domainParam)
+    setQuery('')
+    setType(null)
+    setSubset('all')
+    setLimit(PAGE_SIZE)
+    navigate('/library', { replace: true })
+    // The list is longer than the panel: a filter set from another screen must be visible
+    // as a filter, not just as a shorter table.
+    requestAnimationFrame(() => {
+      domListRef.current?.querySelector('.domrow.active')?.scrollIntoView({ block: 'nearest' })
+    })
+  }, [domainParam])
 
   const nodes = graph.data?.nodes
 
@@ -329,7 +366,7 @@ export function Library({ vaultName }: { vaultName: string }): React.ReactElemen
               aria-label="Filter the domain list"
             />
           </div>
-          <div className="domlist">
+          <div className="domlist" ref={domListRef}>
             {domainRows.map(([d, count]) => {
               const key = d === '' ? 'none' : d
               const active = domain === key

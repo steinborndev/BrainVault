@@ -32,7 +32,7 @@ export function HomePanel({
   gaps,
   vaultName,
   now,
-  onOpenLibrary,
+  onOpenDomain,
   onOpenGaps,
   onResearch,
 }: {
@@ -45,8 +45,10 @@ export function HomePanel({
   vaultName: string
   /** Passed in rather than read here, so the panel renders the same way in a test. */
   now: number
-  onOpenLibrary: () => void
+  /** The Library, filtered to one domain - a bar you click is a question about that domain. */
+  onOpenDomain: (domain: string) => void
   onOpenGaps: () => void
+  /** Research, with the gap's name in the composer (`/research?prefill=`, the param it reads). */
   onResearch: (topic: string) => void
 }): React.ReactElement {
   return (
@@ -70,7 +72,7 @@ export function HomePanel({
           gaps={gaps}
           vaultName={vaultName}
           now={now}
-          onOpenLibrary={onOpenLibrary}
+          onOpenDomain={onOpenDomain}
           onResearch={onResearch}
         />
       </div>
@@ -88,7 +90,7 @@ function Body({
   gaps,
   vaultName,
   now,
-  onOpenLibrary,
+  onOpenDomain,
   onResearch,
 }: {
   panel: PanelId
@@ -98,7 +100,7 @@ function Body({
   gaps: ReadonlyArray<{ title: string; refBy: number[] }>
   vaultName: string
   now: number
-  onOpenLibrary: () => void
+  onOpenDomain: (domain: string) => void
   onResearch: (topic: string) => void
 }): React.ReactElement {
   if (panel === 'domains') {
@@ -108,7 +110,12 @@ function Body({
     return (
       <div className="ranklist">
         {domains.map((d) => (
-          <button key={d.domain} className="rank" onClick={onOpenLibrary} title={`${d.pages} pages in ${d.domain}`}>
+          <button
+            key={d.domain}
+            className="rank"
+            onClick={() => onOpenDomain(d.domain)}
+            title={`List the ${d.pages} pages in ${d.domain}`}
+          >
             <span className="lab">
               <span className="dot" style={{ background: domainColor(d.domain) }} aria-hidden />
               <span className="nm">{d.domain}</span>
@@ -204,9 +211,11 @@ function Foot({
     )
   }
 
+  // Distinct missing PAGES, which is what the list above shows one card each of - the head
+  // of the gaps view next door counts the links behind them separately (12 links, 10 pages).
   return (
     <button className="vzl linkish" onClick={onOpenGaps}>
-      <b>{gaps.length}</b> links to pages that do not exist
+      <b>{gaps.length}</b> pages linked but not written
     </button>
   )
 }
