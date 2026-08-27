@@ -21,7 +21,9 @@ import { api } from '../api/client.ts'
 import type { Job, JobStatus } from '../api/types.ts'
 import { Dropzone } from '../components/Dropzone.tsx'
 import { VaultConstellation } from '../components/VaultConstellation.tsx'
-import { JobDrawer } from '../components/JobDrawer.tsx'
+import { JobDetail } from '../components/JobDetail.tsx'
+import { HomePanel } from '../components/HomePanel.tsx'
+import { isPanelId, type PanelId } from '../lib/homePanels.ts'
 import { Icon } from '../components/Icon.tsx'
 import { queryState, merge } from '../components/QueryState.tsx'
 import { Cost } from '../components/Cost.tsx'
@@ -98,11 +100,36 @@ const WINDOW_MAX = 500
 
 const DEFAULT_FILTER: ActivityFilter = { kind: 'all', state: null, channel: null, days: 30, query: '' }
 
+/** Where the second panel's choice is remembered. */
+const PANEL_KEY = 'bv.home.panel'
+
 export function Home({ statusFilter = '' }: { statusFilter?: string }): React.ReactElement {
   const qc = useQueryClient()
   const [filter, setFilter] = useState<ActivityFilter>(DEFAULT_FILTER)
   const [limit, setLimit] = useState(WINDOW_STEP)
-  const [drawerJob, setDrawerJob] = useState<string | null>(null)
+  /** The activity row being read, by event id. Null = the stream itself. */
+  const [detailId, setDetailId] = useState<string | null>(null)
+  /**
+   * Which of the five second-panel views is on show. Remembered per browser: it is a
+   * standing preference about this vault, not a per-visit choice, and re-picking it on every
+   * load is the kind of small friction that makes a screen feel unfinished.
+   */
+  const [panel, setPanel] = useState<PanelId>(() => {
+    try {
+      const saved = localStorage.getItem(PANEL_KEY)
+      return isPanelId(saved) ? saved : 'growth'
+    } catch {
+      return 'growth'
+    }
+  })
+  const choosePanel = (id: PanelId): void => {
+    setPanel(id)
+    try {
+      localStorage.setItem(PANEL_KEY, id)
+    } catch {
+      // A browser with storage blocked keeps the choice for this visit; nothing else breaks.
+    }
+  }
 
   // `?filter=` from elsewhere (a failure count, a notification) pre-applies a state - the
   // screen stays mounted, so this must react to navigation, not just the first mount.
@@ -145,6 +172,14 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
       }),
     [jobs, runs.running, historyQ.data, maint.data, stats.data],
   )
+
+  /**
+   * The row being read. Looked up against the UNFILTERED stream and by either id: a live job
+   * row hands over the job's id, a settled one the event's, and a filter the reader changes
+   * while a record is open must not close it out from under them.
+   */
+  const detailEvent =
+    detailId === null ? null : (events.find((e) => e.id === detailId || e.job?.id === detailId) ?? null)
 
   const shown = filterActivity(events, filter, new Date())
   const live = shown.filter((e) => e.live)
@@ -440,8 +475,8 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             </div>
           </div>
 
-          <div className="vz-plot">
-            <div className="vz-plothead">
+          <div className="vz-panel">
+            <div className="vz-phead">
               <span className="gp-eyebrow">Shape</span>
               <span className="box-sub">the wikilink graph, clustered by domain</span>
               <span className="spacer" />
@@ -451,7 +486,7 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             </div>
             {/* A force layout is a decorative read - nothing can be counted off it, which is
                 why every countable thing is stated as text to the left of it. */}
-            <div className="vz-canvas">
+            <div className="vz-body">
               {constellation !== null ? (
                 <VaultConstellation
                   nodes={constellation.nodes}
@@ -462,7 +497,7 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                 (queryState(graphQ, 'the vault graph') ?? <div className="empty">No pages yet.</div>)
               )}
             </div>
-            <div className="vz-legend">
+            <div className="vz-foot">
               {legend.map(([dir, n]) => (
                 <span key={dir} className="vzl">
                   <span className="dot" style={{ background: `var(${TYPE_VARS[dir] ?? '--type-meta'})` }} aria-hidden />
@@ -477,6 +512,20 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               )}
             </div>
           </div>
+          <HomePanel
+            panel={panel}
+            onPanel={choosePanel}
+            growth={growth}
+            nodes={graphQ.data?.nodes ?? []}
+            jobs={jobs}
+            events={events}
+            gaps={graphQ.data?.gaps ?? []}
+            vaultName={vaultName}
+            now={Date.now()}
+            onOpenLibrary={() => navigate('/library')}
+            onOpenGaps={() => navigate('/graph?gaps=1')}
+            onResearch={(topic) => navigate(`/research?topic=${encodeURIComponent(topic)}`)}
+          />
         </section>
 
         {/* ZONE 2 - the flow. The operational figures sit on top of the table they describe. */}
@@ -537,129 +586,131 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             />
           </Facts>
 
-        <div className="box-head">
-          <h2 className="box-title">Activity</h2>
-          <span className="box-sub">
-            {filter.kind === 'all' ? 'everything' : KINDS.find((k) => k.id === filter.kind)!.label.toLowerCase()}
-            {filter.state !== null ? `, ${filter.state}` : ''}
-            {filter.channel !== null ? `, via ${channelLabel(filter.channel).toLowerCase()}` : ''}
-            {filter.days === null ? ', all time' : filter.days === 1 ? ', today' : `, last ${filter.days} days`}
-          </span>
-          <span className="spacer" />
-          {clearCount > 0 && (
-            <button
-              className={`btn ${armedLeft !== null ? 'armed' : 'ghost danger'}`}
-              disabled={clear.isPending}
-              onClick={onClear}
-              title={
-                clearable === null
-                  ? 'Deletes every stored history entry (all statuses, including ones not shown), and with it the token and cost history those entries carry - System → Usage & cost counts from them, and so does the daily budget. The vault and created pages stay untouched.'
-                  : `Deletes every stored "${clearable}" entry, including ones the filters hide, and with it the token and cost history those entries carry. The vault and created pages stay untouched.`
-              }
-            >
-              {armedLeft !== null
-                ? `Really delete ${clearCount} ${clearable === null ? 'entries' : `${clearable} entries`}? (${armedLeft})`
-                : clearable === null
-                  ? 'Clear history'
-                  : `Clear ${clearable}`}
-            </button>
-          )}
-        </div>
+        {detailEvent === null ? (
+          <>
+          <div className="box-head">
+            <h2 className="box-title">Activity</h2>
+            <span className="box-sub">
+              {filter.kind === 'all' ? 'everything' : KINDS.find((k) => k.id === filter.kind)!.label.toLowerCase()}
+              {filter.state !== null ? `, ${filter.state}` : ''}
+              {filter.channel !== null ? `, via ${channelLabel(filter.channel).toLowerCase()}` : ''}
+              {filter.days === null ? ', all time' : filter.days === 1 ? ', today' : `, last ${filter.days} days`}
+            </span>
+            <span className="spacer" />
+            {clearCount > 0 && (
+              <button
+                className={`btn ${armedLeft !== null ? 'armed' : 'ghost danger'}`}
+                disabled={clear.isPending}
+                onClick={onClear}
+                title={
+                  clearable === null
+                    ? 'Deletes every stored history entry (all statuses, including ones not shown), and with it the token and cost history those entries carry - System → Usage & cost counts from them, and so does the daily budget. The vault and created pages stay untouched.'
+                    : `Deletes every stored "${clearable}" entry, including ones the filters hide, and with it the token and cost history those entries carry. The vault and created pages stay untouched.`
+                }
+              >
+                {armedLeft !== null
+                  ? `Really delete ${clearCount} ${clearable === null ? 'entries' : `${clearable} entries`}? (${armedLeft})`
+                  : clearable === null
+                    ? 'Clear history'
+                    : `Clear ${clearable}`}
+              </button>
+            )}
+          </div>
 
-        {clear.error != null && <div className="toast err">Clearing failed: {(clear.error as Error).message}</div>}
+          {clear.error != null && <div className="toast err">Clearing failed: {(clear.error as Error).message}</div>}
 
-        <div className="box-body">
-          <table className="dtable inbox-table">
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th>Channel</th>
-                <th className="num">Pages</th>
-                <th className="num">Took</th>
-                <th className="num">Cost</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {live.length > 0 && (
-                <tr className="livehead">
-                  <td colSpan={6}>In flight - {live.length}</td>
+          <div className="box-body">
+            <table className="dtable inbox-table">
+              <thead>
+                <tr>
+                  <th>Event</th>
+                  <th>Channel</th>
+                  <th className="num">Pages</th>
+                  <th className="num">Took</th>
+                  <th className="num">Cost</th>
+                  <th>When</th>
                 </tr>
-              )}
-              {liveRuns.map((r) => (
-                <RunRow key={r.id} run={r} />
-              ))}
-              {groupRows(liveJobs, batches).map((row) =>
-                row.kind === 'batch' ? (
-                  <BatchHead key={`batch:${row.batchId}`} jobs={row.jobs} />
-                ) : (
-                  <LiveJobRow key={row.job.id} job={row.job} onOpen={() => setDrawerJob(row.job.id)} />
-                ),
-              )}
-              {settled.map((e) =>
-                e.job !== undefined ? (
-                  <HistoryJobRow
-                    key={e.id}
-                    job={e.job}
-                    vaultName={vaultName}
-                    authMode={authMode}
-                    onOpen={() => setDrawerJob(e.job!.id)}
-                  />
-                ) : e.commit !== null ? (
-                  /* A commit no job claims. The test used to be `kind === 'edit'`, which sent
-                     an unclaimed `ingest:` commit to SettleRow - and that prefixes the run's
-                     name onto a subject that already starts with "ingest: ". Only jobs and
-                     commits carry a hash, and jobs are handled above, so this is exact. */
-                  <CommitRow key={e.id} event={e} vaultName={vaultName} />
-                ) : (
-                  <SettleRow key={e.id} event={e} vaultName={vaultName} authMode={authMode} />
-                ),
-              )}
-              {shown.length === 0 && (
-                <tr className="staterow">
-                  <td colSpan={6}>
-                    {/* A failed query must not render as an empty vault. `streamState` is
-                        null once the data is there, and only then does "nothing here" mean
-                        what it says. */}
-                    {streamState ?? (
-                      <div className="empty">
-                        {filtered
-                          ? 'Nothing matches these filters.'
-                          : 'Nothing yet - drop a file on the left and it starts here.'}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {live.length > 0 && (
+                  <tr className="livehead">
+                    <td colSpan={6}>In flight - {live.length}</td>
+                  </tr>
+                )}
+                {liveRuns.map((r) => (
+                  <RunRow key={r.id} run={r} />
+                ))}
+                {groupRows(liveJobs, batches).map((row) =>
+                  row.kind === 'batch' ? (
+                    <BatchHead key={`batch:${row.batchId}`} jobs={row.jobs} />
+                  ) : (
+                    <LiveJobRow key={row.job.id} job={row.job} onOpen={() => setDetailId(row.job.id)} />
+                  ),
+                )}
+                {settled.map((e) =>
+                  e.job !== undefined ? (
+                    <HistoryJobRow
+                      key={e.id}
+                      job={e.job}
+                      vaultName={vaultName}
+                      authMode={authMode}
+                      onOpen={() => setDetailId(e.id)}
+                    />
+                  ) : e.commit !== null ? (
+                    /* A commit no job claims. The test used to be `kind === 'edit'`, which sent
+                       an unclaimed `ingest:` commit to SettleRow - and that prefixes the run's
+                       name onto a subject that already starts with "ingest: ". Only jobs and
+                       commits carry a hash, and jobs are handled above, so this is exact. */
+                    <CommitRow key={e.id} event={e} vaultName={vaultName} />
+                  ) : (
+                    <SettleRow key={e.id} event={e} vaultName={vaultName} authMode={authMode} />
+                  ),
+                )}
+                {shown.length === 0 && (
+                  <tr className="staterow">
+                    <td colSpan={6}>
+                      {/* A failed query must not render as an empty vault. `streamState` is
+                          null once the data is there, and only then does "nothing here" mean
+                          what it says. */}
+                      {streamState ?? (
+                        <div className="empty">
+                          {filtered
+                            ? 'Nothing matches these filters.'
+                            : 'Nothing yet - drop a file on the left and it starts here.'}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-        <div className="box-foot">
-          <span>
-            {shown.length} shown · {historyCount} stored
-            {allTime > historyCount ? ` · ${allTime} all-time` : ''}
-          </span>
-          <span className="spacer" />
-          {historyCount >= limit && limit < WINDOW_MAX && (
-            <button className="btn sm" onClick={() => setLimit(WINDOW_MAX)}>
-              Load older
-            </button>
-          )}
-          <span className="dim">Click a row for the full record: log, commit, pages, retry, revert.</span>
-        </div>
+          <div className="box-foot">
+            <span>
+              {shown.length} shown · {historyCount} stored
+              {allTime > historyCount ? ` · ${allTime} all-time` : ''}
+            </span>
+            <span className="spacer" />
+            {historyCount >= limit && limit < WINDOW_MAX && (
+              <button className="btn sm" onClick={() => setLimit(WINDOW_MAX)}>
+                Load older
+              </button>
+            )}
+            <span className="dim">Click a row for the full record: log, commit, pages, retry, revert.</span>
+          </div>
+          </>
+        ) : (
+          <JobDetail
+            event={detailEvent}
+            vaultName={vaultName}
+            authMode={authMode}
+            onBack={() => setDetailId(null)}
+          />
+        )}
         </div>
       </div>
 
-      {drawerJob !== null && (
-        <JobDrawer
-          jobId={drawerJob}
-          vaultName={vaultName}
-          authMode={authMode}
-          onClose={() => setDrawerJob(null)}
-          onOpenJob={setDrawerJob}
-        />
-      )}
     </div>
   )
 }

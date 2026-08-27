@@ -4261,78 +4261,6 @@ kbd {
 .dtable td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); white-space: nowrap; }
 .dtable td.faintc { color: var(--text-faint); font-size: 12.5px; white-space: nowrap; }
 
-/* ---- Job drawer: everything the DB knows about one job ---- */
-.drawer-veil {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  background: color-mix(in srgb, var(--bg) 45%, transparent);
-}
-.drawer {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 70;
-  width: min(460px, 94vw);
-  background: var(--bg-elev);
-  border-left: 1px solid var(--border-strong);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-}
-.drawer-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 13px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.drawer-head .ttl {
-  font-weight: 600;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 14px 16px 18px;
-}
-.drawer-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 16px;
-  border-top: 1px solid var(--border);
-}
-/* A real definition list (the job drawer's record): label column, value column. It used to
-   be called `.kv` as well, and lost every one of these declarations to the later `.kv` in
-   the System pane - a flex row with `justify-content: space-between`, which laid every
-   dt/dd pair of the drawer out side by side on ONE line. Two different layouts cannot share
-   a class name; this one is `.deflist`. */
-.deflist {
-  display: grid;
-  grid-template-columns: 110px 1fr;
-  gap: 6px 14px;
-  font-size: 12.5px;
-  margin: 12px 0;
-}
-.deflist dt {
-  color: var(--text-faint);
-}
-.deflist dd {
-  margin: 0;
-  color: var(--text);
-  word-break: break-all;
-  min-width: 0;
-}
-.deflist dd code {
-  font-size: 11.5px;
-}
-
 /* Intake note textarea + optional title (notes can be multi-line and carry a title now).
    Two visible lines is plenty for a URL or a short note; it grows on focus for longer ones,
    because a fixed height for the rare long note set the whole intake band's height. */
@@ -4849,9 +4777,10 @@ tr:focus-within .rowacts {
   min-width: 0;
   min-height: 0;
 }
+/* Hero, the graph, and the panel that took the half the graph gave back. */
 .vaultzone {
   display: grid;
-  grid-template-columns: 268px minmax(0, 1fr);
+  grid-template-columns: 244px minmax(0, 1fr) minmax(0, 1fr);
   flex: none;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -4916,32 +4845,221 @@ tr:focus-within .rowacts {
 .vzf:focus-visible b {
   color: var(--accent);
 }
-.vz-plot {
+/* ── The stock zone's two panels ───────────────────────────────────────────────
+   Three columns now, not two: the graph filled the whole width and needed about half of it,
+   and a fitted force layout in a box twice its size is empty canvas rather than information.
+   Both panels are built the same way - head, a FIXED-height body, a foot of figures - so the
+   zone is one band whatever is in it. A body sized to its content made a list panel taller
+   than a chart one and moved every row below the zone (2026-08-27). ── */
+.vz-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   min-width: 0;
-  padding: 12px 14px;
+  padding: 11px 14px 12px;
 }
-.vz-plothead {
+.vz-panel + .vz-panel {
+  border-left: 1px solid var(--border);
+}
+.vz-phead {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
+  height: 26px;
 }
-.vz-plothead .spacer {
+.vz-phead .spacer {
   flex: 1;
 }
-/* Tall on purpose, and it scales with the window rather than with the graph: a squashed
-   force layout reads as noise. */
-.vz-canvas {
-  height: clamp(220px, 32vh, 380px);
+.vz-body {
+  flex: none;
+  height: clamp(210px, 30vh, 300px);
   min-height: 0;
+  overflow: hidden;
+  margin-top: 8px;
 }
-.vz-legend {
+/* A fixed height, not a minimum: the gaps foot is a button and came out one pixel taller
+   than the others, which moved the zone and everything under it on a panel switch. */
+.vz-foot {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 4px 14px;
+  flex: none;
+  height: 18px;
+  overflow: hidden;
+  margin-top: 8px;
 }
+
+/* Domains, ranked. The count sits BESIDE its bar rather than adrift at the far right of the
+   label row, with the same 20px of air on each side - to the bar on the left, to the
+   scrollbar on the right (the list carries 2px of that itself). */
+.ranklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.rank .lab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.rank .lab .nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank:hover .lab {
+  color: var(--text);
+}
+.rank .barrow {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-right: 18px;
+}
+.rank .track {
+  flex: 1;
+  min-width: 0;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.rank .track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+/* Body colour, not the faint one: it is the figure the bar is drawn for. */
+.rank .n {
+  flex: none;
+  width: 34px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the vault learned, by day. */
+.newlist {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.daygroup .day {
+  margin-bottom: 5px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.daygroup .items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Ingests per day, stacked by what put them there. Every day in the window keeps a column,
+   including the empty ones - a chart that skips its quiet days reports a busier pipeline
+   than the one that ran. */
+.flowplot {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 100%;
+  padding-bottom: 2px;
+}
+.flowbar {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+.flowbar i {
+  display: block;
+  width: 100%;
+  border-radius: 1.5px;
+}
+.flowbar i.drop { background: var(--accent); }
+.flowbar i.watcher { background: var(--ok); }
+.flowbar i.bot { background: var(--type-question); }
+.vzl .dot.drop { background: var(--accent); }
+.vzl .dot.watcher { background: var(--ok); }
+.vzl .dot.bot { background: var(--type-question); }
+
+/* The backlog, as offers rather than a third list of records. */
+.gaplist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  align-content: start;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.gapcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  text-align: left;
+}
+.gapcard:hover {
+  border-color: color-mix(in srgb, var(--research) 45%, transparent);
+}
+.gapcard .t {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gapcard .m {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* A chip band's key is its own column, so a second row of pills starts where the first did
+   rather than half a label to its left. */
+.chipband .chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
 .vzl {
   display: inline-flex;
   align-items: center;
@@ -5201,6 +5319,8 @@ tr:focus-within .rowacts {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg) 60%, transparent);
 }
+.seg.sm { padding: 2px; }
+.seg.sm button { height: 21px; padding: 0 9px; font-size: 11px; }
 .seg button {
   height: 24px;
   padding: 0 12px;
@@ -5532,9 +5652,8 @@ tr:focus-within .rowacts {
    height whatever the chip count, so moving between them shifts nothing. */
 .chipband {
   display: flex;
-  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 5px;
+  gap: 8px;
   flex: none;
   height: 57px;
   overflow-y: auto;
@@ -5542,10 +5661,12 @@ tr:focus-within .rowacts {
   padding: 6px 14px;
   border-bottom: 1px solid var(--border);
 }
-.chipband .bandkey {
+.chipband /* A fixed column, not a first-row sibling: as a sibling the second row of pills started at
+   the container edge, half a label to the left of the first. */
+.bandkey {
   flex: none;
-  align-self: center;
-  margin-right: 4px;
+  width: 44px;
+  padding-top: 3px;
   font-family: var(--mono);
   font-size: 9.5px;
   letter-spacing: 0.1em;
@@ -5842,12 +5963,18 @@ tr:focus-within .rowacts {
 
 /* Home's activity table: `table-layout` and the sticky head now come from `.dtable`; what is
    left here is this table's own column split. */
-.inbox-table th:nth-child(1) { width: 44%; }
-.inbox-table th:nth-child(2) { width: 13%; }
-.inbox-table th:nth-child(3) { width: 8%; }
-.inbox-table th:nth-child(4) { width: 8%; }
-.inbox-table th:nth-child(5) { width: 9%; }
-.inbox-table th:nth-child(6) { width: 18%; }
+/* The event takes the slack; the four figures after the channel share one width and read
+   off the same right edge. Sized to their own labels (8/8/9%) they bunched three values into
+   a third of the row, and a left-aligned "When" in an 18% column left the last sixth of every
+   row empty while its value sat pressed against the cost (2026-08-27). */
+.inbox-table th:nth-child(1) { width: 40%; }
+.inbox-table th:nth-child(2) { width: 16%; }
+.inbox-table th:nth-child(3),
+.inbox-table th:nth-child(4),
+.inbox-table th:nth-child(5),
+.inbox-table th:nth-child(6) { width: 11%; }
+.inbox-table th:nth-child(6),
+.inbox-table td:nth-child(6) { text-align: right; }
 /* The name may take the whole column now - the fixed width is the limit, not a magic px. */
 .box-body > .dtable .hrow-name .nm {
   max-width: none;
