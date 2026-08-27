@@ -273,19 +273,42 @@ jobs(
   raw_path TEXT,                  -- .raw/<job-id>/
   created_pages TEXT,             -- JSON-Liste erzeugter/aktualisierter Wiki-Seiten
   notify_channel TEXT,            -- z. B. 'telegram:<chat_id>' — Abschluss-Meldung an den Eingangskanal (4.3; Migration v7)
+  commit_hash TEXT,               -- der Commit dieses Ingests, Grundlage des Revert (§9; Migration v9)
+  reverted_at TEXT,               -- gesetzt, wenn der Ingest zurückgenommen wurde; der Status bleibt unverändert (§9; Migration v9)
+  duplicate_of TEXT,              -- bei status='duplicate' der Job, den dieser dupliziert (Migration v11)
   error TEXT, attempts INTEGER DEFAULT 0,
   tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL,
   created_at TEXT, started_at TEXT, finished_at TEXT
 );
-job_logs(job_id, ts, level, message);            -- Agent-Stream + Pipeline-Events
-sessions(id, user_id DEFAULT 'local', title, created_at);  -- Query-Chat
-messages(session_id, role, content, citations, ts);
+job_logs(id INTEGER PRIMARY KEY, job_id, ts, level, message);  -- Agent-Stream + Pipeline-Events
+sessions(id, user_id DEFAULT 'local', title, created_at,   -- Query-Chat
+  sdk_session_id,                 -- SDK-Session des letzten Query-Runs, damit eine Folgefrage sie fortsetzen kann (§5; Migration v2)
+  updated_at);                    -- Sortierschlüssel der Session-Liste, bewegt sich mit jeder neuen Nachricht (Migration v2)
+messages(id INTEGER PRIMARY KEY, session_id, role, content, citations, ts,
+  tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL);   -- Kosten je Antwort; NULL bei User-/System-Zeilen (Migration v6)
 settings(key PRIMARY KEY, value);
 users(id PRIMARY KEY, name, token_hash, role, created_at); -- in v1 nur der Seed-Eintrag 'local'
 telegram_drops(user_id, sender_id, username, first_at, last_at, count); -- abgewiesene Bot-Absender, aggregiert (4.3/§9; Migration v8)
+agent_runs(                       -- eine Zeile je settled Agent-Run (Migration v12)
+  id TEXT PRIMARY KEY,
+  user_id TEXT DEFAULT 'local',
+  kind TEXT NOT NULL,             -- 'research' | 'lint' | 'hot-cache' | 'tag-fix' | 'domain-backfill' | 'retrieve-index' | …
+  label TEXT,                     -- Thema eines Research-Runs; NULL, wo die Art schon alles sagt
+  profile_key TEXT,               -- Lens, unter der ein Research-Run lief (12.7)
+  ok INTEGER NOT NULL,
+  pages TEXT,                     -- JSON-Liste der geschriebenen Wiki-Seiten
+  tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL,
+  error TEXT,
+  commit_hash TEXT,               -- der Commit dieses Runs; NULL = nichts committet (Migration v13)
+  started_at TEXT, finished_at TEXT
+);
+maintenance_state(user_id, kind, run_id, ok, pages INTEGER, error, finished_at); -- eine Zeile je Run-Kind, "zuletzt erledigt" (12.7; Migration v10)
+domain_dismissals(user_id, key, dismissed_at);     -- verworfene Domain-Kandidaten, PK (user_id, key) (12.4; Migration v5)
 ```
 
 Der Vault selbst bleibt die einzige Wahrheit für Wissen; SQLite hält ausschließlich Betriebszustand. Ein Verlust der DB darf den Vault nicht beschädigen (Rebuild der Statistiken aus Dateisystem + Git möglich).
+
+`agent_runs` und `maintenance_state` beantworten verschiedene Fragen und existieren deshalb nebeneinander: die eine ist die Historie (eine Zeile je Lauf, `pages` als JSON-Liste), die andere der Stand je Bereich (eine Zeile je Art, beim Settle upserted, `pages` nur als Anzahl). Mit `commit_hash` (ergänzt 2026-08-27, Migration v13) kennt **jeder** vault-schreibende Vorgang seinen Commit, Ingest-Job wie Agent-Run; das Dashboard musste die Zuordnung vorher aus Zeitstempeln raten und zeigte settled Agent-Runs deshalb als "nichts committet" an. NULL bleibt die richtige Antwort, wo ein Lauf nichts committet hat: Fehlschlag vor dem Commit-Schritt, `retrieve-index` (schreibt nur abgeleitete Artefakte außerhalb der Vault-History, 12.6) und Zeilen aus der Zeit vor v13.
 
 ---
 
