@@ -2278,6 +2278,17 @@ details.hot-cache[open] summary {
 .gp-head .spacer {
   flex: 1;
 }
+/* A head is 24px of content, and anything that APPEARS in it must fit that - a `.btn` is
+   `--control-h` (32px), so a Reset or a Clear that shows up the moment a filter is picked
+   made its own head 8px taller than it was a click earlier, and pushed every section under
+   it down the screen. The research rail lost its Clear button over exactly this bug
+   (2026-08-26); sizing the control to the row it sits in fixes it for every panel at once,
+   and a secondary affordance beside a 10.5px label has no business being 32px anyway. */
+.gp-head .btn {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
 .gp-eyebrow {
   font-size: 10.5px;
   font-weight: 600;
@@ -4612,6 +4623,11 @@ kbd {
   align-items: center;
   gap: 10px;
   flex: none;
+  /* One height for every box head in the app, whether it carries a control or only a title:
+     32px of control + 20px of padding + the rule under it. A head sized to its content grew
+     and shrank by eleven pixels as a button appeared and went - Home's "Clear history" comes
+     and goes with the state filter - and the table under it moved with it. */
+  min-height: calc(var(--control-h) + 21px);
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
 }
@@ -4641,6 +4657,10 @@ kbd {
   align-items: center;
   gap: 10px;
   flex: none;
+  /* Same reservation as the head, for the same reason: a foot carries a button that comes
+     and goes with the list it counts ("Show more", "Load older"), and a foot sized to its
+     content took 14px off the table above it the moment the button appeared. */
+  min-height: calc(var(--control-h) + 19px);
   padding: 9px 14px;
   border-top: 1px solid var(--border);
   font-size: 12px;
@@ -4783,6 +4803,14 @@ tr:focus-within .rowacts {
   gap: 12px;
   min-width: 0;
   min-height: 0;
+}
+/* The flow zone takes whatever the stock zone leaves, whether it has one row in it or five
+   hundred. Without the grow it sized itself to its content: filtering the stream down to a
+   single row shortened the box by 160px, so the table's own foot - and the bottom edge of
+   the screen's main object - jumped up the moment a filter was picked. The rows scroll
+   inside `.box-body`, which is what a fixed frame around a changing list is for. */
+.home-main > .box {
+  flex: 1 1 0;
 }
 /* Hero, the graph, and the panel that took the half the graph gave back. */
 .vaultzone {

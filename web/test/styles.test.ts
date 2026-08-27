@@ -106,6 +106,31 @@ describe('styles.css geometry invariants', () => {
     const slot = block('.lib-table .lt-kind')
     expect(slot).toMatch(/flex:\s*0 0 var\(--lib-kind-w\)/)
   })
+
+  /**
+   * Nothing may move when a filter is picked. Three chrome elements carry a control that
+   * appears only once something is filtered - a panel head's Reset/Clear, a box head's
+   * "Clear history", a box foot's "Show more" - and each of them was sized to its content,
+   * so the control's arrival pushed everything under it down the screen (8px, 11px, 14px).
+   * Each reserves the height now; these assert the reservation, because the symptom only
+   * shows in a browser and only while clicking.
+   */
+  it('keeps a panel head one height whether or not a control has appeared in it', () => {
+    expect(block('.gp-head')).toMatch(/min-height:\s*24px/)
+    // The control is sized to the head, not the other way round: a `.btn` is `--control-h`.
+    const headBtn = block('.gp-head .btn')
+    expect(headBtn).toMatch(/height:\s*24px/)
+  })
+
+  it('reserves the control height in a box head and a box foot', () => {
+    expect(block('.box-head')).toMatch(/min-height:\s*calc\(var\(--control-h\)/)
+    expect(block('.box-foot')).toMatch(/min-height:\s*calc\(var\(--control-h\)/)
+  })
+
+  /** The flow zone is a frame around a changing list, not a box that follows it. */
+  it('lets Home\'s activity box take the height the stock zone leaves', () => {
+    expect(block('.home-main > .box')).toMatch(/flex:\s*1 1 0/)
+  })
 })
 
 describe('styles.css coverage', () => {
