@@ -403,6 +403,11 @@ export interface AgentRunRecord {
   tokensOut: number | null
   costUsd: number | null
   error: string | null
+  /**
+   * The commit this run produced (schema v13), or null when it committed nothing - a
+   * read-only kind, a failure before any write, or a run that settled before v13 landed.
+   */
+  commitHash: string | null
   startedAt: string
   finishedAt: string
 }

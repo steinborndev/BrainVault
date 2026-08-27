@@ -85,6 +85,12 @@ export function contentPages(paths: readonly string[]): string[] {
 const kindOfRun = (runKind: string): ActivityKind => (runKind === 'research' ? 'research' : 'maintenance')
 
 /**
+ * How close a commit has to be to a settled run to count as that run's commit. Only used for
+ * rows written before schema v13, which persists the hash and needs no guessing.
+ */
+const COMMIT_JOIN_MS = 90_000
+
+/**
  * What a commit was, read off the subject the service itself wrote:
  *
  *   ingest: …        the ingest queue           (`queue.ts`)
@@ -126,9 +132,14 @@ export interface ActivityInput {
 /**
  * One stream out of four sources, newest first.
  *
- * A commit is dropped when a job already claims it, or when a maintenance run settled within
- * 90 s of it - the settle record carries no hash, so time proximity is the only join
- * available. Without that, every agent run would also appear as an anonymous "edit".
+ * A commit is dropped when something else already accounts for it: an ingest job naming its
+ * hash, a logged run naming its hash (schema v13), or - for runs that settled before v13 and
+ * so carry none - a run that settled within 90 s of it. Without that last fallback every
+ * pre-v13 agent run would appear twice, once as itself and once as an anonymous "edit".
+ *
+ * The fallback also HANDS the matched hash to the run event rather than dropping it with the
+ * commit. That omission is what made every agent run's detail view read "nothing was
+ * committed" until 2026-08-27, however cleanly the run had committed.
  */
 export function buildActivity(input: ActivityInput): ActivityEvent[] {
   const out: ActivityEvent[] = []
@@ -171,14 +182,19 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
     })
   }
 
-  const settleTimes: number[] = []
+  // Where each settled run landed in `out`, so a commit matched by time can hand its hash
+  // back to the run it belongs to. `hash` is set for v13 rows and null for everything older.
+  const settleSlots: SettleSlot[] = []
+  const runCommits = new Set<string>()
   const loggedIds = new Set<string>()
   const loggedKinds = new Map<string, number>()
 
   for (const r of input.runHistory ?? []) {
     loggedIds.add(r.id)
     const at = Date.parse(r.finishedAt)
-    settleTimes.push(at)
+    const hash = r.commitHash ?? null
+    if (hash !== null) runCommits.add(hash.slice(0, 8))
+    settleSlots.push({ at, index: out.length, hash })
     loggedKinds.set(r.kind, Math.max(loggedKinds.get(r.kind) ?? 0, at))
     out.push({
       id: `logrun:${r.id}`,
@@ -190,7 +206,7 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
       whenIso: r.finishedAt,
       pages: contentPages(r.pages),
       costUsd: r.costUsd,
-      commit: null,
+      commit: r.commitHash ?? null,
       live: false,
       startedIso: r.startedAt,
       ...(r.error !== null ? { note: r.error } : {}),
@@ -202,7 +218,8 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
     if (loggedIds.has(a.runId)) continue
     const at = Date.parse(a.finishedAt)
     if ((loggedKinds.get(a.kind) ?? -Infinity) >= at) continue
-    settleTimes.push(at)
+    // The per-kind settle record never held a hash, so this slot always wants one.
+    settleSlots.push({ at, index: out.length, hash: null })
     out.push({
       id: `settle:${a.kind}:${a.runId}`,
       kind: kindOfRun(a.kind),
@@ -220,9 +237,18 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
   }
 
   for (const c of input.commits) {
-    if (jobCommits.has(c.hash.slice(0, 8))) continue
+    const short = c.hash.slice(0, 8)
+    if (jobCommits.has(short) || runCommits.has(short)) continue
     const t = Date.parse(c.date)
-    if (settleTimes.some((rt) => Math.abs(rt - t) < 90_000)) continue
+    // Nothing named this hash, so fall back to time for the pre-v13 rows. Nearest wins:
+    // with two runs inside the same window, the closer one is the better guess.
+    const slot = nearestHashlessSlot(settleSlots, t)
+    if (slot !== undefined) {
+      const ev = out[slot.index]
+      if (ev !== undefined) out[slot.index] = { ...ev, commit: c.hash }
+      slot.hash = c.hash
+      continue
+    }
     const { kind, channel } = classifyCommit(c.subject)
     out.push({
       id: `commit:${c.hash}`,
@@ -239,6 +265,35 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
   }
 
   return out.sort((a, b) => Date.parse(b.whenIso) - Date.parse(a.whenIso))
+}
+
+/** A settled run in `out`, and the commit it is known (or later found) to have made. */
+interface SettleSlot {
+  readonly at: number
+  readonly index: number
+  hash: string | null
+}
+
+/**
+ * The closest still-hashless run slot within the join window, or undefined if none is.
+ *
+ * "Still-hashless" is what keeps one run from swallowing two commits. A run makes exactly one
+ * commit, so a second commit inside the same window came from somewhere else - a page edited
+ * through the API, Obsidian, a terminal - and belongs in the feed as its own edit rather than
+ * silently absorbed, which is what the old any-run-is-near-enough test did to it.
+ */
+function nearestHashlessSlot(slots: readonly SettleSlot[], commitMs: number): SettleSlot | undefined {
+  let best: SettleSlot | undefined
+  let bestGap = COMMIT_JOIN_MS
+  for (const s of slots) {
+    if (s.hash !== null) continue
+    const gap = Math.abs(s.at - commitMs)
+    if (gap < bestGap) {
+      best = s
+      bestGap = gap
+    }
+  }
+  return best
 }
 
 export interface ActivityFilter {

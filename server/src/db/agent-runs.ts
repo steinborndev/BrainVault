@@ -1,6 +1,6 @@
 /**
  * The run log: one persistent row per settled agent run (research, lint, hot cache, tag-fix,
- * domain backfill, …). Schema v12.
+ * domain backfill, …). Schema v12, plus the commit each run produced (v13).
  *
  * Why this exists alongside `maintenance_state` (v10): that table answers "when did the last
  * run of each KIND settle, and did it work" - one row per kind, upserted. It is the right
@@ -34,6 +34,11 @@ export interface AgentRunRecord {
   readonly tokensOut: number | null
   readonly costUsd: number | null
   readonly error: string | null
+  /**
+   * The commit this run produced, or null when it committed nothing (a read-only kind, a
+   * failure before any write, or a row written before schema v13).
+   */
+  readonly commitHash: string | null
   readonly startedAt: string
   readonly finishedAt: string
 }
@@ -81,6 +86,7 @@ interface Row {
   tokens_out: number | null
   cost_usd: number | null
   error: string | null
+  commit_hash: string | null
   started_at: string
   finished_at: string
 }
@@ -104,6 +110,7 @@ function toRecord(row: Row): AgentRunRecord {
     tokensOut: row.tokens_out,
     costUsd: row.cost_usd,
     error: row.error,
+    commitHash: row.commit_hash,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   }
@@ -121,8 +128,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
     this.db
       .prepare(
         `INSERT INTO agent_runs
-           (id, user_id, kind, label, profile_key, ok, pages, tokens_in, tokens_out, cost_usd, error, started_at, finished_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, user_id, kind, label, profile_key, ok, pages, tokens_in, tokens_out, cost_usd, error, commit_hash, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            kind = excluded.kind,
            label = excluded.label,
@@ -133,6 +140,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
            tokens_out = excluded.tokens_out,
            cost_usd = excluded.cost_usd,
            error = excluded.error,
+           commit_hash = excluded.commit_hash,
            started_at = excluded.started_at,
            finished_at = excluded.finished_at`,
       )
@@ -148,6 +156,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
         run.tokensOut,
         run.costUsd,
         run.error,
+        run.commitHash,
         run.startedAt,
         run.finishedAt,
       )
@@ -162,7 +171,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
     params.push(limit)
     const rows = this.db
       .prepare(
-        `SELECT id, kind, label, profile_key, ok, pages, tokens_in, tokens_out, cost_usd, error, started_at, finished_at
+        `SELECT id, kind, label, profile_key, ok, pages, tokens_in, tokens_out, cost_usd, error, commit_hash, started_at, finished_at
            FROM agent_runs
           WHERE user_id = ?${where}
           ORDER BY finished_at DESC

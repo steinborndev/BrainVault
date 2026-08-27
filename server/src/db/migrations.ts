@@ -325,6 +325,24 @@ CREATE INDEX idx_agent_runs_kind ON agent_runs (user_id, kind, finished_at DESC)
 CREATE INDEX idx_agent_runs_finished ON agent_runs (user_id, finished_at DESC);
 `
 
+/**
+ * v13 - the commit each agent run produced.
+ *
+ * v12 recorded everything about a run except where its writing LANDED. The dashboard had to
+ * infer that: a run event carried no hash, so the activity feed matched runs to commits by
+ * time proximity and, having matched, dropped the commit event with its hash. The run detail
+ * then read "nothing was committed" for every research, lint and tag-fix run that had in fact
+ * committed cleanly. Time proximity is also ambiguous on its face - two runs settling inside
+ * the same 90 s window cannot be told apart by it.
+ *
+ * The runner has held the hash all along (`CommitResult.hash`); it simply had nowhere to put
+ * it. Additive and nullable: rows written before this migration keep no hash, and the UI
+ * falls back to the time-proximity join for them.
+ */
+const V13 = `
+ALTER TABLE agent_runs ADD COLUMN commit_hash TEXT;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -338,4 +356,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 10, up: V10 },
   { version: 11, up: V11 },
   { version: 12, up: V12 },
+  { version: 13, up: V13 },
 ]

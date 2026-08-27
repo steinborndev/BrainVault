@@ -17,6 +17,7 @@ import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { Mutex } from '../src/util/mutex.js'
 import type { AgentRunResult } from '../src/pipeline/agent-runner.js'
+import type { CommitResult } from '../src/pipeline/git.js'
 
 const record = (over: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
   id: 'r1',
@@ -29,6 +30,7 @@ const record = (over: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
   tokensOut: 3_000,
   costUsd: 1.8,
   error: null,
+  commitHash: 'abc1234def5678',
   startedAt: '2026-08-25T09:00:00.000Z',
   finishedAt: '2026-08-25T09:20:00.000Z',
   ...over,
@@ -147,7 +149,11 @@ describe('MaintenanceRunner run history', () => {
     throw new Error('run never settled')
   }
 
-  const makeRunner = (store: MemoryAgentRunStore, agentOk: boolean): MaintenanceRunner =>
+  const makeRunner = (
+    store: MemoryAgentRunStore,
+    agentOk: boolean,
+    commitResult: CommitResult = { committed: true, hash: 'abc12345', committedPages: ['wiki/questions/Research: X.md'] },
+  ): MaintenanceRunner =>
     new MaintenanceRunner({
       vaultRoot,
       auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
@@ -155,7 +161,7 @@ describe('MaintenanceRunner run history', () => {
       commitMutex: new Mutex(),
       runAgent: async () =>
         agentOk ? okResult('done') : ({ ...okResult(''), ok: false, error: 'agent exploded' } as AgentRunResult),
-      commit: async () => ({ committed: true, hash: 'abc12345', committedPages: ['wiki/questions/Research: X.md'] }),
+      commit: async () => commitResult,
       runStore: store,
     })
 
@@ -174,6 +180,7 @@ describe('MaintenanceRunner run history', () => {
       profileKey: 'sota',
       ok: true,
       costUsd: 0.5,
+      commitHash: 'abc12345',
     })
     expect(runs[0]!.pages).toContain('wiki/questions/Research: X.md')
     expect(Date.parse(runs[0]!.startedAt)).toBeLessThanOrEqual(Date.parse(runs[0]!.finishedAt))
@@ -189,6 +196,8 @@ describe('MaintenanceRunner run history', () => {
     expect(runs).toHaveLength(1)
     expect(runs[0]).toMatchObject({ ok: false, label: 'Grid-scale storage', profileKey: 'startups' })
     expect(runs[0]!.error).toContain('agent exploded')
+    // It never reached the commit step, so there is no hash to claim.
+    expect(runs[0]!.commitHash).toBeNull()
   })
 
   it('records the other run kinds too, with no label to speak of', async () => {
@@ -199,5 +208,31 @@ describe('MaintenanceRunner run history', () => {
 
     expect(store.list({ kind: 'hot-cache' })).toHaveLength(1)
     expect(store.list({ kind: 'hot-cache' })[0]!.label).toBeNull()
+  })
+
+  /**
+   * The reason schema v13 exists. Before it, a run's row held no hash at all, the dashboard
+   * matched runs to commits by timestamp and threw the hash away on match, and every settled
+   * agent run's detail view read "nothing was committed" - including this one, which had.
+   */
+  it('records the commit the run produced, so the run can name where its writing landed', async () => {
+    const store = new MemoryAgentRunStore()
+    const runner = makeRunner(store, true)
+    const run = runner.startResearch('Perovskite tandems', 'broad')
+    await waitSettled(runner, run.id)
+
+    expect(store.list()[0]!.commitHash).toBe('abc12345')
+  })
+
+  it('records no hash when the run had nothing to commit', async () => {
+    const store = new MemoryAgentRunStore()
+    const runner = makeRunner(store, true, { committed: false, committedPages: [], note: 'nothing to commit' })
+    const run = runner.startResearch('A topic nobody wrote about', 'broad')
+    await waitSettled(runner, run.id)
+
+    const [recorded] = store.list()
+    expect(recorded!.ok).toBe(true)
+    expect(recorded!.commitHash).toBeNull()
+    expect(recorded!.pages).toEqual([])
   })
 })

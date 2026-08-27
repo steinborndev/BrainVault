@@ -56,6 +56,7 @@ function finishedRun(id: string, costUsd: number, tokens = 100, ok = true): void
     tokensOut: tokens,
     costUsd,
     error: ok ? null : 'boom',
+    commitHash: null,
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
   })
@@ -84,7 +85,7 @@ describe('usageSince aggregate', () => {
   it('leaves agent runs outside the window alone', () => {
     runs.record({
       id: 'old', kind: 'lint', label: null, profileKey: null, ok: true, pages: [],
-      tokensIn: 999, tokensOut: 999, costUsd: 9.99, error: null,
+      tokensIn: 999, tokensOut: 999, costUsd: 9.99, error: null, commitHash: null,
       startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:10:00.000Z',
     })
     const usage = store.usageSince(startOfToday().toISOString())

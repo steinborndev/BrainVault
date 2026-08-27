@@ -164,6 +164,7 @@ describe('formatResearchOutcome', () => {
       result: {
         ok: true,
         kind: 'research',
+        commit: 'f00ba12',
         pages: ['wiki/concepts/Ionizable Lipid.md', 'wiki/index.md', 'wiki/hot.md'],
         usage: undefined as never,
       },

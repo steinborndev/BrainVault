@@ -226,6 +226,7 @@ const logged = (over: Partial<AgentRunRecord> = {}): AgentRunRecord => ({
   tokensOut: 20,
   costUsd: 1.8,
   error: null,
+  commitHash: null,
   startedAt: '2026-08-25T09:00:00.000Z',
   finishedAt: '2026-08-25T09:20:00.000Z',
   ...over,
@@ -318,5 +319,88 @@ describe('buildActivity with the persistent run log', () => {
     })
     expect(events).toHaveLength(1)
     expect(events[0]!.id).toContain('logrun:')
+    // …and the hash goes TO the run rather than over the side with the commit event. This
+    // row predates schema v13 and has no hash of its own; dropping the matched commit
+    // outright is what made every agent run's detail read "nothing was committed".
+    expect(events[0]!.commit).toBe('ffff0000ffff')
+  })
+
+  it('carries the commit a v13 run recorded, without needing a commit event at all', () => {
+    const events = buildActivity({
+      jobs: [],
+      activeRuns: [],
+      runHistory: [logged({ commitHash: 'abc123abc123' })],
+      lastRuns: [],
+      commits: [],
+    })
+    expect(events).toHaveLength(1)
+    expect(events[0]!.commit).toBe('abc123abc123')
+  })
+
+  it('suppresses a run\'s own commit by hash, however far apart the clocks put them', () => {
+    // The 90 s window is a fallback for hashless rows. A run that knows its hash needs no
+    // window - and must not be tricked into an anonymous "edit" by a slow clock either.
+    const events = buildActivity({
+      jobs: [],
+      activeRuns: [],
+      runHistory: [logged({ commitHash: 'abc123abc123', finishedAt: '2026-08-25T09:00:00.000Z' })],
+      lastRuns: [],
+      commits: [commit({ hash: 'abc123abc123', date: '2026-08-25T09:40:00.000Z', subject: 'maintenance: research' })],
+    })
+    expect(events).toHaveLength(1)
+    expect(events[0]!.id).toContain('logrun:')
+    expect(events[0]!.commit).toBe('abc123abc123')
+  })
+
+  it('gives a hashless run the NEAREST commit when two runs share a window', () => {
+    // Two pre-v13 runs settling a minute apart is exactly where time proximity is ambiguous:
+    // this commit is inside the 90 s window of BOTH. It is 1 s from 'late' and 59 s from
+    // 'early', so taking the first match in list order would attach it to the wrong run.
+    const events = buildActivity({
+      jobs: [],
+      activeRuns: [],
+      runHistory: [
+        logged({ id: 'early', finishedAt: '2026-08-25T09:00:00.000Z' }),
+        logged({ id: 'late', kind: 'lint', label: null, finishedAt: '2026-08-25T09:01:00.000Z' }),
+      ],
+      lastRuns: [],
+      commits: [commit({ hash: '1a1a1a1a1a1a', date: '2026-08-25T09:00:59.000Z', subject: 'maintenance: lint' })],
+    })
+    expect(events).toHaveLength(2)
+    expect(events.find((e) => e.id === 'logrun:late')!.commit).toBe('1a1a1a1a1a1a')
+    expect(events.find((e) => e.id === 'logrun:early')!.commit).toBeNull()
+  })
+
+  it('keeps a second commit in the same window visible instead of absorbing it', () => {
+    // A run makes exactly one commit. Anything else landing in its window came from elsewhere
+    // - a page edited by hand, say - and used to vanish, because the old join dropped every
+    // commit near ANY settle rather than pairing each one off.
+    const events = buildActivity({
+      jobs: [],
+      activeRuns: [],
+      runHistory: [logged({ finishedAt: '2026-08-25T09:00:00.000Z' })],
+      lastRuns: [],
+      commits: [
+        commit({ hash: 'ffff0000ffff', date: '2026-08-25T09:00:10.000Z', subject: 'maintenance: research' }),
+        commit({ hash: 'dddd1111dddd', date: '2026-08-25T09:00:40.000Z', subject: 'edit: Sourdough Hydration' }),
+      ],
+    })
+    expect(events).toHaveLength(2)
+    expect(events.find((e) => e.id.startsWith('logrun:'))!.commit).toBe('ffff0000ffff')
+    expect(events.find((e) => e.id === 'commit:dddd1111dddd')).toMatchObject({ kind: 'edit', channel: 'manual' })
+  })
+
+  it('leaves a run that committed nothing without a hash to show', () => {
+    const events = buildActivity({
+      jobs: [],
+      activeRuns: [],
+      runHistory: [logged({ commitHash: null, pages: [], finishedAt: '2026-08-25T09:00:00.000Z' })],
+      lastRuns: [],
+      commits: [commit({ hash: 'aaaabbbbcccc', date: '2026-08-25T06:00:00.000Z' })],
+    })
+    const logrun = events.find((e) => e.id.startsWith('logrun:'))!
+    expect(logrun.commit).toBeNull()
+    // The unrelated commit three hours earlier stays its own event.
+    expect(events).toHaveLength(2)
   })
 })

@@ -6,6 +6,7 @@ import { openDb, migrate, defaultDbPath, nowIso, MEMORY_DB } from '../src/db/ind
 import { MIGRATIONS } from '../src/db/migrations.js'
 import { JobStore } from '../src/db/jobs.js'
 import { TelegramDropStore } from '../src/db/telegram-drops.js'
+import { SqliteAgentRunStore } from '../src/db/agent-runs.js'
 
 const LATEST = MIGRATIONS[MIGRATIONS.length - 1]!.version
 
@@ -60,6 +61,50 @@ describe('v7 — telegram channel (SPEC.md §4.3)', () => {
     // Non-telegram jobs simply carry none.
     const { job: plain } = store.create({ source: 'drop', type: 'text' })
     expect(plain.notify_channel).toBeNull()
+  })
+
+  it('adds the run log a commit column on upgrade, leaving old rows hashless', () => {
+    // A v12 database: run history exists, but no run in it knows which commit it produced.
+    // v13 must widen the table without touching what is already there - the hash for those
+    // rows is not recoverable from SQLite, and the UI falls back to a time join for them.
+    const db = openDb(MEMORY_DB, { skipMigrations: true })
+    db.pragma('foreign_keys = OFF')
+    for (const m of MIGRATIONS.filter((m) => m.version <= 12)) {
+      db.exec(m.up)
+      db.pragma(`user_version = ${m.version}`)
+    }
+    db.prepare(
+      `INSERT INTO agent_runs (id, kind, label, ok, pages, started_at, finished_at)
+       VALUES ('old-run', 'research', 'a topic', 1, '["wiki/index.md"]', ?, ?)`,
+    ).run('2026-08-20T09:00:00.000Z', '2026-08-20T09:10:00.000Z')
+
+    migrate(db)
+    db.pragma('foreign_keys = ON')
+
+    expect(db.pragma('user_version', { simple: true })).toBe(LATEST)
+    const row = db.prepare("SELECT * FROM agent_runs WHERE id = 'old-run'").get() as Record<string, unknown>
+    expect(row['label']).toBe('a topic')
+    expect(row['commit_hash']).toBeNull()
+
+    // And the widened table takes a hash from here on.
+    new SqliteAgentRunStore(db).record({
+      id: 'new-run',
+      kind: 'research',
+      label: 'another topic',
+      profileKey: 'sota',
+      ok: true,
+      pages: [],
+      tokensIn: 1,
+      tokensOut: 1,
+      costUsd: 0.1,
+      error: null,
+      commitHash: 'deadbeef1234',
+      startedAt: '2026-08-27T09:00:00.000Z',
+      finishedAt: '2026-08-27T09:10:00.000Z',
+    })
+    const back = new SqliteAgentRunStore(db).list().find((r) => r.id === 'new-run')
+    expect(back?.commitHash).toBe('deadbeef1234')
+    db.close()
   })
 
   it('rebuilds the jobs table on upgrade WITHOUT losing rows or their logs', () => {

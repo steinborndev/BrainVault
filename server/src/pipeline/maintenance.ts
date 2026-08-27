@@ -213,6 +213,12 @@ export interface MaintenanceResult {
   readonly kind: MaintenanceKind
   /** Committed wiki pages touched by the run (from the commit). */
   readonly pages: string[]
+  /**
+   * The hash of the commit this run produced, or null when it committed nothing. Carried out
+   * of `run()` so the run log can persist it (schema v13) - without it the dashboard had to
+   * guess which commit belonged to which run from timestamps alone.
+   */
+  readonly commit: string | null
   readonly usage: AgentRunResult['usage']
   readonly error?: string
   /** The agent's final text — a summary/fallback the UI can render as markdown. */
@@ -730,7 +736,9 @@ export class MaintenanceRunner {
       const answer = `retrieval index rebuilt: ${built.chunkCount} chunk(s) in ${Math.round(built.durationMs / 1000)}s`
       log('info', `maintenance: retrieve-index complete (${built.chunkCount} chunk(s))`)
       this.settle(id, 'done', {
-        result: { ok: true, kind: 'retrieve-index', pages: [], usage: EMPTY_USAGE, answer },
+        // `commit: null` is the honest answer, not a gap: this kind writes only the derived
+        // artifacts under `.vault-meta/`, which are excluded from vault history by design.
+        result: { ok: true, kind: 'retrieve-index', pages: [], commit: null, usage: EMPTY_USAGE, answer },
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -854,6 +862,7 @@ export class MaintenanceRunner {
           tokensOut: patch.result?.usage.tokensOut ?? null,
           costUsd: patch.result?.usage.costUsd ?? null,
           error: patch.error ?? patch.result?.error ?? null,
+          commitHash: patch.result?.commit ?? null,
           startedAt: prev.startedAt,
           finishedAt: settled.finishedAt ?? new Date().toISOString(),
         })
@@ -935,7 +944,7 @@ export class MaintenanceRunner {
       if (!res.ok) {
         endRun()
         log('error', `maintenance: ${kind} failed: ${res.error ?? 'unknown error'}`)
-        return { ok: false, kind, pages: [], usage: res.usage, error: res.error ?? `${kind} failed` }
+        return { ok: false, kind, pages: [], commit: null, usage: res.usage, error: res.error ?? `${kind} failed` }
       }
 
       // One commit per run, serialized against ingest commits. The sole-writer check and the
@@ -956,6 +965,7 @@ export class MaintenanceRunner {
       })
       endRun()
       const pages = commit.committed ? commit.committedPages : []
+      const commitHash = commit.committed ? (commit.hash ?? null) : null
       log('info', commit.committed ? `committed ${commit.hash?.slice(0, 8)} (${pages.length} page(s))` : 'nothing to commit')
       this.events.publish({ kind: 'stats' })
 
@@ -975,7 +985,7 @@ export class MaintenanceRunner {
         }
       }
 
-      const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage, answer: res.result }
+      const base: MaintenanceResult = { ok: true, kind, pages, commit: commitHash, usage: res.usage, answer: res.result }
       if (kind === 'lint') {
         // The report file IS the deliverable: lint-fix is bounded by it, and the status model
         // dates the whole area from it. A run that exits cleanly without writing one leaves
@@ -998,6 +1008,7 @@ export class MaintenanceRunner {
           ok: false,
           kind,
           pages,
+          commit: commitHash,
           usage: res.usage,
           error:
             'the lint run finished without writing a report to wiki/meta/ - nothing to base safe ' +
