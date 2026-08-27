@@ -5,7 +5,9 @@
       "Bash([ -s \"$HOME/.nvm/nvm.sh\" ])",
       "Bash(npm -v)",
       "Bash(git --version)",
-      "Bash(claude --version)"
+      "Bash(claude --version)",
+      "Read(//home/benjamin/.config/vault-service/**)",
+      "Bash(systemctl --user list-units --type=service --all)"
     ]
   }
 }
