@@ -1,4 +1,4 @@
-# systemd USER unit for BrainVault (vault-service) — TASKS-M5 §1.
+# systemd USER unit for BrainVault (vault-service) - TASKS-M5 §1.
 # This is a TEMPLATE: scripts/install-systemd.sh substitutes @PLACEHOLDERS@ with real
 # paths (the repo location and the resolved node binary) and installs the result to
 # ~/.config/systemd/user/vault-service.service. Do not install this file directly.
@@ -11,7 +11,7 @@ After=network.target
 Type=simple
 WorkingDirectory=@REPO@/server
 # Run the BUILT JS as a single node process (not tsx/npm) so systemd's main PID IS the
-# server — a tsx/npm wrapper leaves an orphaned node child that keeps holding port 8420
+# server - a tsx/npm wrapper leaves an orphaned node child that keeps holding port 8420
 # (TASKS-M5 §1 gotcha). Rebuild with `npm run build` after code changes.
 ExecStart=@NODE@ dist/main.js
 Environment=NODE_ENV=production
@@ -19,7 +19,7 @@ Environment=NODE_ENV=production
 # `spawn('node', …)`. Put the resolved node dir first, then the system dirs that hold the
 # sandbox deps (bwrap, socat) and preprocessing tools (python3, bash).
 Environment=PATH=@NODEDIR@:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin@EXTRA_PATH@
-# VAULT_ROOT is a config value (hard rule 1), passed here — it is intentionally NOT in the
+# VAULT_ROOT is a config value (hard rule 1), passed here - it is intentionally NOT in the
 # credential env file. The Anthropic credential loads from ~/.config/vault-service/env, which
 # the app reads itself; do not put the token in this unit.
 Environment=VAULT_ROOT=@VAULT_ROOT@

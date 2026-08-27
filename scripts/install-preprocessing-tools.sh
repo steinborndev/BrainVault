@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
 # Installs the preprocessing toolchain (SPEC.md §5, TASKS-M1 §3). The apt packages need
-# root, so this script uses sudo and will prompt for a password. Idempotent — safe to
+# root, so this script uses sudo and will prompt for a password. Idempotent - safe to
 # re-run. After it finishes, `npm run smoke -- --tools` (or detectTools) should report
 # every tool present.
 #
 set -euo pipefail
 
 # pip --user installs land in ~/.local/bin (yt-dlp). On a fresh account that dir is not
-# on PATH yet — Ubuntu's ~/.profile only adds it once it EXISTS, i.e. from the next login
-# on — so extend PATH here or the verification below reports a false MISS (fresh-WSL e2e
+# on PATH yet - Ubuntu's ~/.profile only adds it once it EXISTS, i.e. from the next login
+# on - so extend PATH here or the verification below reports a false MISS (fresh-WSL e2e
 # finding, 2026-07-20). The systemd unit template carries ~/.local/bin already.
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -31,7 +31,7 @@ echo "==> Python extractors (pip)"
 #    the libraries; user-site installs with --break-system-packages are the sanctioned
 #    non-venv escape for pure-python packages like these.
 # `--user` is invalid inside a virtualenv (pyenv/venv/conda), so only add it when we are
-# NOT in one — otherwise install into the active environment directly.
+# NOT in one - otherwise install into the active environment directly.
 if ! python3 -m pip --version >/dev/null 2>&1; then
   sudo apt-get install -y python3-pip
 fi
@@ -75,7 +75,7 @@ for tool in pdftotext pdfinfo ocrmypdf tesseract pandoc exiftool defuddle yt-dlp
 done
 
 if [ "$missing" -ne 0 ]; then
-  echo "Some tools are still missing — see above." >&2
+  echo "Some tools are still missing - see above." >&2
   exit 1
 fi
 echo "All preprocessing tools present."

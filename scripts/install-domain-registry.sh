@@ -2,7 +2,7 @@
 # Install the domain registry seed page into the vault (SPEC.md §12.4, Meta-Kategorien Stufe 2).
 #
 # The registry lists the meta-categories pages may be filed under. Once installed, the VAULT's
-# copy is the source of truth — the service reads it on every ingest and hands it to the agent
+# copy is the source of truth - the service reads it on every ingest and hands it to the agent
 # as a closed list, and you edit it in the dashboard's page view (or here). This script only
 # seeds it.
 #
@@ -50,7 +50,7 @@ cp "$SEED" "$TARGET"
 echo "installed domain registry: $TARGET"
 echo
 echo "next steps:"
-echo "  1. review/adjust the domains in the dashboard (Vault tab → wiki/meta/domains.md)"
-echo "  2. run the domain backfill from the Wartung tab to file existing pages"
+echo "  1. review/adjust the domains in the dashboard (Library → wiki/meta/domains.md)"
+echo "  2. run the domain backfill from System -> Status & checks to file existing pages"
 echo
 echo "note: the registry is a vault page, so it is committed like any other vault content."

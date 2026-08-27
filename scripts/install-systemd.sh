@@ -21,7 +21,7 @@ VAULT_ROOT_ARG="${1:-$HOME/vault}"
 die() { echo "error: $*" >&2; exit 1; }
 
 [ -f "$TEMPLATE" ] || die "template not found: $TEMPLATE"
-command -v systemctl >/dev/null || die "systemctl not found — systemd (user) is required."
+command -v systemctl >/dev/null || die "systemctl not found - systemd (user) is required."
 
 # Resolve the REAL node path (nvm installs symlinks); systemd needs an absolute ExecStart.
 NODE="$(command -v node || true)"
@@ -38,11 +38,11 @@ VAULT_ROOT="$(cd "$VAULT_ROOT_ARG" 2>/dev/null && pwd || true)"
   die "VAULT_ROOT does not look like a claude-obsidian vault (no wiki/ + skills/): $VAULT_ROOT"
 
 # The app loads its Anthropic credential from this file. A missing file is fine now: the
-# service starts in SETUP MODE and the dashboard collects the credential (Maintenance →
-# Settings) — mention it so nobody hunts for a startup failure that no longer happens.
+# service starts in SETUP MODE and the dashboard collects the credential (System →
+# Settings) - mention it so nobody hunts for a startup failure that no longer happens.
 if [ ! -f "$ENV_FILE" ]; then
-  echo "note: no credential file at $ENV_FILE yet — the service will start in setup mode;"
-  echo "      open the dashboard and add the credential under Maintenance → Settings."
+  echo "note: no credential file at $ENV_FILE yet - the service will start in setup mode;"
+  echo "      open the dashboard and add the credential under System → Integrations."
 fi
 
 # yt-dlp (YouTube URL ingestion) is often installed under pyenv shims or ~/.local/bin,
@@ -53,7 +53,7 @@ EXTRA_PATH=""
 if [ -n "$YTDLP" ]; then
   EXTRA_PATH=":$(dirname "$YTDLP")"
 else
-  echo "warning: yt-dlp not found on PATH — YouTube URL jobs will fail until it is installed" >&2
+  echo "warning: yt-dlp not found on PATH - YouTube URL jobs will fail until it is installed" >&2
 fi
 
 # deno backs yt-dlp's YouTube extraction (EJS player challenges). Without it on the
@@ -67,7 +67,7 @@ if [ -n "$DENO" ]; then
     *) EXTRA_PATH="$EXTRA_PATH:$DENODIR" ;;
   esac
 else
-  echo "warning: deno not found on PATH — YouTube extraction is degraded and will hit bot checks; run scripts/install-preprocessing-tools.sh" >&2
+  echo "warning: deno not found on PATH - YouTube extraction is degraded and will hit bot checks; run scripts/install-preprocessing-tools.sh" >&2
 fi
 
 # Ensure a production build exists (single-process `node dist/main.js`).

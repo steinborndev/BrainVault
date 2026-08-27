@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# commit-msg hook — stop private vault content from leaking into this PUBLIC repo's history.
+# commit-msg hook - stop private vault content from leaking into this PUBLIC repo's history.
 #
 # The tooling repo is public; the vault it operates on is private. A commit message must never
-# name a specific vault subject (an entity, a person's handle, a source title) — that reveals
+# name a specific vault subject (an entity, a person's handle, a source title) - that reveals
 # what the private knowledge base contains. The motivating leak (2026-07-22): a commit body
 # named two X handles from an entity page.
 #
@@ -37,14 +37,14 @@ import os, re, sys
 msg_file, vault_root = sys.argv[1], sys.argv[2]
 
 # Git attribution trailers: `Co-authored-by:`, `Signed-off-by:`, `Reviewed-by:` and friends.
-# Deliberately narrow — only the `<Word>-by:` form, so ordinary prose can never claim the
+# Deliberately narrow - only the `<Word>-by:` form, so ordinary prose can never claim the
 # exemption by accident. The point is not that trailers are trusted: a trailer names a PERSON
 # who worked on the commit, which is public information about the commit, whereas the leak
 # this hook exists to stop is a message describing the vault's private SUBJECT MATTER.
 TRAILER_RE = re.compile(r"^[A-Za-z][A-Za-z-]*-by:", re.IGNORECASE)
 
 def scanned(line: str) -> bool:
-    # Comment lines go too (git strips them anyway) — matching against them would
+    # Comment lines go too (git strips them anyway) - matching against them would
     # false-positive on the hook's own explanatory text if it were ever pasted in.
     return not line.startswith("#") and TRAILER_RE.match(line) is None
 

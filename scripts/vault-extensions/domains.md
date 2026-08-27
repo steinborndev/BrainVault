@@ -19,24 +19,24 @@ by. This page is the single source of truth for that list: the ingestion service
 tells every ingest run to assign a domain from it.
 
 **This page is the contract, not a suggestion.** An ingest may only pick a key listed under
-"Domains" below, or `unassigned` when nothing fits. It must never invent a new key — that is
+"Domains" below, or `unassigned` when nothing fits. It must never invent a new key - that is
 how the field drifted before this registry existed (`mrna-delivery` and `drug-delivery` were
 both filed as domains, at a different altitude than `cooking`).
 
 ## How a new domain is born
 
-Pages that fit nothing get `domain: unassigned`. They stay fully visible and searchable —
+Pages that fit nothing get `domain: unassigned`. They stay fully visible and searchable -
 `unassigned` is a normal bucket in the graph view, not a hole. When enough of them accumulate
 around a shared theme (rule of thumb: **five or more** coherent pages), that is the evidence
 that a real domain has formed, and a new key gets added to this page. Adding it is a human
 decision; the service only surfaces the candidates. One or two stray pages are not a domain.
 
 To add one: append a `## <key>` section below, in the same shape as the others, then run the
-domain backfill from the dashboard's Wartung tab so existing pages get re-sorted.
+domain backfill from the dashboard (System -> Status & checks) so existing pages get re-sorted.
 
 ## Conventions
 
-- Keys are lowercase, hyphenated, singular in spirit, and broad — a domain is a shelf, not a
+- Keys are lowercase, hyphenated, singular in spirit, and broad - a domain is a shelf, not a
   book. Prefer `finance` over `investment-funds`.
 - Keep them at a comparable altitude. If one key would sit inside another, it is a tag, not a
   domain.
@@ -89,7 +89,7 @@ siblings, the repos and communities around them, and the SEO tooling built on to
 ## meta
 
 The wiki's own machinery rather than a subject: index and overview pages, the hot cache, the
-log, session records, folds, lint reports, and this page. Reserved — reach for it only when a
+log, session records, folds, lint reports, and this page. Reserved - reach for it only when a
 page is vault infrastructure.
 
 **Tags:** `meta`, `index`, `hot-cache`, `session`, `fold`

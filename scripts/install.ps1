@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
 # Safe to re-run. Two-phase by nature: if WSL itself has to be installed first, Windows
-# needs a reboot before Ubuntu can run — the script detects that, tells you, and you
+# needs a reboot before Ubuntu can run - the script detects that, tells you, and you
 # simply run it again after the reboot.
 
 $ErrorActionPreference = 'Stop'
@@ -31,8 +31,8 @@ WSL installation started. If this is the first time WSL is installed on this
 machine, Windows may need a REBOOT now. After the reboot:
 
   1. An 'Ubuntu' window opens once to create your Linux username + password
-     (any name/password you like — remember the password, setup needs it for sudo).
-  2. Run this script again — it continues where it left off.
+     (any name/password you like - remember the password, setup needs it for sudo).
+  2. Run this script again - it continues where it left off.
 "@ -ForegroundColor Yellow
     exit 0
 }
@@ -72,7 +72,7 @@ Write-Host @"
 BrainVault is running. Open the 'BrainVault' shortcut on your desktop
 (or $DashboardUrl in any browser).
 
-One step left in the browser: connect your Anthropic account — the dashboard
+One step left in the browser: connect your Anthropic account - the dashboard
 shows a 'Set up now' banner that takes you to the right place.
 "@ -ForegroundColor Green
 Start-Process $DashboardUrl

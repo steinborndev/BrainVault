@@ -11,15 +11,18 @@ BrainVault is a local ingestion service and web dashboard on top of a
 [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) vault (v1.9.2, Generic mode).
 It watches a folder, accepts drag-and-drop uploads and (optionally) files sent to a Telegram bot
 from your phone, preprocesses the material (PDF, Office, web, images, text), and runs headless
-Claude Agent SDK sessions that execute the vault's `ingest` skill fully automatically. A React dashboard exposes status, the job queue, research chat with citations,
-an interactive vault viewer, and maintenance actions.
+Claude Agent SDK sessions that execute the vault's `ingest` skill fully automatically. A React
+dashboard exposes intake and status, web and vault research with citations, an interactive graph
+and page viewer, a browsable library of every page, and the machine room behind it all.
 
-![Overview tab](docs/img/overview.png)
+![Home: the vault as a shape, the domain panel, and one activity stream](docs/img/home.png)
 
-![Vault graph, colored by domain](docs/img/vault-graph.png)
+![The wikilink graph, one colour per domain](docs/img/graph.png)
 
-<sub>Screenshots from a demo vault (mRNA/lipid-nanoparticle literature plus this project's own
-tooling notes); the ingest history behind the numbers is representative, not a benchmark.</sub>
+<sub>Every screenshot on this page comes from a **synthetic** vault - textbook subject matter,
+generic document titles, no real notes, people or sources. Regenerate it and re-shoot the set
+with `scripts/demo-vault.mjs` + `scripts/shoot-screens.mjs` (see
+[Screenshots](#screenshots)).</sub>
 
 Everything runs on your machine: the service binds `127.0.0.1` by default, the vault stays a plain
 git repository on disk, and the only thing that leaves the box is the agent's traffic to Anthropic -
@@ -44,7 +47,7 @@ That installs everything (Node via nvm, sandbox + preprocessing toolchain, the v
 the systemd service), starts the dashboard at <http://localhost:8420>, and leaves exactly
 one step for the browser: the dashboard opens in **setup mode** and walks you through
 connecting your Anthropic account (Claude subscription or API key) under
-Maintenance → Settings.
+System → Integrations.
 
 **Windows without WSL yet:** download the repo as a ZIP (GitHub: Code → Download ZIP - no
 git needed on Windows), unpack it, and run `scripts\install.ps1` in PowerShell - it installs
@@ -121,8 +124,8 @@ sudo apt-get install -y bubblewrap socat        # sandbox - not optional, see "S
 ### 3. Credential
 
 **The easy path: none needed up front.** Without a credential the service starts in **setup
-mode** - the dashboard shows a "Set up now" banner and collects the key under Maintenance →
-Settings (choose Claude subscription or Anthropic API key), writes it into the service env
+mode** - the dashboard shows a "Set up now" banner and collects the key under System →
+Integrations (choose Claude subscription or Anthropic API key), writes it into the service env
 file, and restarts itself (under systemd). Everything below is the manual equivalent.
 
 Exactly one credential may be configured - if both are set the service refuses to start, because
@@ -206,91 +209,122 @@ vault, and silently replaying a mid-commit write risks vault integrity.
 
 ## The dashboard
 
-Five tabs, all live over SSE:
+**Five screens**, as tabs in the header row, all live over SSE. The order follows the day: what
+arrived, what you go and find out, the two ways of browsing what is there, then the machine room.
 
-- **Overview** - page counts by type, wiki growth, recently changed pages and recent commits, the
-  hot cache, 7-day KPIs with week-over-week trends, token/cost totals and the daily budget.
-- **Ingestion** - dropzone (files + URLs), active jobs with a live agent log, the queue, and a
-  filterable history with created pages, duration, tokens and cost per job. A finished ingest can
-  be **reverted** from the history: since every ingest is exactly one vault commit, undoing it is
-  one click, and the undo is itself a commit - so it stays versioned and reversible. It refuses
-  rather than guessing if the vault has uncommitted changes or the revert would conflict.
-- **Research** - chat against the read-only query runner; answers **stream in as they are
-  written** and then settle into the finished message, which cites vault pages as clickable chips
-  that both deep-link into Obsidian and expand an inline preview of the page. Multiple named
-  sessions, each savable into the vault as a page ("Save to vault"). Autoresearch runs live here
-  too.
-- **Vault** - the viewer that makes the Obsidian app optional for everyday use. An interactive
-  graph of the wikilink structure with:
-  - **Search that narrows the graph** - a term (matched over titles, tags and domains) hides
-    everything unrelated and lists *every* match in a scrollable result list, not just the
-    first few. A local-neighborhood mode zooms in on one focused page and its links.
-  - **Color lenses** - recolor the same graph to answer different questions: by `domain:`
-    meta-category (the default), by wiki type, or by a metric (authority / orphans / stubs /
-    recency).
-  - **A two-tier toolbar** - a stable view bar (lens, page-type visibility, overlays) above a
-    domain filter band whose chips double as the color legend and scale to any number of
-    domains.
-  - **Overlays** - auto-detected community hulls (clusters), and knowledge-gap "ghost" nodes:
-    the pages other pages already link to but that don't exist yet, ranked into a ready-made
-    research backlog.
-  - **A System toggle** - structural scaffolding (index hubs, MOCs, the domain registry) and
-    maintenance artifacts (lint/release reports, session logs) are hidden by default so the
-    graph shows knowledge; one click brings them back.
-  - **An explorer panel** - click a node for its backlinks, outgoing links and tag-siblings
-    without leaving the graph. A "Graph health" section flags an isolated page or an
-    incidental-looking cross-domain link and offers a one-click, bounded repair run that
-    weaves the page in or reviews the link.
-  - **Keyboard + pointer navigation** - double-click a node to open its page, `Esc` to step
-    back out, `/` to jump to search, `f` to fit the view, Enter to open the selection.
+- **Home** - intake and everything in flight. The left rail is the control column: the dropzone
+  (files, URLs, a pasted note) on top, then the filters that narrow the stream below it - by kind
+  of event, by age, by state, by channel. The workspace answers two questions with two
+  treatments: **the stock** on top (how many pages the wiki holds, how many links, how many
+  domains, how many pages are linked but never written) with the wikilink graph beside it as a
+  picture and the domain split as bars; **the flow** underneath, as a strip of operational
+  figures (in flight, failures, ingests, spend today, checks due) over the activity stream they
+  belong to. One stream, not one per channel: an ingest, a research run, a maintenance run and a
+  vault edit are all rows in the same table, each showing the pages it produced, what it took and
+  what it cost. Click a row and it opens in place with the full record - log, commit, pages, and
+  the retry or revert action if it has one. A finished ingest can be **reverted** from its row:
+  every ingest is exactly one vault commit, so undoing it is one click, and the undo is itself a
+  commit, so it stays versioned and reversible. It refuses rather than guessing if the vault has
+  uncommitted changes or the revert would conflict.
 
-  The page view has rendered markdown, clickable `[[wikilinks]]`, a frontmatter properties
-  panel, and backlink/outgoing panels. Pages can be **edited and deleted right here** - every
-  mutation is one git commit (`edit:`/`delete:`), serialized behind the same commit mutex as
+- **Research** - the screen for going and finding something out, in the two ways that means:
+
+  | | reads | writes | cost |
+  |---|---|---|---|
+  | **Web research** | the web | files pages, one commit | fetches |
+  | **Vault research** | only what the vault already holds | nothing | tokens only |
+
+  Both appear as ledgers of the same shape, so a question and the record of what came back are
+  one object wherever you meet them. A **lens** shapes a web run - a closed set of four profiles
+  (broad sweep, state of the art, recent patents, startups & funding) that decides how it
+  searches and what it files - and the composer shows the run's plan before it starts: the page
+  it will file under, the fetch budget, and the step rail it will walk. Answers **stream in as
+  they are written** and then settle into the finished message, citing vault pages as clickable
+  chips that both deep-link into Obsidian and expand an inline preview. Conversations are named,
+  resumable, and savable into the vault as a page. Underneath the ledgers, the vault's own
+  **knowledge gaps** sit as a band of offers: the pages other pages link to that nobody has
+  written yet, each one a research run you can start with a click.
+
+  ![Research: two ledgers of one shape, with the vault's own gaps as a backlog](docs/img/research.png)
+
+- **Graph** - the wikilink structure on a canvas, with the force layout in a web worker so it
+  stays smooth as the vault grows (deliberately, since the WSLg Obsidian graph does not). The
+  view bar carries the **colour lenses** - recolour the same graph to answer different questions:
+  by `domain:` (the default, one colour per field of knowledge), by page type, or by a metric
+  (authority, recency, orphans, stubs). **Overlays** add auto-detected community areas, brightened
+  bridges between communities, and a spotlight that isolates one community on hover. Page-type
+  pills and a domain list filter what is shown; the domain list doubles as the colour legend and
+  scales to any number of domains. **Search narrows the graph** rather than just highlighting:
+  a term matched over titles, tags and domains hides everything unrelated and lists every match,
+  not just the first few. Structural scaffolding (index hubs, the domain registry) and maintenance
+  artifacts are hidden by default so the graph shows knowledge; one toggle brings them back.
+  Double-click a node to open its page, `Esc` to step back out, `/` to search, `f` to fit.
+
+  The **page view** behind it has rendered markdown, clickable `[[wikilinks]]`, a frontmatter
+  properties panel, and backlink/outgoing panels. Pages can be **edited and deleted right here** -
+  every mutation is one git commit (`edit:`/`delete:`), serialized behind the same commit mutex as
   agent commits, with an optimistic lock (409 if an agent changed the page since you loaded it).
   After a delete, a banner counts the backlinks that just went dangling and offers a one-click
-  reference-cleanup run. Deep-linkable: `/vault` and `/vault/page/<path>` survive a reload and
+  reference-cleanup run. Deep-linkable: `/graph` and `/page/<path>` survive a reload and
   browser back/forward.
 
-  All page links across the dashboard open this viewer first; the `obsidian://` deep link is
-  the secondary action on each chip. That makes the dashboard fully usable from a **Windows**
-  browser - Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only
-  work from a WSLg browser.
-- **Maintenance** - lint (structured report) plus a separate "fix safe findings" run that
-  automates only the report's mechanical categories (frontmatter gaps, stub pages, unlinked
-  mentions, stale index entries) and leaves anything needing judgment alone, hot-cache refresh
-  with its last-refresh time, the retrieval-index status and rebuild, the domain registry with
-  its backfill action, and the settings editor.
+- **Library** - the browse path a graph cannot give you: one filterable, sortable table over
+  every page, fed by the same graph query the canvas uses. Filter by page type, by domain, or by
+  health (orphans, stubs, system pages); sort by recency, title, backlinks or domain. Each row
+  carries the page's domain, its in/out link counts, when it changed, and a **source** column
+  that opens the document the page came from - the provenance comes from the vault's own `.raw/`
+  manifests rather than from the database, because losing operational state must never lose
+  provenance.
 
-**Domains** are the vault's meta-categories (`biomedicine`, `ai-tooling`, `knowledge-management`,
-…), the axis the graph filters and colors by. The allowed list lives in the vault itself, as the editable
-page `wiki/meta/domains.md` - install the seed with `scripts/install-domain-registry.sh`. Every
-vault-writing agent run gets that list as a **closed** set: it files each page under one key, or
-under `unassigned` when nothing fits, and may never coin a new key. New domains are created by a
-human editing that page (or accepting a candidate in the Maintenance tab); the rule of thumb is
-that five or more coherent `unassigned` pages are what justifies one. `Maintenance → Domains → Backfill` files existing pages retroactively
+  ![Library: one table over every page, filtered by type, domain and health](docs/img/library.png)
+
+- **System** - the machine room, in five sections:
+  - **Status & checks** - what the vault needs from you right now: lint (a structured report)
+    plus a separate "fix safe findings" run that automates only the report's mechanical
+    categories (frontmatter gaps, stub pages, unlinked mentions, stale index entries) and leaves
+    anything needing judgment alone; the hot-cache refresh; the domain registry with its backfill;
+    and the governance loop below.
+  - **Usage & cost** - tokens in and out, spend today and over 7 days, the daily budget as a
+    meter, spend per channel, and every priced run with the dearest first.
+  - **Vault stats** - pages, links, orphans, stubs, gaps and unfiled pages as figures; growth
+    over 30 days; pages by type; the vault's own commit history; the retrieval index and its
+    rebuild; and a check that every page under `wiki/` actually made it into git.
+  - **Service & config** - watch folder, concurrency, upload limit, git auto-commit, daily budget.
+  - **Integrations** - the Anthropic credential, the Telegram bot, and the Obsidian vault name.
+
+  ![System: vault stats - size, shape, growth and what is still unfiled](docs/img/system.png)
+
+All page links across the dashboard open the in-app viewer first; the `obsidian://` deep link is
+the secondary action on each chip. That makes the dashboard fully usable from a **Windows**
+browser - Windows-Obsidian cannot open a WSL vault over `\\wsl$`, so the deep links only work
+from a WSLg browser.
+
+The graph updates **live**: while an ingest writes pages, a debounced `vault` SSE event refreshes
+it, new nodes surface at their neighbours' centroid with a brief flash, existing nodes keep their
+positions, and the camera never jumps.
+
+**Domains** are the vault's meta-categories, the axis the graph filters and colours by. The
+allowed list lives in the vault itself, as the editable page `wiki/meta/domains.md` - install the
+seed with `scripts/install-domain-registry.sh`. Every vault-writing agent run gets that list as a
+**closed** set: it files each page under one key, or under `unassigned` when nothing fits, and may
+never coin a new key. New domains are created by a human editing that page (or accepting a
+candidate under System → Status & checks); the rule of thumb is that five or more coherent
+`unassigned` pages are what justifies one. The backfill files existing pages retroactively
 (frontmatter only - it never touches page bodies).
 
-The Maintenance tab also runs the **governance loop**: it continuously (and for free) looks for
-themes among the `unassigned` pages that are big enough to deserve a domain, and shows them as
+System → Status & checks also runs the **governance loop**: it continuously (and for free) looks
+for themes among the `unassigned` pages that are big enough to deserve a domain, and shows them as
 candidates with their page list and a link-cohesion score. Accepting one appends it to the
-registry as a single commit; rejecting one is remembered so it stops being proposed. A toggle
-adds an optional agent pass that judges each candidate - new domain, belongs to an existing one,
-or not a real theme - and pre-fills the proposal. That pass is read-only: only you create
-domains.
-
-The graph renders on a canvas with the force layout in a web worker, so it stays smooth as the
-vault grows - deliberately, since the WSLg Obsidian graph does not. It also updates **live**:
-while an ingest writes pages, a debounced `vault` SSE event refreshes the graph, new nodes
-surface at their neighbors' centroid with a brief flash, existing nodes keep their positions,
-and the camera never jumps. The vault itself is never written from here; only agent runs write
-(see the security model).
+registry as a single commit; rejecting one is remembered so it stops being proposed. A toggle adds
+an optional agent pass that judges each candidate - new domain, belongs to an existing one, or not
+a real theme - and pre-fills the proposal. That pass is read-only: only you create domains.
 
 Every write - an ingest, a maintenance run, or a page edit - is followed by a deterministic,
 read-only check of the pages it touched: missing frontmatter, dead links, orphaned pages, stale
-counters. The findings are **advisory** - streamed to the run's log or shown as a banner after
-an edit - never an automatic rewrite, so the vault is only ever changed by something you or the
-agent did on purpose.
+counters. The findings are **advisory** - streamed to the run's log or shown as a banner after an
+edit - never an automatic rewrite, so the vault is only ever changed by something you or the agent
+did on purpose. The vault itself is never written from the browser except through those page
+edits; everything else that touches it is an agent run (see the security model).
 
 ### Hybrid retrieval (optional)
 
@@ -301,7 +335,7 @@ vault ships an opt-in `wiki-retrieve` skill (contextual chunk prefixes + BM25, f
 [Anthropic's contextual-retrieval method](https://www.anthropic.com/news/contextual-retrieval)),
 and the service provisions and maintains its index:
 
-- Build it once from **Maintenance → Retrieval index → Build index** (or `POST
+- Build it once from **System → Vault stats → Retrieval index** (or `POST
   /api/v1/maintenance/retrieve-index`). It chunks every wiki page and builds a BM25 index under
   the vault's `.vault-meta/` - **derived data, kept out of vault git** and rebuildable at any
   time. The build is deterministic (no agent run, no credential needed) and stays fully
@@ -339,7 +373,7 @@ Two layers, with one deliberate precedence rule:
 
 ```
 env / ~/.config/vault-service/env   →  start-time BASELINE
-settings table (Maintenance tab)    →  runtime OVERRIDES
+settings table (System → Service)   →  runtime OVERRIDES
 effective value                     =  override ?? baseline
 ```
 
@@ -361,8 +395,8 @@ SQLite and survive a restart.
 | `TELEGRAM_ALLOWED_USER_IDS` | - | comma-separated numeric Telegram user ids; **required** once the token is set |
 | `DB_PATH` | `~/.local/share/vault-service/jobs.db` | kept **outside** the vault |
 
-Runtime-settable in the Maintenance tab: watch folder, concurrency, upload limit, git auto-commit,
-and the daily budget. Concurrency and auto-commit apply live; the watch folder and upload limit are
+Runtime-settable under System → Service & config: watch folder, concurrency, upload limit, git
+auto-commit, and the daily budget. Concurrency and auto-commit apply live; the watch folder and upload limit are
 bound at startup and are flagged "Restart required" rather than pretending they took effect.
 
 The bind address is **not** settable through the UI, by design. The credential is settable -
@@ -402,7 +436,7 @@ Setup:
    pick a name and username. BotFather answers with the bot token.
 2. **Find your numeric user id:** message a bot like `@userinfobot`, which replies with your id.
    (Usernames don't work here - they are mutable and spoofable; the allowlist wants the number.)
-3. **Configure** - either in the dashboard under **Maintenance → Settings → "Set up Telegram
+3. **Configure** - either in the dashboard under **System → Integrations → "Set up Telegram
    bot…"** (writes the env file for you and restarts the service under systemd), or by editing
    `~/.config/vault-service/env` directly:
 
@@ -437,7 +471,7 @@ Behavior and limits:
   the conflict and stops - the service itself keeps running.
 - **Setup mode:** `/status` answers (and says so); ingests are refused with guidance until a
   credential is configured.
-- **Disabling:** Maintenance → Settings → "Disable" removes both variables from the env file
+- **Disabling:** System → Integrations → "Disable" removes both variables from the env file
   (and restarts the service under systemd); the token itself is never displayed anywhere after
   saving - revoke it via BotFather if it may have leaked.
 
@@ -547,7 +581,7 @@ directory owned by your user is readable but not writable by agent runs. Pass
 ## Development
 
 ```bash
-npm test                 # server unit tests (vitest) - agent runs are mocked
+npm test                 # server + web unit tests (vitest) - agent runs are mocked
 npm run typecheck        # server + web
 npm run lint             # server (eslint)
 ```
@@ -561,7 +595,9 @@ server/   Fastify backend, TypeScript ESM
   src/telegram/   bot api client, long-poll loop, update router, message formatting
   src/db/         better-sqlite3 schema + migrations
 web/      React + Vite frontend (responsive, PWA-ready)
-scripts/  setup helpers, systemd unit template
+  src/tabs/       the five screens: Home, Chat (Research), Vault (Graph), Library, System
+  src/components/ shared vocabulary: cards, tables, status, charts, the graph canvas
+scripts/  setup helpers, systemd unit template, demo vault + screenshot tooling
 docs/     per-milestone task lists and findings
 ```
 
@@ -569,6 +605,44 @@ Conventions: TypeScript strict, ESM, conventional commits. Pipeline logic (queue
 dedupe, preprocessing, guards) gets unit tests; agent runs are mocked. New source types are added
 as preprocessing plugins, never as special cases in the pipeline core. `npm test` must pass before
 a milestone is called done.
+
+A green `tsc` + `vite build` + test run says nothing about whether a screen actually *renders*
+anything - a shared component that always returned an element once blanked all five screens while
+every check stayed green. `scripts/probe-screens.mjs` opens every screen in a headless browser and
+reports what came up:
+
+```bash
+~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome --headless --disable-gpu --no-sandbox \
+  --remote-debugging-port=9333 --user-data-dir=/tmp/probe-profile about:blank &
+node --experimental-websocket scripts/probe-screens.mjs
+```
+
+### Screenshots
+
+The images in this README are shot from a **synthetic vault**, so nothing private is ever
+published and the whole set can be re-shot whenever the UI changes:
+
+```bash
+# 1. Build a throwaway vault (~100 invented pages, backdated git history) and its database
+node scripts/demo-vault.mjs
+
+# 2. Serve it on a spare port. TELEGRAM_BOT_TOKEN= is REQUIRED: without it this process picks
+#    the real token out of the service env file and knocks the real bot off it (Telegram
+#    allows exactly one poller per token).
+cd server && VAULT_ROOT=~/.local/share/vault-service/demo-vault \
+  DB_PATH=~/.local/share/vault-service/demo-jobs.db PORT=8421 \
+  CLAUDE_CODE_OAUTH_TOKEN=demo-not-a-real-token TELEGRAM_BOT_TOKEN= \
+  node dist/main.js &
+
+# 3. Shoot the screens at 2x into docs/img/
+node --experimental-websocket scripts/shoot-screens.mjs
+```
+
+The generator invents everything it writes - textbook subject matter, document titles with no
+authors, no real people or organisations - and dates the pages relative to today, so the growth
+chart and the "N days ago" columns stay plausible without being frozen in the past. Stop the demo
+process by PID when you are done; a `pkill` on the binary name would take the real service with
+it.
 
 ## API
 
@@ -610,8 +684,19 @@ POST   /maintenance/{lint,lint-fix,research,hot-cache,domain-backfill,domain-rev
 GET    /maintenance/retrieve-index   retrieval index status (provisioned?, chunk count, built-at)
 POST   /maintenance/retrieve-index   (re)build the retrieval index - deterministic, no
                                  credential (works in setup mode), 409 on a pre-v1.7 vault
-GET    /maintenance/runs         recent runs
+POST   /maintenance/tag-fix      bounded tag repair from user-picked drop/merge actions;
+                                 every named tag must exist in the live graph, and one
+                                 invalid action rejects the whole request
+GET    /maintenance/research/profiles   the closed lens list for the composer + its default
+GET    /maintenance/runs         runs the process still holds - "what is happening now"
 GET    /maintenance/runs/:id     poll one run's result
+GET    /maintenance/history      the persistent run log, newest first - "what has happened"
+                                 (`?kind=research`, `?limit=`)
+GET    /maintenance/state        per-kind last-settle state behind the status head
+GET    /sources                  page → the ingested document it came from (built from the
+                                 vault's `.raw/` manifests, not from SQLite)
+GET    /sources/raw?path=…       one ingested document; an allow-list of formats the browser
+                                 cannot execute is served inline, everything else downloads
 GET/PUT /settings                runtime configuration
 POST   /settings/credential      first-run onboarding: {kind: oauth|api-key, value} → writes
                                  the service env file (0600) and restarts; never echoes the
@@ -657,7 +742,7 @@ Check `~/.config/vault-service/env` and that only one credential variable is set
 
 **Everything answers 503 and a "Set up now" banner is showing.** That is setup mode: no credential
 is configured, so nothing that would spawn an agent is allowed to run. Add it under
-Maintenance → Settings; the service restarts itself and picks up any queued work.
+System → Integrations; the service restarts itself and picks up any queued work.
 
 **The watch folder never fires.** Windows mounts (`/mnt/*`) deliver no inotify events; the watcher
 switches to polling automatically. Force it with `WATCH_POLLING=true`.
@@ -678,8 +763,9 @@ The journal logs the first attempt per sender id (`dropped message from non-allo
 user …`), which is also how you spot your own mistyped id.
 
 **Obsidian cannot open the vault over `\\wsl$`.** It can't - Obsidian for Windows fails with
-`EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4. (The Vault
-tab exists precisely so that everyday reading/editing does not need Obsidian at all.)
+`EISDIR … watch`. Run Obsidian inside WSL via WSLg instead; the vault stays on ext4. (The Graph
+and Library screens exist precisely so that everyday reading and editing does not need Obsidian
+at all.)
 
 ---
 

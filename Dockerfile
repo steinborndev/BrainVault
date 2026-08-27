@@ -1,11 +1,11 @@
-# BrainVault (vault-service) — pure Linux userland image (SPEC.md §12.2, TASKS-M5 §5).
+# BrainVault (vault-service) - pure Linux userland image (SPEC.md §12.2, TASKS-M5 §5).
 #
 # Not used under WSL day-to-day; it exists so the service can move to an always-on host
 # without a rewrite. Two things make this image non-trivial and are easy to get wrong:
 #
 #  1. The agent sandbox needs `bubblewrap` (+ `socat`). CLAUDE.md hard rule 4 runs the SDK with
 #     `failIfUnavailable: true`, so if bwrap is missing every agent run FAILS LOUDLY rather than
-#     silently running unconfined. That is the correct behaviour — but it means the runtime image
+#     silently running unconfined. That is the correct behaviour - but it means the runtime image
 #     must ship bwrap, and the container needs unprivileged user namespaces (see README).
 #  2. `better-sqlite3` is a native module. It is compiled in a stage that HAS build tools and
 #     copied into a slim runtime on the same Debian release, so the ABI matches.
@@ -61,7 +61,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # The mount points must be created here AND chowned to that user. Letting the VOLUME instruction
 # below create them implicitly leaves them root-owned, and Docker seeds an anonymous volume from
-# the image directory — so the service failed at startup with SQLITE_CANTOPEN because it could not
+# the image directory - so the service failed at startup with SQLITE_CANTOPEN because it could not
 # create /data/jobs.db. Measured on the first real container run.
 RUN useradd --create-home --uid 10001 vault \
     && mkdir -p /vault /data /inbox \
@@ -74,7 +74,7 @@ COPY --from=build     --chown=vault:vault /app/web/dist ./web/dist
 COPY --chown=vault:vault package.json ./
 COPY --chown=vault:vault server/package.json ./server/
 
-# The vault is mounted, never baked in — it is a configuration value (hard rule 1) and its
+# The vault is mounted, never baked in - it is a configuration value (hard rule 1) and its
 # contents are the user's data. SQLite lives outside the vault (hard rule 1: losing the DB must
 # never damage the vault), so it gets its own volume.
 ENV VAULT_ROOT=/vault \
@@ -85,7 +85,7 @@ VOLUME ["/vault", "/data", "/inbox"]
 
 # NOTE ON BINDING (hard rule 2 / SPEC.md §9): the default bind stays 127.0.0.1, which inside a
 # container means "not reachable from outside". To publish the port you must ALSO configure an
-# auth token — the service refuses to start on a non-loopback bind without one:
+# auth token - the service refuses to start on a non-loopback bind without one:
 #   -e HOST=0.0.0.0 -e HTTP_AUTH_MODE=token -e HTTP_AUTH_TOKEN=<secret>
 # Do not "fix" this by defaulting HOST to 0.0.0.0 here.
 EXPOSE 8420
