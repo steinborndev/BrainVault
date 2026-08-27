@@ -1,8 +1,8 @@
 /**
  * In-memory live log store, keyed by job id. The SSE hook merges `log` events here as they
  * arrive; the JobLog component seeds it with the job's historical lines (one fetch) and then
- * renders live via `useSyncExternalStore`. Merge is idempotent — by `job_logs` rowid when the
- * line carries one, by ts|level|message otherwise — so a seed and the live stream can overlap
+ * renders live via `useSyncExternalStore`. Merge is idempotent - by `job_logs` rowid when the
+ * line carries one, by ts|level|message otherwise - so a seed and the live stream can overlap
  * without duplicating lines (the DoD's live agent log).
  *
  * Memory is bounded: the SSE stream feeds EVERY job's lines through here, viewed or not, so an
@@ -14,7 +14,7 @@ import type { JobLogLine } from '../api/types.ts'
 
 type Listener = () => void
 
-/** Newest lines kept per job — an ingest run logs hundreds, not tens of thousands. */
+/** Newest lines kept per job - an ingest run logs hundreds, not tens of thousands. */
 const MAX_LINES = 2000
 /** Unwatched jobs retained before the least-recently-updated is dropped. */
 const MAX_JOBS = 50
@@ -24,7 +24,7 @@ function keyOf(line: JobLogLine): string {
 }
 
 class LogStore {
-  /** Insertion order doubles as LRU order — re-inserting on merge moves a job to the tail. */
+  /** Insertion order doubles as LRU order - re-inserting on merge moves a job to the tail. */
   private readonly lines = new Map<string, JobLogLine[]>()
   private readonly seen = new Map<string, Set<string>>()
   private readonly listeners = new Map<string, Set<Listener>>()

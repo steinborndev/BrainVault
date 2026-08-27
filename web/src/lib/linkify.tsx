@@ -5,7 +5,7 @@
  * source page becomes a link without the author having to write Markdown link syntax.
  *
  * Safe by construction: it only ever emits <a> elements with an href we built or validated,
- * never raw HTML — ingested content cannot inject markup.
+ * never raw HTML - ingested content cannot inject markup.
  */
 
 import type { ReactNode } from 'react'
@@ -25,13 +25,13 @@ const PATENT_MAX_DIGITS = 13
 /**
  * URL first (so a patent-looking digit run INSIDE a URL is swallowed by the URL), then a
  * patent number: country code, an optional single space, a digit run (commas allowed, no
- * inner spaces — matches how the vault writes them), an optional kind code (A1/B2/…).
+ * inner spaces - matches how the vault writes them), an optional kind code (A1/B2/…).
  */
 const LINK_SRC =
   '(https?:\\/\\/[^\\s<>()]+[^\\s<>().,;:!?\'"])' +
   `|(\\b(${PATENT_CC})\\s?(\\d[\\d,]*\\d)\\s?([A-C]\\d?)?\\b)`
 
-/** Espacenet (EPO) publication-number search — official, worldwide, one scheme for every CC. */
+/** Espacenet (EPO) publication-number search - official, worldwide, one scheme for every CC. */
 export function espacenetUrl(publicationNumber: string): string {
   return `https://worldwide.espacenet.com/patent/search?q=pn%3D${publicationNumber}`
 }
@@ -68,7 +68,7 @@ export function linkifyText(text: string, keyBase: string): ReactNode[] {
           </a>,
         )
       } else {
-        out.push(m[2]!) // a country code + short number that isn't a patent — leave as text
+        out.push(m[2]!) // a country code + short number that isn't a patent - leave as text
       }
     }
     last = m.index + m[0]!.length

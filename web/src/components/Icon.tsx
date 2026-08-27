@@ -1,4 +1,4 @@
-/** Inline SVG icon set — no icon-font dependency, theme-inheriting via `currentColor`. */
+/** Inline SVG icon set - no icon-font dependency, theme-inheriting via `currentColor`. */
 
 export type IconName =
   | 'logo'
@@ -22,8 +22,39 @@ export type IconName =
   | 'upload'
   | 'edit'
   | 'palette'
+  | 'home'
+  | 'book'
+  | 'gear'
+  | 'health'
+  | 'flask'
+  | 'play'
+  | 'commit'
+  | 'chevron'
+  | 'clock'
+  | 'keyboard'
+  | 'bolt'
+  | 'expand'
+  | 'shrink'
+  | 'globe'
+  | 'image'
 
 const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
+  expand: (
+    <>
+      <path d="M12 3.5h4.5V8" />
+      <path d="M8 16.5H3.5V12" />
+      <path d="M16.5 3.5 11.5 8.5" />
+      <path d="M3.5 16.5l5-5" />
+    </>
+  ),
+  shrink: (
+    <>
+      <path d="M16.5 8H12V3.5" />
+      <path d="M3.5 12H8v4.5" />
+      <path d="M11.5 8.5l5-5" />
+      <path d="M8.5 11.5l-5 5" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1.5" />
@@ -46,6 +77,14 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
     <>
       <path d="M14 3v5h5" />
       <path d="M6 3h8l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+    </>
+  ),
+  // An ingested photo or scan, in the Library's source column.
+  image: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="m4.5 17 4.7-4.3 3.4 3.1 3-2.6 3.9 3.4" />
     </>
   ),
   link: (
@@ -74,6 +113,14 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <path d="M16.5 16.5L21 21" />
     </>
   ),
+  // Web egress, on the research console's capability chip.
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.4 2.5 3.6 5.4 3.6 8.5s-1.2 6-3.6 8.5c-2.4-2.5-3.6-5.4-3.6-8.5S9.6 6 12 3.5z" />
+    </>
+  ),
   graph: (
     <>
       <circle cx="6" cy="6" r="2.5" />
@@ -82,7 +129,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <path d="M8.2 7l7.4 0.7M7 8.2l1.4 7.4M16.4 10l-5.8 6.3" />
     </>
   ),
-  // A real page linking into a dashed, not-yet-written one — the ghost-node treatment itself.
+  // A real page linking into a dashed, not-yet-written one - the ghost-node treatment itself.
   gap: (
     <>
       <circle cx="6.5" cy="6.5" r="2.5" />
@@ -90,7 +137,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="15" r="5" strokeDasharray="2.6 2.6" />
     </>
   ),
-  // Member dots inside a tinted hull outline — the cluster overlay in miniature.
+  // Member dots inside a tinted hull outline - the cluster overlay in miniature.
   cluster: (
     <>
       <ellipse cx="12" cy="12" rx="8.5" ry="6" />
@@ -99,7 +146,7 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="9.5" r="1.4" />
     </>
   ),
-  // Two nodes with the directed bridge between them — the network lens's arrowed edge.
+  // Two nodes with the directed bridge between them - the network lens's arrowed edge.
   network: (
     <>
       <circle cx="5.5" cy="18.5" r="2.5" />
@@ -135,6 +182,58 @@ const PATHS: Record<Exclude<IconName, 'logo'>, React.ReactNode> = {
       <circle cx="15" cy="7.5" r="1" />
     </>
   ),
+  home: (
+    <>
+      <path d="M3 10.5L12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M10 21v-6h4v6" />
+    </>
+  ),
+  // Two facing book halves - the library's paired shelves.
+  book: (
+    <>
+      <path d="M4 4h7v16H4z" />
+      <path d="M13 4h7v16h-7z" />
+      <path d="M6.5 8h2M6.5 11h2M15.5 8h2M15.5 11h2" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4L5.3 5.3" />
+    </>
+  ),
+  // A pulse line - the vault's vitals, not a wrench.
+  health: <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />,
+  flask: (
+    <>
+      <path d="M10 3v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3" />
+      <path d="M8 3h8" />
+      <path d="M7.5 15h9" />
+    </>
+  ),
+  play: <path d="M8 5.5v13l10-6.5z" />,
+  // A commit on its line - one revertable point in history.
+  commit: (
+    <>
+      <circle cx="12" cy="12" r="3.5" />
+      <path d="M12 2.5v6M12 15.5v6" />
+    </>
+  ),
+  chevron: <path d="M7 10l5 5 5-5" />,
+  keyboard: (
+    <>
+      <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+      <path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5.5l3.5 2" />
+    </>
+  ),
+  bolt: <path d="M13 2L4 14h6l-1 8 9-12h-6z" />,
 }
 
 export function Icon({ name }: { name: IconName }): React.ReactElement {
@@ -143,16 +242,17 @@ export function Icon({ name }: { name: IconName }): React.ReactElement {
       // The mark: two facing brackets (the [[wikilink]] hemispheres) enclosing the knowledge
       // graph the service builds. Strokes are tuned for ~28px in the topbar; the small-size
       // cut with heavier strokes lives in public/favicon.svg.
+      // Redesign: the mark wears the brand gold; the graph inside inks in the ground color.
       <svg viewBox="0 0 64 64" width="1em" height="1em" aria-hidden="true">
-        <rect width="64" height="64" rx="14" fill="var(--accent)" />
-        <g fill="none" stroke="#fff" strokeWidth="3.8" strokeLinecap="round">
+        <rect width="64" height="64" rx="14" fill="var(--gold)" />
+        <g fill="none" stroke="var(--bg)" strokeWidth="3.8" strokeLinecap="round">
           <path d="M28 18A14 14 0 0 0 28 46" />
           <path d="M36 18A14 14 0 0 1 36 46" />
         </g>
-        <g fill="none" stroke="#fff" strokeWidth="2.8" strokeLinecap="round">
+        <g fill="none" stroke="var(--bg)" strokeWidth="2.8" strokeLinecap="round">
           <path d="M32 32.5 27.5 27M32 32.5 37 26.8M32 32.5 27 38M32 32.5 37 37.6" />
         </g>
-        <g fill="#fff">
+        <g fill="var(--bg)">
           <circle cx="32" cy="32.5" r="3.9" />
           <circle cx="27.5" cy="27" r="2.8" />
           <circle cx="37" cy="26.8" r="2.8" />

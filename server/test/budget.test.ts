@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
+import { SqliteAgentRunStore } from '../src/db/agent-runs.js'
 import { budgetStatus, budgetUnit, startOfToday, nextMidnight, msUntilReset } from '../src/pipeline/budget.js'
 import { baselineSettings, effectiveSettings } from '../src/db/settings.js'
 import type { Config } from '../src/config.js'
 
 let db: Db
 let store: JobStore
+let runs: SqliteAgentRunStore
 
 const makeConfig = (mode: 'oauth' | 'api-key'): Config =>
   ({
@@ -25,6 +27,7 @@ const makeConfig = (mode: 'oauth' | 'api-key'): Config =>
 beforeEach(() => {
   db = openDb(MEMORY_DB)
   store = new JobStore(db)
+  runs = new SqliteAgentRunStore(db)
 })
 
 /** Drives a job to a terminal state with usage, so it counts toward today's budget. */
@@ -37,7 +40,58 @@ function finishedJob(sha: string, status: 'done' | 'failed', costUsd: number, to
   })
 }
 
+/**
+ * A settled agent run in the run log (research, lint, hot cache, …). These spend the same
+ * tokens against the same limits as an ingest, so they count the same way.
+ */
+function finishedRun(id: string, costUsd: number, tokens = 100, ok = true): void {
+  runs.record({
+    id,
+    kind: 'research',
+    label: 'a topic',
+    profileKey: 'broad',
+    ok,
+    pages: [],
+    tokensIn: tokens,
+    tokensOut: tokens,
+    costUsd,
+    error: ok ? null : 'boom',
+    startedAt: new Date().toISOString(),
+    finishedAt: new Date().toISOString(),
+  })
+}
+
 describe('usageSince aggregate', () => {
+  it('counts agent runs alongside ingests, because both spend the same tokens', () => {
+    // Until 2026-08-25 this read `jobs` alone. A vault filled mainly by research therefore
+    // reported a spend of $0, and - the part that mattered - those runs passed the daily
+    // budget untouched, though a single research run can cost more than a day of ingests.
+    finishedJob('a', 'done', 0.5)
+    finishedRun('r1', 2.5, 1000)
+    const usage = store.usageSince(startOfToday().toISOString())
+    expect(usage.ingests).toBe(2)
+    expect(usage.costUsd).toBeCloseTo(3)
+    expect(usage.tokensIn).toBe(1100)
+  })
+
+  it('counts a failed agent run too - it spent its tokens either way', () => {
+    finishedRun('r1', 1.25, 500, false)
+    const usage = store.usageSince(startOfToday().toISOString())
+    expect(usage.ingests).toBe(1)
+    expect(usage.costUsd).toBeCloseTo(1.25)
+  })
+
+  it('leaves agent runs outside the window alone', () => {
+    runs.record({
+      id: 'old', kind: 'lint', label: null, profileKey: null, ok: true, pages: [],
+      tokensIn: 999, tokensOut: 999, costUsd: 9.99, error: null,
+      startedAt: '2020-01-01T00:00:00.000Z', finishedAt: '2020-01-01T00:10:00.000Z',
+    })
+    const usage = store.usageSince(startOfToday().toISOString())
+    expect(usage.ingests).toBe(0)
+    expect(usage.costUsd).toBe(0)
+  })
+
   it('sums tokens/cost and counts ingests over done AND failed runs', () => {
     // A failed run still spent tokens and still competed for the subscription limit, so it
     // must count — otherwise a run of failures blows through a budget unnoticed.
@@ -82,6 +136,28 @@ describe('budget unit depends on the auth mode (SPEC.md §7.1)', () => {
     finishedJob('c', 'done', 0.01)
     expect(budgetStatus(config, settings, store).spent).toBe(3)
     expect(budgetStatus(config, settings, store).exceeded).toBe(true)
+  })
+
+  it('lets an agent run exhaust the budget, not just ingests', () => {
+    // The hole this closes: a research run is the most expensive thing the service does, and
+    // the budget it is supposed to be bounded by could not see it at all.
+    const config = makeConfig('oauth')
+    const settings = effectiveSettings(config, { dailyBudget: 2 })
+    finishedRun('r1', 7.2, 14_803_910)
+    expect(budgetStatus(config, settings, store).spent).toBe(1)
+    finishedRun('r2', 3.1)
+    const status = budgetStatus(config, settings, store)
+    expect(status.spent).toBe(2)
+    expect(status.exceeded).toBe(true)
+  })
+
+  it('counts an agent run against a dollar budget in api-key mode', () => {
+    const config = makeConfig('api-key')
+    const settings = effectiveSettings(config, { dailyBudget: 5 })
+    finishedRun('r1', 7.2)
+    const status = budgetStatus(config, settings, store)
+    expect(status.spent).toBeCloseTo(7.2)
+    expect(status.exceeded).toBe(true)
   })
 
   it('counts USD in api-key mode, where cost is real', () => {

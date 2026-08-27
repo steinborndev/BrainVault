@@ -100,6 +100,8 @@ export interface JobRow {
   notify_channel: string | null
   /** The one vault commit this job produced (v9) — the anchor for "revert this ingest". */
   commit_hash: string | null
+  /** For a `duplicate` row: the id of the job whose content it repeats (v11). */
+  duplicate_of: string | null
   /** Set once that commit has been reverted; the job's own status stays whatever it was. */
   reverted_at: string | null
 }
@@ -179,10 +181,10 @@ export class JobStore {
         .prepare(
           `INSERT INTO jobs
              (id, user_id, batch_id, source, type, original_name, url, sha256, status,
-              raw_path, attempts, created_at, finished_at, notify_channel)
+              raw_path, attempts, created_at, finished_at, notify_channel, duplicate_of)
            VALUES
              (@id, @user_id, @batch_id, @source, @type, @original_name, @url, @sha256, @status,
-              @raw_path, 0, @created_at, @finished_at, @notify_channel)`,
+              @raw_path, 0, @created_at, @finished_at, @notify_channel, @duplicate_of)`,
         )
         .run({
           id,
@@ -200,6 +202,8 @@ export class JobStore {
           // Duplicates are terminal on arrival, so they get a finish time immediately.
           finished_at: isDuplicate ? now : null,
           notify_channel: input.notifyChannel ?? null,
+          // Persisted, not just returned: the history must be able to answer "of what?".
+          duplicate_of: isDuplicate ? original!.id : null,
         })
 
       this.log(
@@ -260,16 +264,25 @@ export class JobStore {
   }
 
   /**
-   * Token/cost totals over jobs whose agent run FINISHED at or after `sinceIso` — the aggregate
+   * Token/cost totals over every agent run that FINISHED at or after `sinceIso` — the aggregate
    * usage display and the daily budget (SPEC.md §7.1, §11.3).
    *
-   * Scope is `done` + `failed` deliberately: a failed run still spent tokens and still competed
-   * for the subscription's limits, so counting only successes would under-report what was used
-   * and let a run of failures blow through a daily budget unnoticed. `duplicate`/`cancelled`
-   * never started an agent run and carry no usage.
+   * BOTH sources, because both spend the same tokens against the same limits: ingest jobs, and
+   * the agent runs the run log records (research, lint, hot cache, tag-fix, domain work). It
+   * read `jobs` alone until 2026-08-25, which made a vault filled mainly by research report a
+   * spend of $0 — and, far worse, let those runs pass the daily budget untouched. A single
+   * research run measured at $7.20 and 14.8M input tokens while the budget saw nothing at all.
    *
-   * `ingests` is the job count — the unit the budget uses in subscription mode, where the limit
-   * is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1).
+   * Scope on the job side is `done` + `failed` deliberately: a failed run still spent tokens and
+   * still competed for the subscription's limits, so counting only successes would under-report
+   * what was used and let a run of failures blow through a daily budget unnoticed.
+   * `duplicate`/`cancelled` never started an agent run and carry no usage. The run log holds
+   * only settled runs and records failures the same way, so it needs no such filter.
+   *
+   * `ingests` is the RUN count across both tables — the unit the budget uses in subscription
+   * mode, where the limit is "Anzahl Ingests" rather than a dollar amount (SPEC.md §7.1). One
+   * agent run counts as one, the same as one ingest: they are the same kind of event, and a
+   * research run is if anything the more expensive of the two.
    *
    * Filtering on `finished_at` is only correct because `failed` is in FINISHED_STATES (it was
    * not before — finding F2; migration v3 backfilled the rows written under the old behaviour).
@@ -282,11 +295,18 @@ export class JobStore {
            COALESCE(SUM(tokens_out), 0) AS tokensOut,
            COALESCE(SUM(cost_usd), 0)   AS costUsd,
            COUNT(*)                     AS ingests
-         FROM jobs
-         WHERE status IN ('done', 'failed')
-           AND finished_at IS NOT NULL AND finished_at >= ?`,
+         FROM (
+           SELECT tokens_in, tokens_out, cost_usd
+             FROM jobs
+            WHERE status IN ('done', 'failed')
+              AND finished_at IS NOT NULL AND finished_at >= :since
+           UNION ALL
+           SELECT tokens_in, tokens_out, cost_usd
+             FROM agent_runs
+            WHERE finished_at >= :since
+         )`,
       )
-      .get(sinceIso) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
+      .get({ since: sinceIso }) as { tokensIn: number; tokensOut: number; costUsd: number; ingests: number }
     return row
   }
 
@@ -391,6 +411,30 @@ export class JobStore {
     return this.db
       .prepare("SELECT * FROM jobs WHERE status IN ('preprocessing', 'ingesting') ORDER BY created_at")
       .all() as JobRow[]
+  }
+
+  /**
+   * Finished ingests that never recorded what they produced: no commit hash AND no page
+   * list, but a raw payload, so they really did run. That pair is the exact signature of a
+   * run whose work was committed by the ingest skill rather than by the service - the
+   * service's own commit then staged nothing and recorded nothing (2026-08-26). The queue
+   * re-derives both from git at startup; once it does, a row stops matching.
+   *
+   * Bounded on purpose: a run that committed nothing at all stays unfixable and would
+   * otherwise be re-examined forever.
+   */
+  settledWithoutPages(limit = 10): JobRow[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM jobs
+          WHERE status = 'done'
+            AND raw_path IS NOT NULL
+            AND commit_hash IS NULL
+            AND (created_pages IS NULL OR created_pages = '' OR created_pages = '[]')
+          ORDER BY created_at DESC
+          LIMIT ?`,
+      )
+      .all(limit) as JobRow[]
   }
 
   /**

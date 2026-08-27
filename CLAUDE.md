@@ -2,7 +2,7 @@
 
 ## What this project is
 
-A local ingestion service + web dashboard on top of a claude-obsidian vault (v1.9.2, Generic mode). It watches a folder and accepts drag-and-drop uploads, preprocesses material (PDF, Office, web, images, text), and runs headless Claude Agent SDK sessions that execute the vault's `ingest` skill fully automatically. A React dashboard (5 tabs: Overview, Ingestion, Query/Chat, Vault, Maintenance) exposes status, queue, chat with citations, and maintenance actions.
+A local ingestion service + web dashboard on top of a claude-obsidian vault (v1.9.2, Generic mode). It watches a folder and accepts drag-and-drop uploads, preprocesses material (PDF, Office, web, images, text), and runs headless Claude Agent SDK sessions that execute the vault's `ingest` skill fully automatically. A React dashboard exposes status, queue, chat with citations, and maintenance actions. Its shell is five tabbed screens in the header row (Home, Research, Graph, Library, System) since the 2026-08-25 redesign pass; SPEC.md §6 still describes the original five tabs and is amended separately (see `docs/tasks/TASKS-REDESIGN.md`).
 
 **The authoritative specification is `SPEC.md` in this repo. Read it before any non-trivial task. When code and spec disagree, the spec wins; when you believe the spec is wrong, say so and ask before deviating.**
 

@@ -1,17 +1,17 @@
 /**
  * Deterministic tag-hygiene analysis (the "lint equivalent" for tags): finds the redundancy
- * patterns that creep in when many independent ingest runs each coin their own tags — the
+ * patterns that creep in when many independent ingest runs each coin their own tags - the
  * concrete trigger was every sub-community of one domain being labelled by the same two
  * near-synonym tags. Read-only by design: this REPORTS; any repair happens through a
  * sanctioned agent run (hard rule 1), for which these findings are the evidence.
  *
  * All rules are deterministic and threshold-based (constants below), computed from the
- * graph data the dashboard already has — no endpoint, no vault access.
+ * graph data the dashboard already has - no endpoint, no vault access.
  */
 
 import type { GraphNode, TagFixAction } from '../api/types.ts'
 
-/** The tag-fix route's hard cap on actions per run — mirrored so UI and status agree. */
+/** The tag-fix route's hard cap on actions per run - mirrored so UI and status agree. */
 export const MAX_TAG_ACTIONS = 20
 
 /** The slice of a graph node the analysis reads (kind gates system pages out). */
@@ -23,7 +23,7 @@ export interface TagPairFinding {
   b: string
   aCount: number
   bCount: number
-  /** Pages carrying BOTH — high overlap is what makes a variant pair worth merging. */
+  /** Pages carrying BOTH - high overlap is what makes a variant pair worth merging. */
   both: number
   /** Implications only: true when the pair implies each other in both directions. */
   mutual?: boolean
@@ -48,7 +48,7 @@ export interface TagReport {
   /** a → b: a's pages (almost) always carry b too, so a adds little beyond b. */
   implications: TagPairFinding[]
   domainEchoes: DomainEchoFinding[]
-  /** Tags used on exactly one page — noise for any tag-based navigation. */
+  /** Tags used on exactly one page - noise for any tag-based navigation. */
   singletons: string[]
 }
 
@@ -56,7 +56,7 @@ export interface TagReport {
 const MIN_STEM = 6
 /** …and the shared prefix must cover at least this share of the shorter tag. */
 const STEM_SHARE = 0.75
-/** a → b needs at least this many pages carrying `a` — below that it's coincidence. */
+/** a → b needs at least this many pages carrying `a` - below that it's coincidence. */
 const MIN_IMPLICATION_SUPPORT = 4
 /** a → b fires when this share of a's pages also carry b. */
 const IMPLICATION_SHARE = 0.95
@@ -66,6 +66,19 @@ const ECHO_DOMAIN_COVERAGE = 0.8
 const ECHO_TAG_CONCENTRATION = 0.9
 /** Domains smaller than this can't meaningfully be "echoed". */
 const MIN_ECHO_DOMAIN_SIZE = 5
+/**
+ * Domain keys that are ALSO a legitimate content tag, so a page carrying both is not
+ * repeating itself and the echo rule must stay quiet about the pair.
+ *
+ * `meta` says what a page IS - vault machinery: an index, a report, a fold - which is a fact
+ * about the page and not only about the shelf it sits on. Every other domain key in `tags:`
+ * is pure repetition of the `domain:` field.
+ *
+ * Kept in step with `DOMAIN_TAGS_THAT_STAY` in server/src/pipeline/maintenance.ts: what the
+ * backfill deliberately leaves in place must not be reported here as redundant, or the two
+ * would pull against each other on every run.
+ */
+const DOMAIN_TAGS_THAT_STAY: ReadonlySet<string> = new Set(['meta'])
 
 /** Word split for the variant comparison: separators and case are never meaningful. */
 const words = (t: string): string[] => t.toLowerCase().split(/[-_\s]+/).filter(Boolean)
@@ -74,13 +87,13 @@ const words = (t: string): string[] => t.toLowerCase().split(/[-_\s]+/).filter(B
  * After the shared stem, a suffix longer than this makes a DIFFERENT word, not a spelling:
  * "product"+"ivity" changes the concept, "biomedic"+"al|ine" does not. Derivational pairs
  * with short suffixes on both sides (research/researcher, regulation/regulator) stay
- * flagged — they are genuinely ambiguous and exactly what the human checkbox is for.
+ * flagged - they are genuinely ambiguous and exactly what the human checkbox is for.
  */
 const MAX_VARIANT_SUFFIX = 4
 
 /**
  * Optimal-string-alignment distance (Levenshtein + adjacent transposition), for short
- * single words. Transpositions count 1 so "fiber"/"fibre" lands at distance 1 — while
+ * single words. Transpositions count 1 so "fiber"/"fibre" lands at distance 1 - while
  * two independent substitutions ("concept"/"context", "product"/"project") stay at 2.
  */
 function osaDistance(a: string, b: string): number {
@@ -122,16 +135,16 @@ function isWordVariant(x: string, y: string): boolean {
   }
   // Spelling twins ("fiber"/"fibre"): one edit or transposition on a shared opening. A
   // plain distance-2 bound flagged "concept"/"context" and "product"/"project" on real
-  // data — two substitutions make a different word, one transposition does not.
+  // data - two substitutions make a different word, one transposition does not.
   return short.length >= 5 && p >= 3 && osaDistance(short, long) <= 1
 }
 
 /**
  * True for tag pairs shaped like spellings of the SAME concept. Compared word by word with
- * equal word counts required — that one rule kills three false-positive families the
+ * equal word counts required - that one rule kills three false-positive families the
  * whole-string stem match produced on real data: base-vs-compound ("person" /
  * "personal-finance", "organization" / "organizational-structure"), and tag hierarchies
- * ("claude" / "claude-ecosystem") — those are different concepts or intentional structure,
+ * ("claude" / "claude-ecosystem") - those are different concepts or intentional structure,
  * not spelling drift. Word-count-preserving pairs still match: "carbon-fiber" ≡
  * "carbon_fibre", "method" / "methods", "biomedical" / "biomedicine".
  */
@@ -146,7 +159,7 @@ function isVariantPair(a: string, b: string): boolean {
 }
 
 export function computeTagReport(nodes: readonly TagNode[]): TagReport {
-  // System pages (reports, logs, index hubs) tag themselves structurally — only knowledge
+  // System pages (reports, logs, index hubs) tag themselves structurally - only knowledge
   // pages say anything about the vault's thematic tag hygiene.
   const pages = nodes.filter((n) => (n.kind ?? 'knowledge') === 'knowledge')
 
@@ -174,7 +187,7 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
   }
   const both = (a: string, b: string): number => pairCount.get(a < b ? `${a}|${b}` : `${b}|${a}`) ?? 0
 
-  // Variants: every distinct pair, string-shape rule. Quadratic in DISTINCT tags — a few
+  // Variants: every distinct pair, string-shape rule. Quadratic in DISTINCT tags - a few
   // hundred tags is ~10⁴..10⁵ cheap prefix comparisons, fine for a memoized report.
   const tags = [...tagCount.keys()].sort()
   const variants: TagPairFinding[] = []
@@ -215,7 +228,7 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
   }
   implications.sort((x, y) => y.both - x.both || x.a.localeCompare(y.a))
 
-  // Domain echoes: the tag blankets the domain AND barely exists outside it — it repeats
+  // Domain echoes: the tag blankets the domain AND barely exists outside it - it repeats
   // what `domain:` already says.
   const domainEchoes: DomainEchoFinding[] = []
   for (const [key, inDomain] of inDomainCount) {
@@ -223,6 +236,9 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
     const dSize = domainSize.get(domain)!
     const tCount = tagCount.get(tag)!
     if (dSize < MIN_ECHO_DOMAIN_SIZE) continue
+    // A tag that IS its domain key is normally the purest echo there is - but for the few
+    // keys that double as a content tag, the pair is intentional and stays.
+    if (tag === domain && DOMAIN_TAGS_THAT_STAY.has(tag)) continue
     if (inDomain / dSize >= ECHO_DOMAIN_COVERAGE && inDomain / tCount >= ECHO_TAG_CONCENTRATION) {
       domainEchoes.push({ tag, domain, tagCount: tCount, domainSize: dSize, inDomain })
     }
@@ -244,12 +260,12 @@ export function computeTagReport(nodes: readonly TagNode[]): TagReport {
 
 /**
  * The preselected recommendation (SPEC §12.7 Stufe a): every actionable finding whose
- * direction is unambiguous — variant merges into the more common spelling, drops of tags
- * that echo a real domain — selected up front so the user unchecks instead of building the
+ * direction is unambiguous - variant merges into the more common spelling, drops of tags
+ * that echo a real domain - selected up front so the user unchecks instead of building the
  * plan from scratch. Greedy and conflict-free by construction: an action that would make a
  * tag both consumed and referenced elsewhere (the `conflictingTag` rule) is left
  * unselected, first come wins (variants before echoes, each in report order). Echoes of
- * `unassigned` are never included — they are missing domains, not redundancy. Capped at
+ * `unassigned` are never included - they are missing domains, not redundancy. Capped at
  * `max` so the preselection never promises more than one fix run applies.
  */
 export function recommendedKeys(report: TagReport, max: number): Set<string> {
@@ -280,7 +296,7 @@ export function recommendedKeys(report: TagReport, max: number): Set<string> {
 /**
  * A tag referenced by two selected repairs where at least one CONSUMES it (drop, or the
  * from-side of a merge), or null when the plan is consistent. Two merges may share a
- * TARGET ("#fibre → #fiber" and "#fibres → #fiber" is fine) — but a tag that is dropped
+ * TARGET ("#fibre → #fiber" and "#fibres → #fiber" is fine) - but a tag that is dropped
  * or merged away must appear nowhere else: "merge #project into #product" plus "merge
  * #project into #projects" is two repairs fighting over one tag, and the agent would have
  * to guess an order. Selection-time guard for the tag-fix run.

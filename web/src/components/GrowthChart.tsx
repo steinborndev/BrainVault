@@ -1,6 +1,6 @@
 /**
  * Area+line chart of cumulative wiki-page growth (SPEC.md §6.1). SVG shapes stretch with the
- * card (preserveAspectRatio none); everything textual — y labels, tooltip, crosshair — is an
+ * card (preserveAspectRatio none); everything textual - y labels, tooltip, crosshair - is an
  * HTML overlay so it never distorts. Hover shows the per-day value.
  */
 
@@ -17,13 +17,15 @@ export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactE
   if (points.length < 2) {
     return (
       <div className="empty">
-        Not enough history for a trend yet — once ingests span several days, the curve appears here.
+        Not enough history for a trend yet - once ingests span several days, the curve appears here.
       </div>
     )
   }
 
   const totals = points.map((p) => p.total)
-  const min = Math.min(...totals)
+  // Zero-based scale: a min-max window turned a 6-page week into a dramatic full-height
+  // climb. Cumulative page totals are honest from zero.
+  const min = 0
   const max = Math.max(...totals)
   const span = max - min || 1
   const stepX = (W - PAD * 2) / (points.length - 1)

@@ -20,7 +20,7 @@ const KIND_INFO: Record<Kind, { title: string; hint: string; placeholder: string
   oauth: {
     title: 'Claude subscription (recommended)',
     hint:
-      'Uses your existing claude.ai subscription — no separate billing. Install the Claude Code ' +
+      'Uses your existing claude.ai subscription - no separate billing. Install the Claude Code ' +
       'CLI, run `claude setup-token` in a terminal, and paste the sk-ant-oat… token here.',
     placeholder: 'sk-ant-oat01-…',
   },
@@ -34,7 +34,7 @@ const KIND_INFO: Record<Kind, { title: string; hint: string; placeholder: string
 }
 
 export function CredentialSetup({ configured }: { configured: boolean }): React.ReactElement {
-  // In setup mode the form is the point — open it; when configured it hides behind a button.
+  // In setup mode the form is the point - open it; when configured it hides behind a button.
   const [open, setOpen] = useState(!configured)
   const [kind, setKind] = useState<Kind>('oauth')
   const [value, setValue] = useState('')
@@ -48,7 +48,7 @@ export function CredentialSetup({ configured }: { configured: boolean }): React.
     },
   })
 
-  // Once written, poll until the restarted process reports the credential, then reload —
+  // Once written, poll until the restarted process reports the credential, then reload -
   // every tab (queue, watcher, chat) needs the fresh server state anyway.
   useEffect(() => {
     if (!result) return
@@ -59,7 +59,7 @@ export function CredentialSetup({ configured }: { configured: boolean }): React.
           if (h.credentialConfigured) window.location.reload()
         })
         .catch(() => {
-          /* server mid-restart — keep polling */
+          /* server mid-restart - keep polling */
         })
     }, 2000)
     return () => clearInterval(timer)
@@ -69,11 +69,11 @@ export function CredentialSetup({ configured }: { configured: boolean }): React.
     return (
       <div className="toast warn">
         {result.restart === 'auto' ? (
-          <>Credential saved. The service is restarting — this page reloads automatically…</>
+          <>Credential saved. The service is restarting - this page reloads automatically…</>
         ) : (
           <>
             Credential saved to the service env file. Restart the service to activate it (
-            <code>systemctl --user restart vault-service</code>, or re-run <code>npm start</code>) —
+            <code>systemctl --user restart vault-service</code>, or re-run <code>npm start</code>) -
             this page reloads automatically once it is back.
           </>
         )}

@@ -114,6 +114,124 @@ describe('MaintenanceRunner state persistence', () => {
     expect(areas[0]).toMatchObject({ kind: 'hot-cache', ok: false, pages: 0, error: 'agent exploded' })
   })
 
+  it('a lint that wrote no report settles as FAILED, not as a silent success', async () => {
+    // The bug this pins down: a lint run exiting cleanly without writing its report left the
+    // dashboard announcing "Lint report written" while the status head still measured the
+    // area from a report weeks older, because the run record said ok and nothing checked the
+    // artifact. The report IS the deliverable - lint-fix is bounded by it.
+    const store = new MemoryMaintenanceStateStore()
+    const runner = makeRunner(store, true)
+    const run = runner.startLint()
+    await waitSettled(runner, run.id)
+
+    expect(runner.getRun(run.id)?.status).toBe('error')
+    expect(store.list()[0]).toMatchObject({ kind: 'lint', ok: false })
+    expect(store.list()[0]!.error).toContain('without writing a report')
+  })
+
+  it('a lint that DID write a report settles as done and carries its path', async () => {
+    const store = new MemoryMaintenanceStateStore()
+    const runner = new MaintenanceRunner({
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      events: new EventBus(),
+      commitMutex: new Mutex(),
+      // The agent writes the report as a real run would, mid-run.
+      runAgent: async () => {
+        fs.writeFileSync(
+          path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-08-25.md'),
+          '# Lint report\n\n## Orphan Pages\n\n- [[Something]]\n',
+        )
+        return okResult('report written')
+      },
+      commit: async () => ({ committed: true, hash: 'abc12345', committedPages: ['wiki/meta/lint-report-2026-08-25.md'] }),
+      stateStore: store,
+    })
+    const run = runner.startLint()
+    await waitSettled(runner, run.id)
+
+    expect(runner.getRun(run.id)?.status).toBe('done')
+    expect(runner.getRun(run.id)?.result?.reportPath).toBe('wiki/meta/lint-report-2026-08-25.md')
+  })
+
+  it('an OLD report cannot stand in for a run that produced nothing', async () => {
+    // Same shape as the vault that surfaced this: a month-old report on disk, and a lint run
+    // that wrote nothing. Without the freshness check the old file made the run look fine.
+    const old = path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-07-24.md')
+    fs.writeFileSync(old, '# Lint report\n\n## Dead Links\n\n- [[Gone]]\n')
+    const past = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000)
+    fs.utimesSync(old, past, past)
+
+    const store = new MemoryMaintenanceStateStore()
+    const runner = makeRunner(store, true)
+    const run = runner.startLint()
+    await waitSettled(runner, run.id)
+
+    expect(runner.getRun(run.id)?.status).toBe('error')
+  })
+
+  it('a research run carries its topic and lens on the tracked record', async () => {
+    // Every surface outside the composer (Home's in-flight list, the sidebar badge, the
+    // inbox) needs to name what is running; the kind alone says only "research".
+    const store = new MemoryMaintenanceStateStore()
+    const runner = makeRunner(store, true)
+    const run = runner.startResearch('solid-state battery manufacturing', 'startups')
+
+    expect(run.label).toBe('solid-state battery manufacturing')
+    expect(run.profileKey).toBe('startups')
+    expect(runner.listRuns()[0]).toMatchObject({ label: 'solid-state battery manufacturing' })
+    await waitSettled(runner, run.id)
+  })
+
+  it('rendering refuses when there is no scan to render from', async () => {
+    // Same shape as lint-fix without a report: the artifact is what BOUNDS the run, so its
+    // absence is a refusal, not a prompt that invites the agent to re-scan on its own.
+    const runner = makeRunner(new MemoryMaintenanceStateStore(), true)
+    expect(() => runner.startLintReport()).toThrow(/no lint scan/i)
+  })
+
+  it('rendering refuses when the newest report is already newer than the scan', async () => {
+    // Otherwise the offer would stand forever after a successful lint, and taking it would
+    // produce a report built from findings older than the one already in the vault.
+    fs.mkdirSync(path.join(vaultRoot, '.vault-meta'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, '.vault-meta', 'lint-scan.json'), '{}')
+    const report = path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-08-25.md')
+    fs.writeFileSync(report, '# report\n')
+    const later = new Date(Date.now() + 60_000)
+    fs.utimesSync(report, later, later)
+
+    const runner = makeRunner(new MemoryMaintenanceStateStore(), true)
+    expect(() => runner.startLintReport()).toThrow(/no lint scan/i)
+  })
+
+  it('rendering starts from a scan a run left behind, whatever it named it', async () => {
+    // The scan that prompted this feature was named by the agent, before the service pinned
+    // a path. Those findings are just as renderable.
+    fs.mkdirSync(path.join(vaultRoot, '.vault-meta'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, '.vault-meta', 'lint_scan_out.json'), '{"dead_links":[]}')
+
+    const store = new MemoryMaintenanceStateStore()
+    const runner = new MaintenanceRunner({
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      events: new EventBus(),
+      commitMutex: new Mutex(),
+      runAgent: async () => {
+        fs.writeFileSync(
+          path.join(vaultRoot, 'wiki', 'meta', 'lint-report-2026-08-25.md'),
+          '# Lint report\n\n## Dead Links\n\n- none\n',
+        )
+        return okResult('rendered')
+      },
+      commit: async () => ({ committed: true, hash: 'abc12345', committedPages: [] }),
+      stateStore: store,
+    })
+    const run = runner.startLintReport()
+    expect(run.kind).toBe('lint')
+    await waitSettled(runner, run.id)
+    expect(runner.getRun(run.id)?.status).toBe('done')
+  })
+
   it('a throwing store never breaks the settle itself', async () => {
     const store: MemoryMaintenanceStateStore = new (class extends MemoryMaintenanceStateStore {
       override record(): void {

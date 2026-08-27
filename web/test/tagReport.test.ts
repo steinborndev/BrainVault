@@ -108,6 +108,27 @@ describe('computeTagReport', () => {
     expect(r.domainEchoes[0]!.domain).toBe('brewing')
   })
 
+  it('leaves #meta on its own domain alone - it is a content tag as well as a key', () => {
+    // The backfill deliberately keeps this one (DOMAIN_TAGS_THAT_STAY in
+    // server/src/pipeline/maintenance.ts). Reporting it as redundant would put the two in a
+    // loop: one puts the tag there on purpose, the other offers to remove it every time.
+    const nodes = [
+      ...Array.from({ length: 8 }, () => page(['meta'], 'meta')),
+      page(['meta'], 'meta'),
+      page([], 'meta'),
+    ]
+    const r = computeTagReport(nodes)
+    expect(r.domainEchoes).toEqual([])
+  })
+
+  it('still flags #meta when it blankets a domain it is not the key of', () => {
+    // The exemption is narrow on purpose: only the tag-equals-its-own-domain pair is
+    // intentional. A key spread across someone else's shelf is a real finding.
+    const nodes = Array.from({ length: 8 }, () => page(['meta'], 'housekeeping'))
+    const r = computeTagReport(nodes)
+    expect(r.domainEchoes.map((e) => e.tag)).toEqual(['meta'])
+  })
+
   it('lists single-use tags and ignores system pages entirely', () => {
     const nodes = [
       page(['once']),

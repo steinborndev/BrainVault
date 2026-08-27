@@ -41,9 +41,53 @@ export interface CommitResult {
   readonly note?: string
 }
 
+/**
+ * `.git/index.lock` is held by every git command that writes the index, and a plain
+ * `git status` is one of them - it refreshes the index and writes it back. Our own commits
+ * are serialized by the shared commit mutex, but the vault is a shared DIRECTORY: the
+ * dashboard's own status polling, Obsidian's git plugin, a terminal, anything can hold the
+ * lock for a few milliseconds at exactly the wrong moment.
+ *
+ * A command that fails this way did no work at all - git bails before touching anything - so
+ * retrying it is safe for reads and writes alike, `commit` included. Measured 2026-08-24: an
+ * ingest's `git add` lost this race, the run's commit was dropped, and its `.raw/` payload
+ * and address counter stayed unversioned (the wiki pages were recovered by the reconcile
+ * pass, which only covers `wiki/**`).
+ */
+const LOCK_RETRIES = 3
+const LOCK_BACKOFF_MS = 120
+
+function isIndexLockContention(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes('index.lock') && message.includes('File exists')
+}
+
 async function git(vaultRoot: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await runTool('git', ['-C', vaultRoot, ...args], { timeoutMs: 60_000 })
-  return stdout
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const { stdout } = await runTool('git', ['-C', vaultRoot, ...args], { timeoutMs: 60_000 })
+      return stdout
+    } catch (err) {
+      // A lock held by a crashed git never clears, so this stays bounded: after the last
+      // attempt the caller sees the original failure, exactly as before.
+      if (attempt > LOCK_RETRIES || !isIndexLockContention(err)) throw err
+      await new Promise((resolve) => setTimeout(resolve, LOCK_BACKOFF_MS * attempt))
+    }
+  }
+}
+
+/**
+ * Read-only git, for the status calls that run OUTSIDE the commit mutex - `/api/v1/stats`
+ * polls one on every SSE tick, and a `done` transition publishes that tick milliseconds
+ * before the run's own commit runs, so an open dashboard sat right in the window.
+ *
+ * `--no-optional-locks` is what keeps a read out of `.git/index.lock`: git then skips the
+ * index write-back it would otherwise do to refresh cached stat info. The reported status is
+ * identical - only the write is skipped (verified against a 400-file repo: the index mtime
+ * moves after a plain `git status` and does not move with the flag).
+ */
+async function gitRead(vaultRoot: string, args: readonly string[]): Promise<string> {
+  return git(vaultRoot, ['--no-optional-locks', ...args])
 }
 
 /**
@@ -61,7 +105,7 @@ async function git(vaultRoot: string, args: readonly string[]): Promise<string> 
 export async function dirtyPaths(vaultRoot: string): Promise<Set<string>> {
   let raw: string
   try {
-    raw = await git(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+    raw = await gitRead(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
   } catch {
     // Not a repo, or git unavailable. Degrade to the Write/Edit-derived pathspec rather than
     // sinking the run: a commit that stages a little less is recoverable, a failed ingest is not.
@@ -85,6 +129,63 @@ export async function dirtyPaths(vaultRoot: string): Promise<Set<string>> {
   return paths
 }
 
+export interface UnversionedPages {
+  /** Wiki pages git has never seen: on disk, absent from history entirely. */
+  readonly untracked: string[]
+  /** Wiki pages whose working copy differs from the last commit. */
+  readonly modified: string[]
+}
+
+/**
+ * Wiki pages that exist on disk but not in git as committed content.
+ *
+ * This is the missing half of finding F4. The commit pathspec is built from a run's
+ * `Write`/`Edit` tool calls, so a page the agent creates with **Bash** is invisible to it -
+ * and the sweep that would catch those (`newWikiPaths`) is deliberately skipped whenever the
+ * run cannot prove it was the sole vault writer, because misattributing a page to the wrong
+ * job is worse than missing it. That trade-off is sound, and it rests on one assumption:
+ *
+ *     "Losing a page from a commit is visible and fixable."
+ *
+ * Nothing made it visible. With concurrency above 1 - and a batch drop routinely puts eight
+ * jobs in flight at once - "not the sole writer" is the normal case, not the exception, so
+ * pages accumulate outside git silently. They still render, still resolve links, still get
+ * indexed; they simply have no history, cannot be reverted, and disappear without trace if
+ * the vault is ever restored from git. This function is what turns that into a fact the
+ * dashboard can state.
+ *
+ * Deliberately NOT included: deletions. A page deleted but not yet committed is a divergence
+ * too, but it is not content at risk, and mixing the two would blur what the number means.
+ *
+ * Costs one `git status` (~8ms on a 750-page vault). Returns empty when git is unavailable,
+ * for the same reason `dirtyPaths` does: this is a report, never a gate.
+ */
+export async function unversionedWikiPages(vaultRoot: string): Promise<UnversionedPages> {
+  let raw: string
+  try {
+    raw = await gitRead(vaultRoot, ['status', '--porcelain', '-z', '--untracked-files=all'])
+  } catch {
+    return { untracked: [], modified: [] }
+  }
+  const untracked: string[] = []
+  const modified: string[] = []
+  const fields = raw.split('\0')
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i]
+    if (entry === undefined || entry.length < 4) continue
+    const status = entry.slice(0, 2)
+    const file = entry.slice(3)
+    // A rename/copy entry carries its origin in the next field; consume it so it is not
+    // misread as a status entry of its own.
+    if (status.startsWith('R') || status.startsWith('C')) i++
+    if (!file.startsWith('wiki/') || !file.endsWith('.md')) continue
+    if (status === '??') untracked.push(file)
+    else if (status.includes('D')) continue
+    else modified.push(file)
+  }
+  return { untracked: untracked.sort(), modified: modified.sort() }
+}
+
 /**
  * Wiki paths that became dirty during a run — `after` minus `before`, scoped to `wiki/`.
  *
@@ -97,13 +198,55 @@ export function newWikiPaths(before: ReadonlySet<string>, after: ReadonlySet<str
   return [...after].filter((p) => !before.has(p) && p.startsWith('wiki/')).sort()
 }
 
-/** Wiki markdown paths from a newline list of files, vault-relative POSIX. */
+/**
+ * Wiki markdown paths from a NUL-separated list of files, vault-relative POSIX.
+ *
+ * NUL-separated, and every caller must pass `-z`. Git's default output QUOTES any path
+ * holding a byte outside plain ASCII and escapes it octally, so
+ * `wiki/questions/… — State of the Art.md` arrives as
+ * `"wiki/questions/… \342\200\224 State of the Art.md"` - which starts with a quote, not
+ * with `wiki/`, and was silently dropped here (2026-08-26). Every page with an em dash or an
+ * umlaut in its name went unrecorded, which in this vault is every research synthesis page:
+ * a run that wrote fifteen pages reported fourteen, and the one page it was FOR was the one
+ * missing. The same trap is already documented one function up for `dirtyPaths`.
+ */
 function wikiPagesFrom(files: string): string[] {
   return files
-    .split('\n')
-    .map((p) => p.trim())
+    .split('\0')
     .filter((p) => p.startsWith('wiki/') && p.endsWith('.md'))
     .map((p) => p.split(path.sep).join(path.posix.sep))
+}
+
+/**
+ * The newest commit that touched `pathspec`, with the wiki pages it changed - or null when
+ * nothing did, or the newest one predates `since`.
+ *
+ * This exists because the service is not the only thing that commits this vault. The wiki
+ * ingest skill commits its own work, and when it wins the race the service's own
+ * `commitVault` finds an empty index and reports `committed: false` - which used to mean the
+ * job recorded no pages and no commit hash at all, even though its work was safely in git
+ * (2026-08-26). Passing this job's `.raw/<job-id>/` as the pathspec is what makes the answer
+ * attributable: that directory belongs to exactly one job, so a commit touching it is that
+ * job's commit and no other's, even at concurrency 2. `since` guards the remaining case -
+ * a run that committed NOTHING would otherwise adopt the older commit that first carried
+ * its raw payload.
+ */
+export async function commitTouching(
+  vaultRoot: string,
+  pathspec: string,
+  since: Date | null = null,
+): Promise<{ hash: string; date: string; pages: string[] } | null> {
+  const line = (await gitRead(vaultRoot, ['log', '-1', '--format=%H %cI', '--', pathspec])).trim()
+  if (line === '') return null
+  const [hash, iso] = line.split(' ')
+  if (hash === undefined || iso === undefined) return null
+  // A second of slack, because git timestamps have second resolution and `since` has
+  // millisecond resolution: a commit made in the same second the run started reads as
+  // fractionally OLDER than the run, and a strict comparison throws away the very commit
+  // this function exists to find.
+  if (since !== null && Date.parse(iso) < since.getTime() - 1000) return null
+  const files = await gitRead(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', hash])
+  return { hash, date: iso, pages: wikiPagesFrom(files) }
 }
 
 /**
@@ -127,7 +270,7 @@ export async function commitPaths(
   // `commit -- <paths>` commits only these paths, leaving anything else staged untouched.
   await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message, '--', ...paths])
   const hash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
-  const files = await git(vaultRoot, ['show', '--name-only', '--pretty=format:', 'HEAD'])
+  const files = await git(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', 'HEAD'])
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }
 
@@ -274,6 +417,6 @@ export async function commitVault(
   }
   await git(vaultRoot, [...AUTHOR_ARGS, 'commit', '--no-verify', '-m', message])
   const hash = (await git(vaultRoot, ['rev-parse', 'HEAD'])).trim()
-  const files = await git(vaultRoot, ['show', '--name-only', '--pretty=format:', 'HEAD'])
+  const files = await git(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', 'HEAD'])
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }

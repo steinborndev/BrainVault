@@ -1,68 +1,120 @@
-/* BrainVault dashboard — one cohesive visual system, theme-aware (dark default + light),
-   responsive from phone to desktop. No UI-framework lock-in (SPEC.md §7): hand-rolled CSS. */
+/* BrainVault dashboard - one cohesive visual system, theme-aware (dark default + light).
+   No UI-framework lock-in (SPEC.md §7): hand-rolled CSS. Redesign 2026-08: night-blue
+   ground, gold brand accent (sparingly: brand mark, working-edge highlights), self-hosted
+   type (Bricolage Grotesque display / Instrument Sans UI / IBM Plex Mono data). Token
+   NAMES are stable - components style through them, never through raw hex. */
 
 :root {
-  --bg: #0f1420;
-  --bg-elev: #171d2b;
-  --bg-elev-2: #1f2637;
-  --border: #2a3346;
-  --border-strong: #3a465f;
-  --text: #e6eaf2;
-  --text-dim: #9aa6bd;
-  --text-faint: #6b7791;
-  --accent: #5b8def;
-  --accent-soft: #23324f;
-  /* The research composer mode — visually distinct from Ask because it has side effects
+  --bg: #0c101b;
+  --bg-elev: #131928;
+  --bg-elev-2: #1a2233;
+  --border: #212c42;
+  --border-strong: #30405f;
+  --text: #e9edf7;
+  --text-dim: #9aa7c2;
+  --text-faint: #78859f;
+  /* The sidebar sits one step below the ground so the content plane reads as raised. */
+  --bg-side: #0a0d16;
+  --accent: #7fa7ff;
+  /* Text ON accent fills (primary buttons, active badges). The dark theme's accent is
+     light, so white-on-accent would wash out - the ground color is the readable ink. */
+  --accent-ink: #0c101b;
+  --accent-soft: #1b2947;
+  /* Brand gold: the mark, the Home "now" edge, design accents. Never a status color. */
+  --gold: #e2b45c;
+  --gold-bg: #332812;
+  /* The research composer mode - visually distinct from Ask because it has side effects
      (web access + vault writes). Violet, validated against both surfaces. */
-  --research: #9085e9;
+  --research: #a78bfa;
   --radius: 12px;
   --radius-sm: 8px;
-  --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Row controls (topbar pills, search trigger, inline buttons) all use this height, so a
+     row can never end up with three slightly different box heights. */
+  --control-h: 32px;
+  /* Width of the graph's standing view panel. One token so the panel, its collapsed
+     variants and the workspace grid can never disagree about it. */
+  --gpanel-w: 252px;
+  /* The status dot. It was written out thirteen times in four sizes, which showed up wherever
+     two lists sat in one panel: Home's state list rendered 8px dots and its channel list
+     directly below rendered 9px ones, in identical rows. `--dot-sm` is for dots inside dense
+     running text (a channel line, a step marker), not a second opinion about status. */
+  --dot: 8px;
+  --dot-sm: 6px;
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --display: "Bricolage Grotesque", "Instrument Sans", "Segoe UI", system-ui, sans-serif;
 
-  --ok: #3fb984;
-  --ok-bg: #133528;
-  --warn: #e0a43b;
-  --warn-bg: #3a2e12;
-  --err: #e5484d;
-  --err-bg: #3a1618;
-  --busy: #5b8def;
-  --busy-bg: #1a2540;
+  --ok: #45c98c;
+  --ok-bg: #12301f;
+  --warn: #e2a64d;
+  --warn-bg: #33270f;
+  --err: #ef5d66;
+  --err-bg: #391418;
+  --busy: #7fa7ff;
+  --busy-bg: #1b2947;
   --muted: #7c88a1;
   --muted-bg: #232a3a;
+
+  /* Categorical page-type scale for the graph's type lens - deliberately NOT the status
+     colors: a bucket is a category, never a health signal. */
+  --type-concept: #6fa1f5;
+  --type-entity: #d08bd6;
+  --type-source: #57bfa8;
+  --type-meta: #8c96ae;
+  --type-root: #b3a7e8;
+  --type-question: #d9b356;
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f4f6fb;
+    --bg: #f2f4f9;
+    --bg-side: #e9ecf3;
     --bg-elev: #ffffff;
-    --bg-elev-2: #eef1f7;
+    --bg-elev-2: #eceff6;
     --border: #dde2ec;
-    --border-strong: #c7cfdd;
-    --text: #1a2233;
-    --text-dim: #566178;
-    --text-faint: #8a94a8;
-    --accent: #3a6fd8;
-    --accent-soft: #e4ecfb;
-    --research: #4a3aa7;
-    --shadow: 0 2px 8px rgba(20, 30, 60, 0.08);
+    --border-strong: #c3cde0;
+    --text: #1a2333;
+    --text-dim: #55627e;
+    --text-faint: #75819b;
+    --accent: #3059c8;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2e9fb;
+    --gold: #a6791f;
+    --gold-bg: #f5ecd7;
+    --research: #6d4fd4;
+    --shadow: 0 2px 10px rgba(20, 30, 60, 0.08);
 
-    --ok: #1c8a5c;
-    --ok-bg: #dcf3e8;
-    --warn: #b47912;
-    --warn-bg: #faf0d7;
-    --err: #cf2b30;
-    --err-bg: #fbe0e1;
-    --busy: #3a6fd8;
-    --busy-bg: #e0e9fb;
+    --ok: #177a4c;
+    --ok-bg: #ddf1e6;
+    --warn: #996712;
+    --warn-bg: #f7ecd4;
+    --err: #c93540;
+    --err-bg: #fae2e4;
+    --busy: #3059c8;
+    --busy-bg: #e2e9fb;
     --muted: #6b7488;
     --muted-bg: #e7ebf2;
+
+    --type-concept: #2f62c9;
+    --type-entity: #a3459f;
+    --type-source: #10796a;
+    --type-meta: #5d6880;
+    --type-root: #6b53c4;
+    --type-question: #8a6410;
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* A class-level `display` beats the UA rule for [hidden], and nearly every control
+   here sets one - so `hidden={…}
+` in JSX would silently render anyway. Restate it
+   with the weight it needs, once, for the whole sheet. */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -76,9 +128,16 @@ body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Display face for the big landmarks; small UI headings stay on the body face. */
+h1,
+h2 {
+  font-family: var(--display);
+  letter-spacing: -0.01em;
 }
 
 a {
@@ -95,87 +154,286 @@ button {
   cursor: pointer;
 }
 
-/* ---- App shell ---- */
+/* ---- App shell: fixed sidebar + slim topbar + per-screen scroll (redesign 2026-08).
+   Three nav groups (Knowledge / Work / System) replace the five flat tabs; every screen
+   owns its scroll position, so switching areas never resets where you were. ---- */
 .app {
   display: flex;
-  flex-direction: column;
-  min-height: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 20px;
-  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-.brand svg {
-  width: 26px;
-  height: 26px;
-}
-
+/* ── Navigation: browser-style tabs in the header row (redesign 2026-08-25, second
+   pass). It was a 216px sidebar while the header row spent itself naming the screen you
+   were already looking at; five screens fit across the top, and every workspace gets that
+   width back. The bar sits on the sidebar ground, the active tab is painted in the screen
+   ground and hangs 1px into the bottom border, so it reads as the surface you are on. ── */
+/* No overflow container here: the active tab deliberately overlaps the header's bottom
+   border, and a scroll container would clip exactly that. */
 .tabs {
   display: flex;
-  gap: 4px;
-  margin-left: 8px;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 .tab {
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
+  position: relative;
+  top: 1px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: background 0.12s, color 0.12s;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tab svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.8;
 }
 .tab:hover {
   background: var(--bg-elev-2);
   color: var(--text);
 }
-.tab.active {
-  background: var(--accent-soft);
+.tab[aria-current='page'] {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--text);
+  font-family: var(--display);
+  font-weight: 600;
+}
+.tab[aria-current='page'] svg {
   color: var(--accent);
+  opacity: 1;
+}
+.tab[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+/* Erases the header's bottom border under the active tab. */
+.tab[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--bg);
+}
+/* The tab's own counter. Two meanings share it, never at once: what is IN FLIGHT (with a
+   pulse, in the busy tone) and, when nothing is running, what is DUE (amber, static). */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--busy);
+  color: var(--accent-ink);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.tab-badge.due {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.topright {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+/* The three chips in the header are one shape: a status dot and a noun. `.status-pill` is
+   the third (it opens a panel rather than a tooltip), and it shares these rules so "the same
+   dot" is literally the same declaration rather than two that drift. */
+.tstat,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h);
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  border-radius: 999px;
+  line-height: 1;
+}
+.tstat:hover,
+.tstat:focus-visible,
+.tstat[aria-expanded='true'] {
+  color: var(--text);
+}
+.tstat .d,
+.status-pill .dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+/* The ring is what makes a dot read as a live state rather than a bullet in front of a
+   label - so every channel that IS live wears it, not just the connection. */
+.tstat .d.ok,
+.status-pill.live .dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+}
+.tstat .d.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent);
+}
+/* The status figures are the first thing to go when the row gets tight - the tabs and the
+   live pill are load-bearing, these are ambient. */
+@media (max-width: 1240px) {
+  .tstat { display: none; }
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  height: 52px;
+  flex: 0 0 52px;
+  display: flex;
+  /* The tabs align to the bottom edge; the status controls centre themselves inside their
+     own box, so the row still has one baseline. */
+  align-items: stretch;
+  gap: 12px;
+  padding: 14px 16px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-side);
+}
+.screens {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.screen {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 22px 24px 48px;
+}
+.screen[hidden] {
+  display: none;
+}
+/* Full-bleed screens (graph, library, research columns) manage their own inner padding. */
+.screen.flush {
+  padding: 0;
+  overflow: hidden;
+}
+.lane {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.lane.wide {
+  max-width: 1800px;
+}
+/* Inside a flush screen the lane has to pass the height through, or the workspace grid
+   below it falls back to content height and pushes the canvas off-screen. */
+.screen.flush .lane {
+  height: 100%;
+  min-height: 0;
 }
 
 .spacer {
   flex: 1;
 }
 
-/* Activity badge on the Ingestion tab — outstanding jobs, visible from every tab. */
-.tab-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
+/* ── Inbox table extras: in-flight rows ride in the same table as the history ────────── */
+.inbox-table tr.live > td {
+  background: color-mix(in srgb, var(--busy-bg) 45%, transparent);
+  border-bottom-color: var(--border-strong);
+}
+.inbox-table tr.live:hover > td {
+  background: color-mix(in srgb, var(--busy-bg) 72%, transparent);
+}
+.inbox-table tr.live.research > td {
+  background: color-mix(in srgb, var(--research) 12%, transparent);
+}
+.inbox-table tr.live.research:hover > td {
+  background: color-mix(in srgb, var(--research) 20%, transparent);
+}
+.inbox-table tr.livehead td {
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  font-size: 10px;
   font-weight: 700;
-  line-height: 1;
-  background: var(--busy);
-  color: #fff;
-  border-radius: 999px;
-  padding: 3px 7px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.inbox-table tr.batchhead td {
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.inbox-table tr.batchhead td {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inbox-table .live-phase {
+  display: block;
+  margin-top: 3px;
+  padding-left: 15px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+/* A fixed-height list would scroll for seven rows; the state filter shows all of them. */
+.domlist.static {
+  overflow: visible;
+}
+
+/* Activity badge (sidebar Inbox item) - outstanding jobs, visible from every screen. */
+/* Research runs get the lens colour, so the badge says WHICH kind of work is running
+   rather than just that something is. */
+.tab-badge.research {
+  background: var(--research);
+  color: #16102b;
 }
 .tab-badge .pulse {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #fff;
+  background: currentColor;
   animation: badge-pulse 1.6s ease infinite;
 }
 @keyframes badge-pulse {
@@ -190,34 +448,14 @@ button {
 .statuswrap {
   position: relative;
 }
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev-2);
-  color: var(--text-dim);
-  font-size: 13px;
-  border-radius: 999px;
-  padding: 4px 12px;
-}
-.status-pill:hover {
-  border-color: var(--border-strong);
+/* Shaped like the status chips beside it, not like a control: no border, no raised ground,
+   no chevron (2026-08-26). It is still a button - hover and focus open the panel, click pins
+   it - but in that row it is one status among three. Its shape comes from the shared
+   `.tstat, .status-pill` rule above; only the hover state is its own. */
+.status-pill:hover,
+.status-pill:focus-visible,
+.status-pill[aria-expanded='true'] {
   color: var(--text);
-}
-.status-pill .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-.status-pill.live .dot {
-  background: var(--ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
-}
-.status-pill .chev {
-  font-size: 10px;
-  color: var(--text-faint);
 }
 .status-pop {
   position: absolute;
@@ -230,6 +468,17 @@ button {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 12px 14px;
+}
+/* The panel floats 8px below the chip. Without this the pointer leaves the wrapper while
+   crossing that gap and the grace timer is the only thing keeping the panel alive; the
+   bridge makes the trip continuous instead of merely forgiven. */
+.status-pop::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  height: 9px;
 }
 .status-row {
   display: flex;
@@ -281,9 +530,8 @@ button {
   background: var(--warn);
 }
 
-/* ---- Info tooltip (ⓘ) — hover, focus AND tap; replaces native title=… ---- */
+/* ---- Info tooltip (ⓘ) - hover, focus AND tap; replaces native title=… ---- */
 .tip {
-  position: relative;
   display: inline-flex;
   vertical-align: middle;
 }
@@ -307,11 +555,10 @@ button {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* Portalled to <body> and positioned from JS (components/Tip.tsx), so no clipped ancestor
+   can slice it and it can flip above/below and clamp to the viewport. */
 .tip-body {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   width: 250px;
   background: var(--bg-elev-2);
   border: 1px solid var(--border-strong);
@@ -324,103 +571,56 @@ button {
   letter-spacing: 0;
   text-transform: none;
   padding: 8px 11px;
-  z-index: 30;
-  display: none;
+  z-index: 200;
 }
-.tip:hover .tip-body,
-.tip:focus-within .tip-body,
-.tip.open .tip-body {
-  display: block;
-}
-
-.content {
-  flex: 1;
-  width: 100%;
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 24px 20px 96px;
+.tip-body code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  word-break: break-all;
 }
 
-/* ---- Bottom nav (mobile) ---- */
-.bottomnav {
-  display: none;
-}
-
-@media (max-width: 680px) {
-  .tabs {
-    display: none;
+/* The dashboard is desktop-only for now (project decision); below ~1000px the shell
+   simply lets the stage scroll horizontally rather than degrading into a mobile layout. */
+@media (max-width: 1000px) {
+  .app {
+    min-width: 1000px;
   }
-  .content {
-    padding: 16px 14px 88px;
-  }
-  .bottomnav {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 30;
-    display: flex;
-    justify-content: space-around;
-    background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
-    backdrop-filter: blur(10px);
-    border-top: 1px solid var(--border);
-    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
-  }
-  .bottomnav button {
-    flex: 1;
-    border: none;
-    background: transparent;
-    color: var(--text-faint);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 2px;
-    font-size: 11px;
-    border-radius: var(--radius-sm);
-  }
-  .bottomnav button.active {
-    color: var(--accent);
-  }
-  .bottomnav button svg {
-    width: 22px;
-    height: 22px;
-  }
-  .bottomnav .nav-icon {
-    position: relative;
-    display: inline-flex;
-  }
-  .bottomnav .nav-badge {
-    position: absolute;
-    top: -4px;
-    right: -10px;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1;
-    background: var(--busy);
-    color: #fff;
-    border-radius: 999px;
-    padding: 2px 5px;
-  }
-  .chat {
-    height: calc(100vh - 160px);
-    height: calc(100dvh - 160px);
+  html,
+  body {
+    overflow-x: auto;
   }
 }
 
-/* ---- Cards & layout ---- */
-.card {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+/* ══ Workspace shell - shared by Graph, Library and Inbox ═════════════════════════════
+   All three are the same shape: an optional full-width bar, then a standing filter panel
+   beside one big box. The rule that matters is that the WORKSPACE owns the padding, so the
+   panel and the box start and end on the same two lines. A column that pads itself (the
+   graph canvas did) or a bar that sits inside one column (the library's did) breaks that,
+   which is exactly how the two edges drifted apart. ══ */
+/* Row 1 explicitly, not by auto-placement: the bar spans both columns, so if a column
+   child is placed first the bar gets pushed into a row of its own BELOW it and the grid
+   silently collapses to one column. Stating the row makes DOM order irrelevant. */
+.ws-bar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
-.card-pad {
-  padding: 16px 18px;
-}
-.section {
-  margin-bottom: 20px;
-}
+
+
+/* ---- Cards & layout ----
+   The `.card` / `.card-pad` / `.section-head` family is gone: it was only ever used by the
+   maintenance tools, and those are hosted INSIDE the System screen, right next to sections
+   built from `.subcard`. Two card languages a click apart - different padding, different
+   radius, one with a shadow - was the most visible seam left after the shell redesign. The
+   tools now use `.subcard.sc-pad` (see the subcard block further down).
+
+   `.section-title` survives for the two headings that are not card heads at all (the run
+   detail's "Pages", the job drawer's log sections). */
 .section-title {
   font-size: 13px;
   font-weight: 600;
@@ -428,21 +628,6 @@ button {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 0 0 10px;
-}
-.section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.section-head .section-title {
-  margin-bottom: 10px;
-}
-.section-head .right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
 }
 
 .grid {
@@ -452,19 +637,36 @@ button {
 .grid.kpis {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
+/* Home's tile strip: four across, one ROW per tile. Label, value with its delta and the
+   sparkline share a line instead of stacking three - 45px per tile, no information lost. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+}
+.kpis .stat {
+  padding: 8px 13px 9px;
+  row-gap: 0;
+}
+.kpis .stat .label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+.kpis .stat .value {
+  font-family: var(--display);
+  font-size: 23px;
+  margin-top: 0;
+}
+.kpis .stat .spark {
+  width: 66px;
+  height: 26px;
+}
+.kpis .stat .sub,
 .grid.two {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 .grid.three {
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-
-/* Overview layout: a 12-col grid so the growth chart gets real width (7/5 + 6/6) instead of
-   the old three-across grid that left the fourth card orphaned in row two. */
-.ov-grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(12, 1fr);
 }
 .ov-grid .col-7 { grid-column: span 7; }
 .ov-grid .col-6 { grid-column: span 6; }
@@ -474,51 +676,9 @@ button {
   .ov-grid .col-6,
   .ov-grid .col-5 { grid-column: span 12; }
 }
-
-/* ---- Status strip (Overview) — the states that can go wrong, as pills ---- */
-.status-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-.spill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-}
-.spill strong {
-  color: var(--text);
-  font-weight: 600;
-}
-.spill.warn {
-  border-color: var(--warn);
-  background: var(--warn-bg);
-}
-.spill .d {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
 .spill .d.ok { background: var(--ok); }
 .spill .d.warn { background: var(--warn); }
 .spill .d.dim { background: var(--muted); }
-/* A spill that navigates (the maintenance badge) — same look, button semantics. */
-button.spill-link {
-  font-family: inherit;
-  cursor: pointer;
-}
-button.spill-link:hover {
-  border-color: var(--accent);
-}
-
 /* ---- Pages-by-type bars ---- */
 .tbars {
   display: flex;
@@ -557,27 +717,59 @@ button.spill-link:hover {
   border-radius: 0 4px 4px 0;
 }
 
-/* ---- Stat tiles ---- */
-.stat {
-  padding: 12px 14px;
-  position: relative;
+/* A single-value progress bar: `<div class="meter"><i style="width:NN%"></i></div>`, with
+   `.over` on the fill when the value has passed its limit. It was only ever styled as
+   `.gx-gaprow .meter`, so the daily-budget bar in System - the one place a reader actually
+   needs a proportion - rendered as nothing at all: no track, and an inline `<i>` with a
+   percentage width but no height. Free-standing here; the gap list keeps its own small
+   variant below. */
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
   overflow: hidden;
 }
-.stat .delta {
-  font-size: 11.5px;
-  font-weight: 600;
-  margin-left: 7px;
-  vertical-align: 2px;
-  letter-spacing: 0;
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s;
 }
+.meter i.over {
+  background: var(--warn);
+}
+
+/* ---- Stat tiles ----
+   Three rows, two columns: the label spans, the number and its sparkline share a row,
+   and the caption row is SHARED by `.sub` and the hover affordance `.goto` - stacked,
+   not stacked up. Both used to cost a row each: the sparkline sat absolutely in space
+   the padding had to leave free, and `.goto` reserved 23px in every tile to render at
+   opacity 0. Together that was a blank line in all four tiles because one of them has
+   a chart. */
+.stat {
+  padding: 11px 14px 10px;
+  border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+}
+.stat .label,
+.stat .sub,
+.stat .value {
+  grid-column: 1;
+}
+/* Same cell: the caption gives way to "where this goes" while the pointer is on it. */
+.stat .sub,
 .stat .delta.good { color: var(--ok); }
 .stat .delta.bad { color: var(--err); }
 .stat .spark {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
+  grid-column: 2;
+  grid-row: 2;
   width: 74px;
-  height: 26px;
+  height: 28px;
   opacity: 0.9;
 }
 .spark polyline {
@@ -599,14 +791,14 @@ button.spill-link:hover {
 .stat .value {
   font-size: 25px;
   font-weight: 700;
-  line-height: 1.1;
-  margin-top: 4px;
+  line-height: 1.15;
+  margin-top: 2px;
   letter-spacing: -0.02em;
 }
 .stat .sub {
   font-size: 12px;
   color: var(--text-dim);
-  margin-top: 2px;
+  transition: opacity 0.12s;
 }
 .stat .value.ok {
   color: var(--ok);
@@ -619,7 +811,22 @@ button.spill-link:hover {
 }
 
 /* ---- Badges ---- */
-.badge {
+/* ── Status pills ───────────────────────────────────────────────────────────────────
+   One shape for every label that names a state. There were four families doing this, each
+   with its own geometry: `.badge` (12px/600 with a leading dot), `.sev` (11px/650 upper
+   case), `.hrow-state` (10.5px/600) and `.lt-flag` (10.5px/600). They differed in ways
+   nobody chose - the same "due" was `badge.deferred` on one screen and `sev.due` on the
+   next.
+
+   The geometry is declared once here and the three narrower families are densities of it,
+   not separate things. The NAMES stay, because they carry meaning the visual tone does not:
+   `sev.due` says a check is overdue, `hrow-state.failed` says a job failed. What was merged
+   is what nobody was choosing on purpose - size, radius, alignment and, below, the colour
+   pairs. */
+.badge,
+.sev,
+.hrow-state,
+.lt-flag {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -629,22 +836,73 @@ button.spill-link:hover {
   border-radius: 999px;
   white-space: nowrap;
 }
+/* Only `.badge` carries the leading dot: it labels one thing on its own, where a bare word
+   would read as running text. The dense variants sit next to a real status dot already. */
 .badge::before {
   content: "";
-  width: 6px;
-  height: 6px;
+  width: var(--dot-sm);
+  height: var(--dot-sm);
   border-radius: 50%;
   background: currentColor;
 }
-.badge.queued { color: var(--muted); background: var(--muted-bg); }
-.badge.preprocessing,
-.badge.ingesting { color: var(--busy); background: var(--busy-bg); }
-.badge.done { color: var(--ok); background: var(--ok-bg); }
-.badge.failed { color: var(--err); background: var(--err-bg); }
-.badge.deferred { color: var(--warn); background: var(--warn-bg); }
-.badge.duplicate,
-.badge.cancelled { color: var(--muted); background: var(--muted-bg); }
+/* Severity of a maintenance check: upper case, because it is a verdict rather than a name. */
+.sev {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* Inside a table row, beside the row's own name: the smallest density. */
+.hrow-state,
+.lt-flag {
+  font-size: 10.5px;
+  padding: 2px 7px;
+}
+/* A library flag follows the page title rather than labelling it, so it needs the gap. */
+.lt-flag {
+  margin-left: 7px;
+}
 
+/* The colour pairs, once. Every pill tone is one of five, and the semantic names of all four
+   families map onto them here rather than each family repeating the same pairs. */
+.badge.done,
+.badge.ok,
+.sev.ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.badge.failed,
+.hrow-state.failed,
+.lt-flag.err {
+  color: var(--err);
+  background: var(--err-bg);
+}
+.badge.deferred,
+.hrow-state.deferred,
+.lt-flag.warn,
+.sev.due {
+  color: var(--warn);
+  background: var(--warn-bg);
+}
+.badge.preprocessing,
+.badge.ingesting,
+.sev.rec {
+  color: var(--busy);
+  background: var(--busy-bg);
+}
+.badge.queued,
+.badge.duplicate,
+.badge.cancelled,
+.hrow-state.duplicate,
+.hrow-state.cancelled,
+.hrow-state.reverted,
+.sev.mut {
+  color: var(--muted);
+  background: var(--muted-bg);
+}
+
+/* The page/job TYPE, not a status: neutral ink on the raised ground, no dot. Shared with
+   the library table's bucket label, which was a separate rule for the same chip. */
 .badge.type {
   color: var(--text-dim);
   background: var(--bg-elev-2);
@@ -657,11 +915,23 @@ button.spill-link:hover {
 }
 
 /* ---- Buttons ---- */
+/* Every button is one row height. The token existed but was only applied inside the graph's
+   control bar, so everywhere else a `.btn` (~31px) and a `.btn.ghost` (~27px) standing in
+   the same row - a box head, a panel head, the article head - were visibly different boxes
+   with different baselines. Height plus centred content, once, for all of them. */
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-h);
+  /* A fixed height only works if the label cannot wrap into a second line - the armed
+     confirm ("Really delete 42 entries? (4)") is the long one that would. */
+  white-space: nowrap;
   border: 1px solid var(--border-strong);
   background: var(--bg-elev-2);
   color: var(--text);
-  padding: 6px 12px;
+  padding: 0 12px;
   border-radius: var(--radius-sm);
   font-weight: 500;
   font-size: 13px;
@@ -674,7 +944,7 @@ button.spill-link:hover {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 .btn.primary:hover {
   filter: brightness(1.08);
@@ -683,7 +953,7 @@ button.spill-link:hover {
   background: transparent;
   border-color: transparent;
   color: var(--text-dim);
-  padding: 4px 8px;
+  padding: 0 8px;
 }
 .btn.ghost:hover {
   background: var(--bg-elev-2);
@@ -693,12 +963,22 @@ button.spill-link:hover {
   border-color: var(--err);
   color: var(--err);
 }
+/* The secondary size: a button that rides along inside a row of text (a table foot, a
+   backlog row, a detail head) rather than being the row's own control. It was used in six
+   places and defined in none, so every "small" button rendered full size. After `.ghost`
+   deliberately, so `btn ghost sm` reads as small rather than as ghost's own padding. */
+.btn.sm {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
 .btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
-
-/* ---- Intake card: dropzone + link/note in one compact card ---- */
+.intake {
+  position: relative;
+}
 .intake {
   display: grid;
   grid-template-columns: 1fr 320px;
@@ -716,20 +996,35 @@ button.spill-link:hover {
     border-bottom: 1px dashed var(--border-strong);
   }
 }
+/* One BAND, not a hero (2026-08-25): the icon sits beside the text instead of above it,
+   which is ~110px of Home's height budget for exactly the same words. A grid, not a flex
+   row, so the headline and its caption still stack while the icon spans both. */
 .dropzone {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  align-content: center;
+  column-gap: 13px;
   border-right: 1px dashed var(--border-strong);
-  padding: 22px 20px;
-  text-align: center;
+  padding: 12px 18px;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s;
+}
+.dropzone .icon {
+  grid-row: 1 / span 2;
+}
+.dropzone h3,
+.dropzone p {
+  grid-column: 2;
 }
 .dropzone:hover,
 .intake.over .dropzone {
   background: var(--accent-soft);
 }
 .dropzone h3 {
-  margin: 6px 0 3px;
-  font-size: 15px;
+  margin: 0;
+  font-size: 14px;
 }
 .dropzone p {
   margin: 0;
@@ -737,45 +1032,19 @@ button.spill-link:hover {
   font-size: 12.5px;
 }
 .dropzone .icon {
-  font-size: 26px;
-  opacity: 0.7;
-}
-.intake-side {
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-}
-.intake-label {
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-faint);
-}
-.intake-cap {
-  font-size: 11.5px;
-  color: var(--text-faint);
-}
-.url-row {
-  display: flex;
-  gap: 8px;
-}
-.url-row input {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-  padding: 8px 12px;
-  font-size: 14px;
-}
-.url-row input:focus {
-  outline: none;
-  border-color: var(--accent);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--bg-elev-2);
+  color: var(--accent);
+  font-size: 17px;
+  opacity: 1;
 }
 
+/* Home bounds its own rows - a section margin inside it would fight the grid gap. */
 .toast {
   margin-top: 12px;
   padding: 10px 14px;
@@ -785,27 +1054,10 @@ button.spill-link:hover {
 .toast.ok { background: var(--ok-bg); color: var(--ok); }
 .toast.err { background: var(--err-bg); color: var(--err); }
 
-/* ---- Job rows ---- */
-.joblist {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* Used by the job drawer. The Inbox's card list became one table (2026-08-25), so the
+   list/batch wrappers that used to sit around these are gone. */
 .job {
   padding: 12px 14px;
-}
-.job-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.job-name {
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 .job-meta {
   display: flex;
@@ -814,11 +1066,6 @@ button.spill-link:hover {
   font-size: 12px;
   color: var(--text-dim);
   margin-top: 6px;
-}
-.job-actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
 }
 .job-error {
   margin-top: 8px;
@@ -831,71 +1078,8 @@ button.spill-link:hover {
   white-space: pre-wrap;
   word-break: break-word;
 }
-
-/* ---- Phase stepper (active jobs) ---- */
-.stepper {
-  display: flex;
-  align-items: center;
-  margin: 10px 0 2px;
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-.step {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-.step .sdot {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 2px solid var(--border-strong);
-  display: grid;
-  place-items: center;
-  background: var(--bg-elev);
-  flex-shrink: 0;
-}
-.step .sdot svg {
-  width: 11px;
-  height: 11px;
-}
-.step.done {
-  color: var(--text-dim);
-}
-.step.done .sdot {
-  border-color: var(--ok);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.step.now {
-  color: var(--busy);
-  font-weight: 600;
-}
-.step.now .sdot {
-  border-color: var(--busy);
-  background: var(--busy-bg);
-}
-.step.now .sdot i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--busy);
-  animation: badge-pulse 1.4s ease infinite;
-}
 @media (prefers-reduced-motion: reduce) {
   .step.now .sdot i { animation: none; }
-}
-.stepline {
-  flex: 0 0 28px;
-  height: 2px;
-  background: var(--border-strong);
-  margin: 0 8px;
-}
-.stepline.done {
-  background: var(--ok);
 }
 .elapsed {
   margin-left: auto;
@@ -905,56 +1089,6 @@ button.spill-link:hover {
 }
 
 /* ---- Batch group in the queue ---- */
-.batch {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.batch-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: var(--bg-elev-2);
-  font-size: 12.5px;
-  color: var(--text-dim);
-}
-.batch-head strong {
-  color: var(--text);
-}
-.batch .job {
-  border: none;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  box-shadow: none;
-}
-
-/* ---- History toolbar (search + count chips) ---- */
-.hist-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-.hist-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-  color: var(--text-faint);
-}
-.hist-search input {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  outline: none;
-  width: 150px;
-  font-size: 13px;
-}
 .chip .chip-n {
   font-size: 11px;
   color: var(--text-faint);
@@ -964,7 +1098,7 @@ button.spill-link:hover {
   opacity: 0.8;
 }
 
-/* Armed (two-step) destructive confirm — red fill + visible countdown. */
+/* Armed (two-step) destructive confirm - red fill + visible countdown. */
 .btn.armed {
   background: var(--err);
   border-color: var(--err);
@@ -1030,7 +1164,7 @@ button.spill-link:hover {
   border-color: var(--accent);
   text-decoration: none;
 }
-/* The chip's anchor part — the buttons are siblings, not children (valid HTML). */
+/* The chip's anchor part - the buttons are siblings, not children (valid HTML). */
 .pagelink-main {
   display: inline-flex;
   align-items: center;
@@ -1041,9 +1175,14 @@ button.spill-link:hover {
   text-decoration: none;
   color: var(--accent);
 }
-.pagelink .bucket {
+/* The page-type kicker beside a page's name (concept / entity / source / …). Free-standing:
+   besides the page link and the graph search it also labels the article head, which rendered
+   it unstyled while the rule was scoped to those two ancestors. */
+.bucket {
   color: var(--text-faint);
   font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 .pagelink .copy {
@@ -1172,11 +1311,11 @@ button.spill-link:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
-/* Domain legend dot inside a filter chip — wears the same color as the domain's nodes. */
+/* Domain legend dot inside a filter chip - wears the same color as the domain's nodes. */
 .chip-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   margin-right: 5px;
 }
@@ -1195,7 +1334,7 @@ button.spill-link:hover {
   max-height: 420px;
   overflow-y: auto;
 }
-/* Collapsed by default — the hot cache is the one arbitrarily long block on the overview.
+/* Collapsed by default - the hot cache is the one arbitrarily long block on the overview.
    The summary row carries the cache's age + the refresh action (no trip to Maintenance). */
 details.hot-cache summary {
   cursor: pointer;
@@ -1208,33 +1347,6 @@ details.hot-cache summary::marker {
 details.hot-cache[open] summary {
   margin-bottom: 10px;
 }
-.hc-summary {
-  /* display:flex drops the native ::marker — the ::before chevron below replaces it. */
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.hc-summary::before {
-  content: "▸";
-  color: var(--text-faint);
-  font-size: 11px;
-  transition: transform 0.15s;
-}
-details.hot-cache[open] .hc-summary::before {
-  transform: rotate(90deg);
-}
-.hc-summary .section-title {
-  margin: 0;
-}
-.hc-meta {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
 .md h1, .md h2, .md h3 { margin: 14px 0 6px; line-height: 1.25; }
 .md h1 { font-size: 20px; }
 .md h2 { font-size: 17px; }
@@ -1249,102 +1361,14 @@ details.hot-cache[open] .hc-summary::before {
   border-radius: 4px;
 }
 .md hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
-
-/* ---- Chat / Research ---- */
-/* Sidebar (sessions) + a full-height thread column: the thread owns the scrolling, the
-   composer is always visible at the bottom, nothing floats in the middle of the viewport.
-   175px ≈ topbar + content padding. */
-.research-layout {
-  display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
-  gap: 16px;
-}
 .chat {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 860px;
+  max-width: 900px;
   margin: 0 auto;
   width: 100%;
-  min-height: 420px;
-  height: calc(100vh - 175px);
-  height: calc(100dvh - 175px);
-}
-
-/* Session sidebar: a list with title + meta scales past the handful of sessions the old
-   horizontal chip strip could hold; rename/delete live on the row (revealed on hover). */
-.sess-side {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 420px;
-  height: calc(100vh - 175px);
-  height: calc(100dvh - 175px);
-}
-.sess-new {
-  justify-content: center;
-}
-.sess-list {
-  flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.sess {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: 2px 4px 2px 0;
-}
-.sess:hover {
-  background: var(--bg-elev);
-}
-.sess.active {
-  background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.sess-main {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.sess-main .st {
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sess.active .sess-main .st {
-  color: var(--accent);
-}
-.sess-main .sm {
-  font-size: 11px;
-  color: var(--text-faint);
-  display: flex;
-  gap: 8px;
-}
-.sess-acts {
-  display: none;
-  align-items: center;
-  flex-shrink: 0;
-}
-.sess:hover .sess-acts,
-.sess.active .sess-acts,
-.sess:focus-within .sess-acts {
-  display: inline-flex;
 }
 .session-act {
   border: none;
@@ -1357,16 +1381,6 @@ details.hot-cache[open] .hc-summary::before {
 }
 .session-act:hover {
   color: var(--err);
-}
-
-.chat-thread {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
 }
 .chat-empty {
   margin: auto;
@@ -1392,8 +1406,12 @@ details.hot-cache[open] .hc-summary::before {
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 30%, transparent);
 }
+/* The answer is the content of the screen, not one side of a chat: it takes the full width.
+   A question still sits to the right at its own size, so the two are told apart by where
+   they are rather than by a strip of empty ground beside the answer. */
 .bubble.assistant {
-  align-self: flex-start;
+  align-self: stretch;
+  max-width: none;
   background: var(--bg-elev);
 }
 .bubble.system {
@@ -1483,15 +1501,6 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text);
 }
 
-/* Save-to-vault at the end of the thread — next to the result it saves. */
-.savebar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-  flex-wrap: wrap;
-  padding: 2px 0;
-}
 .pagelink.unresolved {
   color: var(--text-faint);
   border-style: dashed;
@@ -1503,86 +1512,15 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-faint);
 }
 
-/* One bordered card: hint line (research mode only), then [Ask|Research] · borderless
-   textarea · send. The mode toggle is part of the input, not a floating row of chips.
-   Research mode wears its own accent — it has side effects (web access + vault writes),
-   so the composer must not look like a harmless filter switch. */
-.composer {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-}
-.composer:focus-within {
-  border-color: var(--accent);
-}
-.composer.research-mode,
-.composer.research-mode:focus-within {
-  border-color: var(--research);
-}
-.comp-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-dim);
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--research) 9%, transparent);
-  border-radius: var(--radius) var(--radius) 0 0;
-}
-.comp-hint strong:first-child {
-  color: var(--research);
-}
-.comp-main {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 8px;
-}
-.composer-modes {
-  display: flex;
-  gap: 4px;
-  padding-bottom: 5px;
-}
-.chip.research-on {
-  background: color-mix(in srgb, var(--research) 16%, transparent);
-  border-color: var(--research);
-  color: var(--research);
-}
-.btn.primary.research {
+/* Research violet on a button: the action has side effects (web access + vault writes), so
+   it never wears the neutral accent. Applies with or without `.primary` - the backlog's
+   "Research" button carries `btn sm research` and was rendering as a plain grey button,
+   because the only violet rule was scoped to `.primary` and its sibling `.research-btn`
+   had no call site left at all. */
+.btn.research {
   background: var(--research);
   border-color: var(--research);
-}
-
-/* ---- Research lens picker + run-plan preview (Achse A) ---- */
-.lens-wrap {
-  display: flex;
-  flex-direction: column;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--research) 4%, transparent);
-}
-.lens-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px 2px;
-}
-.lens-label {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-}
-.lens-chips {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding-bottom: 6px;
-  scrollbar-width: thin;
+  color: var(--accent-ink);
 }
 .lens {
   flex-shrink: 0;
@@ -1620,56 +1558,14 @@ details.hot-cache[open] .hc-summary::before {
   background: color-mix(in srgb, var(--research) 22%, transparent);
   color: var(--research);
 }
-.runplan {
-  margin: 4px 12px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  font-size: 12.5px;
-  overflow: hidden;
-}
-.rp-row {
-  display: flex;
-  gap: 10px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.rp-row:last-child {
-  border-bottom: none;
-}
-.rp-k {
-  flex-shrink: 0;
-  width: 74px;
-  color: var(--text-faint);
-}
-.rp-v {
-  min-width: 0;
-  color: var(--text-dim);
-}
-.rp-v .target {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg-elev-2);
-  padding: 1px 6px;
-  border-radius: 5px;
-  word-break: break-word;
-}
-.srcpill {
-  display: inline-block;
-  margin: 0 5px 4px 0;
-  padding: 2px 8px;
-  font-size: 11.5px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.rp-cost b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-/* The lens tag echoed in a running/finished research block's header. */
-.research-head .lens-tag {
+/* The lens tag: the research profile a run was filed under. It appears wherever a run is
+   named - the activity table, the run detail head, the panel's run list - so it is styled
+   free-standing. It used to hang off `.research-head`, an element the second redesign pass
+   removed, which left it rendering as bare text at every remaining call site. */
+.lens-tag {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1678,31 +1574,8 @@ details.hot-cache[open] .hc-summary::before {
   border: 1px solid color-mix(in srgb, var(--research) 45%, transparent);
 }
 
-.composer textarea {
-  flex: 1;
-  resize: none; /* grows with content via JS, capped at 200px */
-  min-height: 36px;
-  max-height: 200px;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  padding: 8px 4px;
-  font: inherit;
-}
-.composer textarea:focus {
-  outline: none;
-}
-
 /* Empty thread: the hint + composer center in the viewport instead of a vast gap with the
    input pinned to the bottom; auto margins on both sides of the group do the centering. */
-.chat.empty-thread .chat-thread {
-  flex: 0 1 auto;
-  overflow: visible;
-  margin-top: auto;
-}
-.chat.empty-thread .composer {
-  margin-bottom: auto;
-}
 
 /* ---- Maintenance ---- */
 /* Two columns on desktop: agent-run tools left, settings right. */
@@ -1712,7 +1585,7 @@ details.hot-cache[open] .hc-summary::before {
   gap: 16px;
   align-items: start;
 }
-/* Focused mode: one status item was clicked — exactly one tool, full width. */
+/* Focused mode: one status item was clicked - exactly one tool, full width. */
 .maint.single {
   grid-template-columns: 1fr;
 }
@@ -1814,7 +1687,7 @@ details.hot-cache[open] .hc-summary::before {
 .wiz-summary-row:last-child {
   border-bottom: none;
 }
-.guided-run > .card + .card {
+.guided-run > .subcard + .subcard {
   margin-top: 16px;
 }
 .mcol {
@@ -1822,7 +1695,7 @@ details.hot-cache[open] .hc-summary::before {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-  /* Settings rows adapt to the COLUMN's width (≈5/12 of the lane), not the viewport —
+  /* Settings rows adapt to the COLUMN's width (≈5/12 of the lane), not the viewport -
      a media query can't see that, a container query can. */
   container-type: inline-size;
 }
@@ -1841,21 +1714,6 @@ details.hot-cache[open] .hc-summary::before {
   margin-bottom: 16px;
 }
 /* Tab-wide severity chips: due (amber) / soon (accent) / healthy (green). */
-.sev {
-  display: inline-flex;
-  align-items: center;
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 2px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.sev.due { color: var(--warn); background: var(--warn-bg); }
-.sev.rec { color: var(--accent); background: var(--accent-soft); }
-.sev.ok { color: var(--ok); background: var(--ok-bg); }
-.sev.mut { color: var(--muted); background: var(--muted-bg); }
 .ms-counts {
   display: inline-flex;
   gap: 8px;
@@ -2124,23 +1982,19 @@ details.hot-cache[open] .hc-summary::before {
   padding: 28px 12px;
   font-size: 14px;
 }
-.stub {
-  text-align: center;
-  padding: 48px 20px;
+/* The failure variant (components/QueryState.tsx): what failed, then why, then the way
+   back. The detail line is the raw message, so it stays quieter than the sentence above it
+   and never dictates the width of the block it sits in. */
+.empty > .qs-line {
+  margin: 0 0 4px;
   color: var(--text-dim);
 }
-.stub .icon {
-  font-size: 40px;
-  opacity: 0.6;
-}
-.stub h2 {
-  margin: 12px 0 6px;
-}
-.skeleton {
-  background: linear-gradient(90deg, var(--bg-elev) 25%, var(--bg-elev-2) 37%, var(--bg-elev) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.4s ease infinite;
-  border-radius: var(--radius-sm);
+.empty > .qs-detail {
+  margin: 0 auto 12px;
+  max-width: 46ch;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  overflow-wrap: anywhere;
 }
 @keyframes shimmer {
   0% { background-position: 100% 0; }
@@ -2160,7 +2014,7 @@ details.hot-cache[open] .hc-summary::before {
   gap: 12px 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  /* Never let a fixed-width input push past the card edge — wrap below the label instead. */
+  /* Never let a fixed-width input push past the card edge - wrap below the label instead. */
   flex-wrap: wrap;
 }
 .setting:last-child { border-bottom: none; }
@@ -2209,7 +2063,7 @@ details.hot-cache[open] .hc-summary::before {
   accent-color: var(--accent);
 }
 
-/* Inline tag — deliberately not .badge, which carries a status dot. */
+/* Inline tag - deliberately not .badge, which carries a status dot. */
 .setting-tag {
   font-size: 11px;
   font-weight: 600;
@@ -2226,12 +2080,6 @@ details.hot-cache[open] .hc-summary::before {
   gap: 8px;
   margin-top: 16px;
 }
-.btn.ghost {
-  background: transparent;
-  color: var(--text-dim);
-}
-.btn.ghost:hover { color: var(--text); }
-
 .toast.warn { background: var(--warn-bg); color: var(--warn); }
 
 .settings-ro-title {
@@ -2266,7 +2114,7 @@ details.hot-cache[open] .hc-summary::before {
 }
 
 /* Narrow settings COLUMN (Maintenance right column on desktop): stack label over control,
-   full-width text inputs — same treatment the small-viewport media query applies. */
+   full-width text inputs - same treatment the small-viewport media query applies. */
 @container (max-width: 480px) {
   .setting {
     flex-direction: column;
@@ -2298,71 +2146,6 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 11px;
   margin-left: 8px;
   cursor: help;
-}
-/* Small screens: the session sidebar becomes a horizontal strip above the thread. */
-@media (max-width: 860px) {
-  .research-layout {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-  .sess-side {
-    height: auto;
-    min-height: 0;
-    flex-direction: row;
-    align-items: center;
-  }
-  .sess-new {
-    flex-shrink: 0;
-  }
-  .sess-list {
-    flex-direction: row;
-    overflow-y: visible;
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-  .sess {
-    flex-shrink: 0;
-    max-width: 220px;
-  }
-  /* On the strip, the meta line is noise — title + actions are enough. */
-  .sess-main .sm {
-    display: none;
-  }
-}
-
-/* Autoresearch block inside the chat thread (not a bubble — it writes vault pages). */
-.research-block {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-elev);
-  padding: 10px 14px;
-}
-.research-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.research-head svg {
-  flex-shrink: 0;
-}
-.research-head strong {
-  color: var(--text);
-}
-
-.budget-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: var(--bg-elev-2);
-  overflow: hidden;
-  margin-top: 4px;
-}
-.budget-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 999px;
-  transition: width 0.3s ease;
 }
 .budget-fill.over { background: var(--warn); }
 
@@ -2423,420 +2206,537 @@ details.hot-cache[open] .hc-summary::before {
 .vault-graph {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  /* Fills the screen's height so the workspace grid below can hand the canvas a real
+     box - the panel and the canvas both scroll inside it, the page itself does not. */
+  height: 100%;
+  min-height: 0;
 }
-/* ═══ Vault toolbar, two tiers (mockup 2026-07-21): a stable VIEW bar for how the graph
-   is drawn, and the growing DOMAIN filter band for what is in it. Splitting by intent is
-   what keeps a filter change from ever reflowing the render controls. ═══ */
-.viewbar {
+/* ═══ Graph workspace (rework 2026-08-24): a standing VIEW PANEL beside the canvas,
+   replacing the two stacked toolbar tiers and the two dropdowns inside them.
+
+   The panel is a column, which is what makes it work: the domain list - the one control
+   that grows with the vault - takes the leftover height and scrolls on its own, while
+   everything above it stays in view. The old horizontal band had to either wrap (and
+   reflow the render controls) or hide its overflow behind a panel. ═══ */
+.graph-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.gpanel,
+.graph-main {
+  min-height: 0;
+}
+.gpanel {
+  display: flex;
+  flex-direction: column;
+  /* Scrolls, never clips: the domain list inside takes the leftover height and scrolls on
+     its own, but on a short window the fixed sections above it can still outgrow the panel
+     and must stay reachable. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+/* The panel scrolls as a whole only when its own sections overflow; the domain list
+   inside it (`.gp-sec.grow`) takes the leftover height and scrolls on its own. */
+.gpanel > .gp-sec:last-child {
+  border-bottom: 0;
+}
+.gp-sec {
+  padding: 11px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.gp-sec:last-child {
+  border-bottom: 0;
+}
+/* A section that takes what is left of the panel and scrolls inside itself. `flex-basis: 0`
+   rather than `auto` is what makes that true: with `auto` the section starts at its content
+   height, so a long list pushed the panel past its box and the WHOLE column scrolled - the
+   sections below it went off the bottom. Two such sections in one panel (research runs and
+   conversations) then split the leftover height evenly, which is the point. */
+.gp-sec.grow {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 120px;
+}
+.gp-sec.grow > .domlist {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.gp-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 8px;
 }
-.vb-eyebrow {
-  font-size: 11px;
+.gp-head .spacer {
+  flex: 1;
+}
+/* A head is 24px of content, and anything that APPEARS in it must fit that - a `.btn` is
+   `--control-h` (32px), so a Reset or a Clear that shows up the moment a filter is picked
+   made its own head 8px taller than it was a click earlier, and pushed every section under
+   it down the screen. The research rail lost its Clear button over exactly this bug
+   (2026-08-26); sizing the control to the row it sits in fixes it for every panel at once,
+   and a secondary affordance beside a 10.5px label has no business being 32px anyway. */
+.gp-head .btn {
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+.gp-eyebrow {
+  font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-faint);
-  margin-right: 2px;
-}
-.vb-sep {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-}
-.vb-spacer {
-  flex: 1 1 40px;
-}
-.overlays {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.overlays .grp-label {
-  font-size: 11px;
-  color: var(--text-faint);
-  letter-spacing: 0.04em;
-}
-/* View-bar control: dropdown trigger or toggle. Rectangular (radius-sm), unlike the round
-   filter chips — the shape difference IS the filter-vs-view distinction. */
-.ctl {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  border-radius: var(--radius-sm);
-  padding: 6px 11px;
-  font-size: 12.5px;
-  font-weight: 500;
   white-space: nowrap;
 }
-.ctl:hover {
-  color: var(--text);
-  border-color: var(--accent);
-}
-.ctl.on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.ctl svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.ctl-val {
-  color: var(--text);
-  font-weight: 600;
-}
-.ctl.on .ctl-val {
-  color: var(--accent);
-}
-
-/* Communities control: one bordered unit — a label plus two segmented toggles (Areas /
-   Bridges), the two views of the same clustering. Sized to sit flush with the .ctl buttons in
-   the overlays row: same border, radius, vertical padding (6px) and font (12.5px), so the box
-   height matches exactly and nothing rides higher. */
-.communities {
-  display: inline-flex;
-  align-items: stretch;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  background: var(--bg-elev);
-  white-space: nowrap;
-}
-.communities.active {
-  border-color: var(--accent);
-}
-.communities .cm-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 11px;
-  font-size: 12.5px;
-  /* Match the .ctl buttons' line box. .ctl is a <button>, and form controls do NOT inherit
-     the body line-height — they render at the UA `line-height: normal` (~15px box at 12.5px).
-     The label is a <span>, so it must state `normal` explicitly or it would inherit the body
-     1.5 and stand ~4px taller than the neighbouring .ctl buttons (measured). */
-  line-height: normal;
-  font-weight: 500;
-  color: var(--text-dim);
-  background: var(--bg-elev-2);
-  border-right: 1px solid var(--border-strong);
-}
-.communities .cm-label svg {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-.communities .cm-seg {
-  display: inline-flex;
-  align-items: center;
-  border: none;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-dim);
-  padding: 6px 12px;
-  font-size: 12.5px;
-  line-height: normal;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-}
-.communities .cm-seg:last-child {
-  border-right: none;
-}
-.communities .cm-seg:hover {
-  color: var(--text);
-  background: var(--bg-elev-2);
-}
-.communities .cm-seg.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-/* View-bar dropdowns sit at the LEFT of the row now — anchor their menus left so they
-   can't extend past the viewport edge (the generic .dropdown-menu anchors right). */
-.viewbar .dropdown-menu {
-  left: 0;
-  right: auto;
-}
-
-/* ── The domain filter band ── */
-.domainband {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-}
-.db-head {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex-shrink: 0;
-  padding-right: 4px;
-}
-.db-head .lab {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+.gp-state {
+  font-size: 11px;
   color: var(--text-faint);
 }
-.db-head .sel {
-  font-size: 11px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
+.gp-none {
+  padding: 8px 4px;
+  font-size: 12px;
+  color: var(--text-faint);
 }
-.db-divider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border);
-}
-.db-scroll {
+
+/* ── View pills. Six options in the space the three-row radio list took, so the
+   diagnostic lenses no longer need a fold of their own. What each one means is said
+   on demand, in the hint line below. ── */
+.pillrow {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  overflow-x: auto;
-  /* No visible scrollbar: a space-taking one shifts the chips off the band's vertical
-     center by exactly its height, and how much that is depends on the browser's scrollbar
-     mode (classic vs overlay) — not compensatable in CSS. The edge fades signal overflow,
-     wheel/drag still scroll, and the "All domains" panel reaches everything regardless. */
-  scrollbar-width: none;
-  padding: 2px 4px;
-  flex: 1 1 auto;
-  min-width: 0;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-}
-.db-scroll::-webkit-scrollbar {
-  display: none;
-}
-.db-scroll .chip {
-  flex: 0 0 auto;
-}
-/* With a selection active, the unselected chips recede instead of losing their accent. */
-.chip.dimmed {
-  opacity: 0.45;
-}
-.db-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-.db-clear {
-  display: inline-flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 5px;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
 }
-.db-clear:hover {
-  color: var(--text);
-  border-color: var(--err);
-}
-.db-more {
-  position: relative;
-}
-.db-more-btn {
+.viewpill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 4px 11px;
+  background: transparent;
+  color: var(--text-dim);
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.db-more-btn:hover,
-.db-more-btn.on {
+.viewpill:hover:not(:disabled) {
   color: var(--text);
+  border-color: var(--border-strong);
+}
+.viewpill[aria-checked='true'] {
+  background: var(--accent-soft);
   border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }
-/* The scalability story: every domain, searchable, in a two-column grid. */
-.db-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 40;
-  /* Wide enough that two columns of real domain names (knowledge-management,
-     materials-science) fit without ellipsizing; the ellipsis stays as fallback only. */
-  width: min(480px, 90vw);
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: 12px;
+.viewpill:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.db-panel .p-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
-  margin-bottom: 10px;
-  color: var(--text-faint);
-}
-.db-panel .p-search input {
-  border: none;
-  background: transparent;
-  color: var(--text);
-  outline: none;
-  font-size: 13px;
-  width: 100%;
-}
-.db-panel .p-grid {
+/* One filter per row. At 252px the labels ("Startups & funding") wrapped into a ragged
+   three-line block whose height changed with the label set; as full-width rows they read as
+   the list they are, and the counts line up on the right. Scoped to the modifier, because
+   Home, Library and the Graph want the same pill as a wrapping chip. */
+.pillrow.stacked {
   display: grid;
-  /* minmax(0, 1fr): without the explicit 0 minimum, a long domain name's min-content
-     width wins over the fr split, pushes the columns past the panel and forces a
-     horizontal scrollbar — the names must ellipsize instead. */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
-  max-height: 260px;
-  overflow-y: auto;
-  overflow-x: hidden;
 }
-.p-row {
+.pillrow.stacked .viewpill {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  border-radius: 6px;
-  padding: 6px 8px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  background: none;
+  width: 100%;
+  border-radius: var(--radius-sm);
   text-align: left;
 }
-.p-row:hover {
-  background: var(--bg-elev-2);
-}
-.p-row.active {
-  color: var(--text);
-  border-color: var(--border);
-  background: var(--bg-elev-2);
-}
-.p-row .nm {
+.pillrow.stacked .viewpill > .pl {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pillrow.stacked .viewpill > .pn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* Two per row, for a set of short labels. Home's time range is four words of one or two
+   syllables, and four rows of them cost the channel list below - the one section that grows
+   with the vault - a third of the height it has to read in. Same pill, same count on the
+   right, half the rows. */
+.pillrow.stacked.two {
+  grid-template-columns: 1fr 1fr;
+}
+.viewpill .pd {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+}
+.viewpill[aria-checked='true'] .pd {
+  opacity: 1;
+}
+/* Fixed height and one line, always: this sits above the rest of the panel, so a hint
+   that wrapped for some options and not others would shift everything below it every
+   time the pointer crossed the row. */
+/* The wrapping variant, for hints that explain rather than swap on hover. The fixed-height
+   one above exists so the graph's hover hints do not reflow the panel under the pointer. */
+/* Home and the activity rail put a sentence here and want it to wrap. Research wants a
+   fixed one-line slot, which is the base - so the multi-line case is the modifier. */
+.pillhint.wrap {
+  height: auto;
+  white-space: normal;
+  line-height: 1.45;
+}
+/* One line, fixed. The lens explains itself in the console now; what is left here is the
+   one thing the console cannot say - that in ask mode no lens applies - and the slot keeps
+   its height in both modes so the sections under it never move. */
+.pillhint {
+  height: 17px;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.p-row .n {
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-}
-.p-row .chk {
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  border: 1.5px solid var(--border-strong);
-  flex-shrink: 0;
+.lenslist {
   display: grid;
-  place-items: center;
-  font-size: 10px;
-  color: #fff;
+  gap: 2px;
 }
-.p-row.active .chk {
-  background: var(--accent);
+/* One line per lens. Four two-line descriptions cost ~90px of a rail that also has to hold
+   the filter, the running totals and the queue - and the description belongs next to the
+   composer it shapes, which is where it went. */
+.lensopt {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 9px;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+.lensopt:hover:not(:disabled) {
+  background: var(--bg-elev-2);
+}
+.lensopt[aria-checked='true'] {
+  background: var(--accent-soft);
   border-color: var(--accent);
 }
-.p-none {
-  grid-column: 1 / -1;
-  color: var(--text-faint);
-  font-size: 12px;
-  padding: 6px 8px;
+.lensopt:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
-.db-panel .p-foot {
+.lensopt .radio {
+  width: 13px;
+  height: 13px;
+  margin-top: 3px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+}
+.lensopt[aria-checked='true'] .radio {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 42%, transparent 45%);
+}
+.lensopt .lname {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+.lensopt .ldesc {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-faint);
+}
+
+/* ── Switch rows for the binary view options. ── */
+.gp-toggles {
+  display: grid;
+  gap: 2px;
+}
+.rowtoggle {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
+  gap: 9px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  text-align: left;
 }
-.db-panel .p-foot .count {
+.rowtoggle:hover {
+  background: var(--bg-elev-2);
+}
+.rowtoggle .sw {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background 0.15s;
+}
+.rowtoggle .sw::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-elev);
+  transition: transform 0.15s;
+}
+.rowtoggle[aria-pressed='true'] .sw {
+  background: var(--accent);
+}
+.rowtoggle[aria-pressed='true'] .sw::after {
+  transform: translateX(12px);
+}
+.rowtoggle .rt-text {
+  min-width: 0;
+}
+.rowtoggle .tname {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+}
+.rowtoggle .tdesc {
+  display: block;
+  font-size: 11px;
+  line-height: 1.3;
   color: var(--text-faint);
-  font-size: 11.5px;
+}
+.rowtoggle .tn {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ── Disclosure. The closed summary carries the state inside it, so folding something
+   away can never hide that it is switched on. ── */
+.fold {
+  margin-top: 7px;
+}
+.fold-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+}
+.fold-summary:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.fold-summary .caret {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform-origin: 30% 50%;
+  transition: transform 0.15s;
+}
+.fold.open .fold-summary {
+  color: var(--text);
+}
+.fold.open .fold-summary .caret {
+  transform: rotate(90deg);
+}
+.fold-state {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.fold-state.lit {
+  color: var(--accent);
+}
+.fold-body {
+  padding-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fold-summary .caret,
+  .rowtoggle .sw,
+  .rowtoggle .sw::after {
+    transition: none;
+  }
+}
+
+/* ── Page-type chips and the domain list. ── */
+.typechips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.chip.dimmed,
+.domrow.dimmed {
+  opacity: 0.45;
+}
+.domlist {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  flex: 1;
+  min-height: 84px;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.domrow {
+  display: grid;
+  grid-template-columns: 9px 1fr auto;
+  gap: 9px;
+  align-items: center;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  text-align: left;
+}
+.domrow:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.domrow.active {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font-weight: 500;
+}
+.domrow .dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+}
+.domrow .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.domrow .n {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+/* The panel's search section, at the very top: one field, no eyebrow - what it does is
+   the placeholder's job, and a heading here would only push the first real filter down. */
+/* A count in a section head, as opposed to `.gp-state` which names the current CHOICE.
+   Research was using `.gp-state` for "how many runs are in this list", which reads as if 12
+   were the selected value. */
+.gp-count {
+  font-size: 11px;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }
-@media (max-width: 720px) {
-  .vb-eyebrow,
-  .overlays .grp-label,
-  .db-head,
-  .db-divider {
-    display: none;
+.gp-find {
+  padding: 10px 12px;
+}
+.gp-find .gp-search {
+  height: 30px;
+  margin-bottom: 0;
+}
+.gp-find .gp-search input {
+  font-size: 13px;
+}
+.gp-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  margin-bottom: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.gp-search svg {
+  color: var(--text-faint);
+  flex: none;
+}
+.gp-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* ── What is in scope, said in words. A shrinking count alone cannot tell a domain filter
+   from a type filter from a search. Lives in the canvas bar since the density pass; the
+   `.gtopline` wrapper it used to sit in is gone, and so are its rules - a stale selector
+   here is not harmless, it took the shortcut popover off-screen with it. ── */
+.scopeline {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scopeline strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── Fullscreen: the graph on its own. The panel and the context line step aside, and
+   the lens - the only control that belongs to the drawing itself - floats over it. ── */
+.vault-graph.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
+}
+.vault-graph.fullscreen .gpanel {
+  display: none;
+}
+.vault-graph.fullscreen .graph-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 1100px) {
+  .graph-workspace {
+    grid-template-columns: 208px minmax(0, 1fr);
   }
 }
 
 /* Generic dropdown (e.g. the page-type filters above the graph). */
 .dropdown {
   position: relative;
-}
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  padding: 6px;
-}
-.dropdown-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text);
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.dropdown-item:hover {
-  background: var(--bg-elev-2);
-}
-.dropdown-item .count {
-  margin-left: auto;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-.dropdown-item input {
-  accent-color: var(--accent);
-}
-.dropdown-item em {
-  font-style: normal;
-  color: var(--text-dim);
-}
-.dropdown-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 4px 2px;
 }
 .graph-search {
   position: relative;
@@ -2850,15 +2750,16 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text-dim);
 }
 /* The search sits ON the canvas (top-right), mirroring the zoom controls top-left. */
-.graph-search-overlay {
-  position: absolute;
-  top: 10px;
-  right: 12px;
+/* In the canvas bar now, not floating over the corner it used to share with it. The
+   result list still drops from the field, so the field stays the positioning context. */
+.graph-search-inbar {
+  position: relative;
   z-index: 5;
+  flex: none;
+  width: min(300px, 34%);
   background: var(--bg);
-  width: min(320px, calc(100% - 140px));
 }
-.graph-search-overlay input {
+.graph-search-inbar input {
   min-width: 0;
   flex: 1;
 }
@@ -2876,7 +2777,7 @@ details.hot-cache[open] .hc-summary::before {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: var(--shadow);
-  /* Show as many matches as the canvas has room for, then scroll — the whole point is
+  /* Show as many matches as the canvas has room for, then scroll - the whole point is
      that no match is out of reach. Bounded so it never runs off the drawing area. */
   max-height: min(60vh, 540px);
   overflow-y: auto;
@@ -2899,15 +2800,12 @@ details.hot-cache[open] .hc-summary::before {
   background: var(--bg-elev-2);
 }
 .graph-search-results .bucket {
-  color: var(--text-faint);
-  font-size: 10px;
-  text-transform: uppercase;
   flex-shrink: 0;
 }
 /* Domain hits sit above the page hits; a color dot ties them to their filter chip. */
 .graph-search-results .dom-hit .dom-dot {
-  width: 9px;
-  height: 9px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex-shrink: 0;
   align-self: center;
@@ -2949,13 +2847,6 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 14px;
   text-align: center;
 }
-/* Graph stats live in the toolbar row, not a lost mini-footer under the canvas. */
-.vtool-stats {
-  font-size: 12px;
-  color: var(--text-faint);
-  white-space: nowrap;
-}
-
 /* Focus mode: one row, one segmented control for the neighborhood depth. Card-framed so
    it reads as a sibling of the domain band, not a loose text line (mockup 2026-07-21). */
 .focusbar {
@@ -2992,8 +2883,8 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text);
 }
 .clusterbar .cb-dot {
-  width: 9px;
-  height: 9px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -3034,7 +2925,7 @@ details.hot-cache[open] .hc-summary::before {
   font-weight: 600;
 }
 
-/* ⋯ overflow menu (page head) — rare/destructive actions, not bare icons in the row. */
+/* ⋯ overflow menu (page head) - rare/destructive actions, not bare icons in the row. */
 .overflow-wrap {
   position: relative;
 }
@@ -3086,19 +2977,63 @@ details.hot-cache[open] .hc-summary::before {
   line-height: 1.4;
   color: var(--warn);
 }
+/* The graph panel: a header row (`.graph-controls`) over the drawing (`.graph-canvas-area`),
+   one card, one border. The bar used to float over the canvas as its own bordered box -
+   a box in a box, with the graph still drawing full-height underneath it, so the top of
+   the drawing was permanently hidden behind the bar. */
 .graph-canvas-wrap {
   position: relative;
-  /* No `flex: 1` here: in a column flex container it sets flex-basis:0 and OVERRIDES the
-     height below, collapsing the canvas to min-height. */
-  min-height: 420px;
-  /* vh first, dvh second: a browser without dvh keeps the vh value instead of
-     dropping the declaration and collapsing to min-height. */
-  height: calc(100vh - 230px);
-  height: calc(100dvh - 230px);
+  display: flex;
+  flex-direction: column;
+  /* Takes the height the stage has left, rather than computing it from a viewport
+     minus a constant. The constant was the toolbar tiers the view panel replaced; any
+     such number is wrong the moment the chrome above the canvas changes, and it was
+     wrong in fullscreen, where that chrome is not on screen at all. */
+  flex: 1 1 auto;
+  min-height: 320px;
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   background: var(--bg-elev);
+}
+/* The panel's header row: in the flow above the drawing, divided from it by one rule -
+   not a floating box with a border of its own. */
+.graph-controls {
+  flex: none;
+  /* Positioned so it wins over the drawing below it: the search dropdown hangs out of the
+     bar into the canvas area, and the area is itself positioned and later in the DOM. */
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.graph-controls .scopeline {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.graph-controls .btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 0 10px;
+}
+.graph-controls .btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The drawing's own box: it takes the height the header leaves, and it is what the canvas
+   measures itself against (GraphCanvas sizes the canvas from its PARENT) and what every
+   corner overlay - legend, trail, tooltip, status - positions against. */
+.graph-canvas-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .graph-canvas {
   display: block;
@@ -3144,27 +3079,27 @@ details.hot-cache[open] .hc-summary::before {
   white-space: nowrap;
 }
 
-/* Graph stage: the canvas plus the explorer panel that slides over its right edge. The
-   canvas-wrap keeps its own height; the stage just gives the overlay a positioning box. */
+/* Graph stage: canvas + explorer side by side. The panel used to be absolutely positioned
+   over the canvas's right edge, where it covered the search overlay (same z-index, later in
+   the DOM) - pressing `/` then focused an invisible field. It docks now: the canvas shrinks,
+   every canvas-corner control stays reachable. */
 .graph-stage {
   position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  /* No padding: the workspace already inset this column, and a second inset here is
+     exactly what put the canvas 10px inside the panel's top and bottom edges. */
+}
+.graph-stage > .graph-canvas-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* A tappable text that reads as inline prose (the "N unresolved" stat) but acts as a button. */
-.linklike {
-  background: none;
-  border: 0;
-  padding: 0;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.linklike:hover {
-  color: color-mix(in srgb, var(--accent) 80%, var(--text));
-}
-
-/* Breadcrumb trail of visited pages, bottom-left of the canvas — its slot alone now that
+/* Breadcrumb trail of visited pages, bottom-left of the canvas - its slot alone now that
    the tooltip follows the pointer; the zoom controls live up top. */
 .graph-trail {
   position: absolute;
@@ -3202,51 +3137,6 @@ details.hot-cache[open] .hc-summary::before {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-
-/* Lens dropdown: each option is a two-line radio (name + what it encodes). */
-.lens-menu {
-  min-width: 240px;
-}
-.lens-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  align-items: flex-start;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.lens-item:hover:not(:disabled) {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-.lens-item:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.lens-item.sel {
-  color: var(--text);
-}
-.lens-item.sel .lens-name::after {
-  content: '✓';
-  margin-left: 6px;
-  color: var(--accent);
-}
-.lens-name {
-  font-size: 13px;
-  font-weight: 500;
-}
-.lens-desc {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
 /* Metric-lens legend, bottom-right of the canvas. */
 .lens-legend {
   position: absolute;
@@ -3288,28 +3178,32 @@ details.hot-cache[open] .hc-summary::before {
   border-radius: 3px;
   flex: none;
 }
+/* Mirrors the ramp in GraphCanvas, which starts a touch off the neutral floor (t = 0.1)
+   so the least-linked pages still read as pages rather than as background. */
 .lens-legend .ll-authority {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--accent));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)) 90%, var(--accent)),
+    var(--accent)
+  );
 }
 .lens-legend .ll-recency {
   background: linear-gradient(90deg, color-mix(in srgb, var(--bg-elev-2) 45%, var(--muted)), var(--ok));
 }
 
-/* Explorer side panel — overlays the right of the canvas when a node or gap is selected. */
+/* Explorer side panel - docked beside the canvas when a node or gap is selected. */
 .graph-explorer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  flex: 0 0 340px;
   width: 340px;
   max-width: 100%;
+  align-self: stretch;
+  position: relative;
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
-  border-left: 1px solid var(--border);
-  border-radius: 0 12px 12px 0;
-  box-shadow: -12px 0 30px rgba(0, 0, 0, 0.28);
-  z-index: 5;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
 }
 .gx-close {
   position: absolute;
@@ -3334,10 +3228,13 @@ details.hot-cache[open] .hc-summary::before {
   padding: 16px 16px 12px;
   border-bottom: 1px solid var(--border);
 }
+/* The kicker over a title in the explorer: the same label as `.bucket`, one step up because
+   it sits over a heading rather than beside a name in a list. */
 .gx-kicker {
   font-size: 11px;
-  text-transform: uppercase;
+  font-weight: 600;
   letter-spacing: 0.07em;
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 .gx-kicker.gap {
@@ -3445,8 +3342,8 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--text);
 }
 .gx-link .bullet {
-  width: 7px;
-  height: 7px;
+  width: var(--dot);
+  height: var(--dot);
   border-radius: 50%;
   flex: none;
 }
@@ -3499,17 +3396,14 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 13px;
   color: var(--text);
 }
+/* The gap list's variant of the shared `.meter`: fixed width, thinner, and amber because it
+   measures how badly a page is missing rather than progress towards a limit. */
 .gx-gaprow .meter {
   width: 56px;
   height: 5px;
-  border-radius: 3px;
-  background: var(--bg-elev-2);
-  overflow: hidden;
   flex: none;
 }
 .gx-gaprow .meter i {
-  display: block;
-  height: 100%;
   background: var(--warn);
 }
 .gx-gaprow .gn {
@@ -3519,10 +3413,16 @@ details.hot-cache[open] .hc-summary::before {
   width: 26px;
   text-align: right;
 }
-@media (max-width: 720px) {
-  .graph-explorer {
-    width: 100%;
-    border-radius: 12px;
+@media (max-width: 1180px) {
+  /* Too narrow for two columns: the panel goes back to overlaying, but ABOVE the search
+     overlay's corner rather than under it. */
+  .graph-stage > .graph-explorer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    box-shadow: -12px 0 30px color-mix(in srgb, var(--bg) 70%, transparent);
   }
   .graph-trail {
     display: none;
@@ -3648,36 +3548,14 @@ details.hot-cache[open] .hc-summary::before {
     position: static;
   }
   .graph-canvas-wrap {
-    height: calc(100vh - 290px);
-    height: calc(100dvh - 290px);
+    min-height: 260px;
   }
 }
 
-/* The graph wants the whole width — the 1080px reading column is for text tabs.
-   Tabs stay mounted (hidden via [hidden]), so only a VISIBLE graph may widen the column. */
-.content:has(.tab-panel:not([hidden]) .vault-graph) {
-  max-width: 1600px;
-}
+/* The graph's width is handled by the shell now: the Graph screen renders in a .lane.wide
+   (1620px) while text screens keep the 1180px reading lane. */
 
-.graph-controls {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  display: flex;
-  gap: 6px;
-}
-.graph-controls .btn {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  padding: 3px 10px;
-}
-.graph-controls .btn.active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-/* Frontmatter shown as properties, the way Obsidian does — not as prose. */
+/* Frontmatter shown as properties, the way Obsidian does - not as prose. */
 .page-meta {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -3879,7 +3757,7 @@ details.hot-cache[open] .hc-summary::before {
   font-size: 13px;
   margin: 10px 0 0;
 }
-/* Candidate member pages, collapsed by default — the count is in the card head already. */
+/* Candidate member pages, collapsed by default - the count is in the card head already. */
 .cand-pages {
   margin-top: 8px;
 }
@@ -3901,6 +3779,8 @@ details.hot-cache[open] .hc-summary::before {
 .cand-pages[open] > summary {
   margin-bottom: 6px;
 }
+/* A text that reads as prose but acts as a button. One primitive: `.linkish` used
+   to have a twin called `.linklike` that differed only in the underline style. */
 .linkish {
   background: none;
   border: none;
@@ -3908,7 +3788,10 @@ details.hot-cache[open] .hc-summary::before {
   color: var(--accent);
   font: inherit;
   cursor: pointer;
-  text-decoration: underline;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.linkish:hover {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
 }
 
 /* ---- First-run credential setup (setup mode) ---- */
@@ -3942,9 +3825,30 @@ details.hot-cache[open] .hc-summary::before {
 .credential-kind input[type='radio'] { display: none; }
 .credential-kind-title { font-weight: 600; font-size: 13px; }
 
+.unversioned-list {
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+}
+.unversioned-list code {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+/* ══ Research run progress (components/RunProgress.tsx) ═══════════════════════════════
+   Three layers: what it is doing now, the plan, the counted numbers. One bar, on the one
+   phase with a real denominator. ══ */
+.prog-step.done .prog-nm,
+details.logbox .log {
+  border: 0;
+  border-radius: 0;
+}
 /* ---- Keyboard hints (vault view shortcuts, 2026-07-21) ---- */
 
-/* A key chip — used in the shortcut legend and the page-head Esc hint. */
+/* A key chip - used in the shortcut legend and the page-head Esc hint. */
 kbd {
   font: 600 10.5px/1.7 ui-monospace, 'SF Mono', Menlo, monospace;
   color: var(--text-dim);
@@ -3966,27 +3870,58 @@ kbd {
   white-space: nowrap;
 }
 
-/* The shortcut legend inside the viewbar's ⓘ tip: keys right-aligned, meanings left. */
+/* ── Shortcuts popover (components/Shortcuts.tsx) ──────────────────────────────────────
+   It hangs off the canvas bar, which sits at the TOP of a box with `overflow: hidden`, so
+   it must open DOWNWARD and anchor to the right edge. That used to be a `.gtopline`
+   override on a generic tooltip; the wrapper was deleted, the rule silently stopped
+   matching, and the panel rendered up into the clipped region where nothing is visible.
+   It is structural, so it now belongs to the component's own class. ── */
+.shortcut-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.shortcut-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 372px;
+  display: block;
+  padding: 11px 13px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  text-align: left;
+  white-space: normal;
+}
+.shortcut-pop .sp-head {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
 .shortcuts {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 6px 10px;
+  gap: 6px 11px;
   align-items: baseline;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+/* Each row is one element spanning both tracks - `display: contents` puts its two children
+   back into the parent grid, so keys and meanings still line up in columns. */
+.shortcuts .sc-row {
+  display: contents;
 }
 .shortcuts .k {
   justify-self: end;
+  display: flex;
+  gap: 3px;
   white-space: nowrap;
-}
-
-/* The viewbar tip sits at the top of the content — drop its bubble DOWN and anchor it to
-   the right edge, or it would open upward into the header / off-screen. */
-.viewbar .tip-body {
-  top: calc(100% + 8px);
-  bottom: auto;
-  left: auto;
-  right: 0;
-  transform: none;
-  width: 300px;
 }
 /* The "double-click to open" line in the canvas hover tooltip. */
 .graph-tooltip .tt-hint {
@@ -4028,7 +3963,7 @@ kbd {
   color: var(--err);
   font-size: 12px;
 }
-/* Page links written inline in the health prose — not the list-row shape. */
+/* Page links written inline in the health prose - not the list-row shape. */
 .gx-health .gx-link.inline {
   display: inline;
   width: auto;
@@ -4036,4 +3971,2331 @@ kbd {
   color: var(--text);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ---- Command palette (Ctrl+K, redesign 2026-08) ---- */
+.veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(2px);
+}
+.palette {
+  position: fixed;
+  top: 12vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(600px, 92vw);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 70;
+}
+.pal-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+}
+.pal-input svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+.pal-input input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  font: inherit;
+  font-size: 15px;
+  color: var(--text);
+}
+.pal-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 8px;
+  overscroll-behavior: contain;
+}
+.pal-group {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 10px 10px 5px;
+}
+.pal-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+.pal-item svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--text-faint);
+}
+.pal-item.sel {
+  background: var(--bg-elev-2);
+}
+.pal-item .pal-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pal-item .pal-hint {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.pal-note {
+  color: var(--text-faint);
+  font-size: 13px;
+  padding: 14px 12px;
+  text-align: center;
+}
+
+/* ---- Window-level drop overlay ---- */
+.dropveil {
+  position: fixed;
+  inset: 10px;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--accent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--accent) 10%, color-mix(in srgb, var(--bg) 72%, transparent));
+  pointer-events: none;
+}
+.dropveil-msg {
+  text-align: center;
+  color: var(--text);
+}
+.dropveil-msg svg {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+.dropveil-msg .big {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 24px;
+  margin-top: 8px;
+}
+.dropveil-msg .small {
+  color: var(--text-dim);
+  margin-top: 5px;
+  font-size: 13.5px;
+}
+
+/* ---- Library ----
+   It used to carry its own copy of the workspace grid and its own copy of the content box
+   (`.lib-main`, which differed from `.box` by having a drop shadow - so the Library box sat
+   visibly differently on the ground than the three screens beside it). Both are gone: the
+   screen is a `.workspace` with a `.box` like Home, Research and System, and what is left
+   here is the table itself. */
+.lib-sentinel {
+  height: 1px;
+}
+/* Nothing matched the filters, or the index failed to load: centre the block in the space
+   the table would have had, rather than leaving it clinging to the top edge. */
+.library-empty {
+  display: grid;
+  place-content: center;
+  min-height: 100%;
+}
+/* The one data table. Four screens use it (activity, research runs, library, spend), and
+   until this sweep each of them re-declared the same three structural facts through its own
+   ancestor: `table-layout: fixed` was set four times, the sticky header three times over
+   three different parents. They live here once; a per-table rule below adds only its column
+   widths.
+
+   `fixed` is not a nicety: with `auto`, one long file name or a row of page chips widens the
+   whole table past its box and the screen scrolls sideways. Fixed columns cannot be pushed,
+   so the cells clip instead - which is why `td` carries `overflow: hidden`. */
+.dtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+.dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+}
+.dtable th {
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 11px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.dtable th.num {
+  text-align: right;
+}
+.dtable td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  overflow: hidden;
+}
+/* Interactive rows opt IN. The pointer used to be on every row of every `.dtable`, so the
+   spend table - which has no row action at all - had to take it back by hand, and any new
+   read-only table would have inherited the same lie. `[tabindex]` is exactly the set of rows
+   `openableRow()` made focusable, so the cursor and the keyboard affordance can never
+   disagree about which rows do something. */
+.dtable tbody tr[tabindex] {
+  cursor: pointer;
+}
+.dtable tbody tr:hover td {
+  background: color-mix(in srgb, var(--bg-elev-2) 55%, transparent);
+}
+.dtable tbody tr:last-child td {
+  border-bottom: none;
+}
+/* The row that holds a loading/empty/error block instead of data: no hover, no separator. */
+.dtable tr.staterow td {
+  border-bottom: none;
+  background: none;
+}
+.lt-title strong {
+  font-weight: 600;
+}
+.lt-domain {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.lt-links {
+  text-align: right;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lt-when {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.lt-acts {
+  white-space: nowrap;
+  text-align: right;
+  width: 76px;
+}
+/* The row's hover actions must not make the row taller than a row of plain text. Showing
+   and hiding them is the GROUP's job now (`.lt-actgroup`), not each button's - two
+   mechanisms for one behaviour is how they end up disagreeing. */
+.lt-acts .btn.ghost {
+  height: 24px;
+  padding: 0 6px;
+}
+/* Visible keyboard focus on the pill/overlay inputs that used to suppress it. */
+.gp-search:focus-within,
+.graph-search:focus-within {
+  border-color: var(--accent);
+}
+
+/* ---- Inbox (redesign 2026-08): channels line, paused banner, history rows + drawer ---- */
+.channels {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 8px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.channels .ch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.channels .ch code {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.channels .d {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  flex: none;
+}
+.channels .d.ok { background: var(--ok); }
+.channels .d.warn { background: var(--warn); }
+.channels .d.dim { background: var(--muted); }
+
+/* History rows: one job per table row; the drawer carries the depth. */
+.hrow-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.hrow-name .nm {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+.hrow-dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  flex: none;
+}
+.hrow-dot.done { background: var(--ok); }
+.hrow-dot.failed { background: var(--err); }
+.hrow-dot.deferred { background: var(--warn); }
+.hrow-dot.duplicate, .hrow-dot.cancelled { background: var(--muted); }
+.dtable td.dimc { color: var(--text-dim); }
+.dtable td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-dim); white-space: nowrap; }
+.dtable td.faintc { color: var(--text-faint); font-size: 12.5px; white-space: nowrap; }
+
+/* Intake note textarea + optional title (notes can be multi-line and carry a title now).
+   Two visible lines is plenty for a URL or a short note; it grows on focus for longer ones,
+   because a fixed height for the rare long note set the whole intake band's height. */
+.intake-note {
+  width: 100%;
+  resize: vertical;
+  height: 38px;
+  min-height: 38px;
+  transition: height 0.12s;
+  max-height: 160px;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+/* Grows once there is something in it, so the intake band's resting height is set by the
+   common case rather than the long one. */
+.intake-note:focus,
+.intake-note:not(:placeholder-shown) {
+  height: 62px;
+}
+.intake-note:focus,
+.intake-title:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.intake-title {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 13px;
+}
+/* ══ Home, bounded (2026-08-25) ═══════════════════════════════════════════════════════
+   Four fixed rows and one filling row. The filling row's two columns scroll INSIDE
+   themselves, so the screen itself never scrolls - at any window height, rather than at
+   the one the old fixed `min-height: 340px` happened to suit. The absolute-positioning
+   trick that used to keep the feed from running past the rail is gone with it: with a
+   real bounded row, `minmax(0, 1fr)` does the same job honestly. ══ */
+@media (max-width: 1100px) {
+  /* Stacked, there is no rail to match - let the screen scroll as a document again. */
+  .home {
+    grid-template-rows: none;
+    height: auto;
+    overflow-y: auto;
+  }  .home-grid > .feed { overflow: visible; }}
+.fico.ingest { background: var(--busy-bg); color: var(--busy); }
+.fico.failed { background: var(--err-bg); color: var(--err); }
+.fico.maintenance { background: var(--ok-bg); color: var(--ok); }
+.fico.edit { background: var(--gold-bg); color: var(--gold); }
+.fico.busy { background: var(--busy-bg); color: var(--busy); }
+.fico.queued { background: var(--muted-bg); color: var(--muted); }
+/* Idle is ONE line, not a card with an empty state inside it - about 70px of the height
+   budget, and it says the same thing. */
+.fico.research,
+.minibar.research i {
+  background: var(--research);
+}
+/* The pipeline as three ticks: enough to see movement, not enough to need a legend. */
+.fsteps {
+  display: flex;
+  gap: 5px;
+}
+.fsteps .st {
+  width: 22px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+.fsteps .st.on {
+  background: var(--busy);
+}
+.fsteps .st.now {
+  background: var(--busy);
+  animation: flight-blink 1.4s ease-in-out infinite;
+}
+@keyframes flight-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fsteps .st.now {
+    animation: none;
+  }
+}
+/* A short machine fact inside running text: a commit hash, a target page title. Free-standing
+   for the same reason as `.lens-tag` - its old `.fmeta` parent is gone. */
+.mono-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+/* Most wanted pages: the gap backlog with a research handoff. */
+/* ---- Health screen (redesign 2026-08): status + run history side by side ---- */
+/* Two columns only when the run-history card is actually rendered - inside the System
+   screen the last-settle rows live in the control column, and the head then takes the
+   full width rather than leaving a 320px hole. */
+.health-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.health-grid:has(> .run-history) {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+@media (max-width: 1100px) {
+  .health-grid, .health-grid:has(> .run-history) { grid-template-columns: 1fr; }
+}
+.health-grid .maint-status {
+  margin-bottom: 0;
+}
+.run-rows {
+  display: flex;
+  flex-direction: column;
+}
+.run-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.run-row:last-child { border-bottom: none; }
+.run-row .rr-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.run-row .rr-title {
+  font-weight: 500;
+}
+.run-row .rr-err {
+  color: var(--err);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-row .rr-meta {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+/* The persisted lint report, collapsed under the lint card. */
+.report-peek {
+  margin-top: 10px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+.report-peek > summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  list-style: none;
+}
+.report-peek > summary::-webkit-details-marker { display: none; }
+.report-peek > summary::before { content: '▸ '; color: var(--text-faint); }
+.report-peek[open] > summary::before { content: '▾ '; }
+.report-body {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: var(--bg);
+}
+.run-state.running { color: var(--research); background: color-mix(in srgb, var(--research) 16%, transparent); }
+.run-state.done { color: var(--ok); background: var(--ok-bg); }
+.run-state.failed { color: var(--err); background: var(--err-bg); }
+/* The plan line: what the send button will do, as labelled facts rather than a sentence
+   of separators. Each fact carries its own key, so the row is scanned. Both modes render
+   the same shape, so switching modes cannot move anything below it. */
+/* Two rows: what the armed mode IS, then what it will do. The lens description used to sit
+   in the control rail, three columns away from the composer it shapes; it says more here,
+   beside the target page and the fetch budget it belongs with (2026-08-27). Both rows keep
+   their height in both modes - the row heights are what a mode switch would otherwise move. */
+.pl-row {
+  flex: 1 1 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pl-blurb {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.planline {
+  display: flex;
+  flex-direction: column;
+  height: 58px;
+  overflow: hidden;
+  padding: 0 13px 0 16px;
+  min-width: 0;
+}
+/* Prefixed, all of it: `.fact`/`.fk`/`.fv` are the shared figure tile (Home's glance
+   strip, System's grids) and `.lens` is the lens pill - three collisions that turned this
+   row into a grid of bordered cards the first time it shipped. */
+.pl-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+.pl-key {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+/* Every value reserves the box the page chip needs, whether or not it IS the chip. Only
+   research files a page, so only research renders the bordered chip - and the row was
+   5.25px taller in that mode, which moved the whole console and everything under it every
+   time the mode changed. The border is transparent here and painted in `.pl-page`. */
+.pl-val {
+  color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 0;
+  border: 1px solid transparent;
+}
+.pl-val.pl-hi {
+  color: var(--research);
+  font-weight: 600;
+}
+/* Ask wears the neutral accent, never the research violet: nothing here has side effects. */
+.console.ask .pl-val.pl-hi {
+  color: var(--accent);
+}
+/* The target page title is a filename. It should look like one. */
+.pl-val.pl-page {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.pl-val b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+/* Unsaved-editor badge in the page head - the draft guard's visible half. */
+.dirty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.dirty-badge svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Workspaces (redesign 2026-08-25, second pass)
+
+   One shape for every screen: a control column of --gpanel-w and one content box
+   beside it, both starting on the same line. No screen has a bar spanning both
+   columns any more, so switching screens never shifts the content edge.
+   ══════════════════════════════════════════════════════════════════════════════ */
+.workspace {
+  display: grid;
+  grid-template-columns: var(--gpanel-w) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+/* The graph's two departures from the shared workspace, and the only two left:
+
+   1. It sits inside a flex column (the stale-links banner can appear above it), so it grows
+      into the space left over rather than claiming the full height.
+   2. It is the last screen with a bar spanning BOTH columns - the cluster and focus rows,
+      which only exist while the graph is focused on something. Home, Library, Research and
+      System have no such bar, which is why the content edge no longer moves when you switch
+      between them. Here it is a deliberate exception: the bar says what the graph is
+      currently isolated to, and that statement belongs above both the filters that produced
+      it and the canvas it applies to. The row is only reserved when the bar is actually
+      rendered - an always-on `auto` row would cost a gap's worth of dead space the rest of
+      the time. */
+.graph-workspace {
+  flex: 1;
+  height: auto;
+}
+.graph-workspace:has(> .ws-bar) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+/* With a bar present the two columns belong to row 2; without one the single row is row 1
+   and these are ignored, because a grid-row beyond the template just creates it. */
+.graph-workspace:has(> .ws-bar) > .gpanel,
+.graph-workspace:has(> .ws-bar) > .graph-main {
+  grid-row: 2;
+}
+
+/* The content box: head, a body that scrolls inside itself, an optional foot. */
+.box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.box-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  /* One height for every box head in the app, whether it carries a control or only a title:
+     32px of control + 20px of padding + the rule under it. A head sized to its content grew
+     and shrank by eleven pixels as a button appeared and went - Home's "Clear history" comes
+     and goes with the state filter - and the table under it moved with it. */
+  min-height: calc(var(--control-h) + 21px);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.box-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+}
+.box-sub {
+  font-size: 12px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.box-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Reserve the scrollbar's width whether or not it is showing, so a filter change that
+     happens to fit without scrolling does not shift the columns sideways. */
+  scrollbar-gutter: stable;
+}
+.box-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  /* Same reservation as the head, for the same reason: a foot carries a button that comes
+     and goes with the list it counts ("Show more", "Load older"), and a foot sized to its
+     content took 14px off the table above it the moment the button appeared. */
+  min-height: calc(var(--control-h) + 19px);
+  padding: 9px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+/* ---- Research: the rail's running totals and the two ledgers ---- */
+/* The same metric-list shape Home's vault zone uses, at rail width. */
+.railfacts {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.railfacts .vzf {
+  font-size: 11.5px;
+}
+/* A fixed column, not a minimum: the widest figure is a cost, and with `min-width` it
+   pushed its own label right while every other label stayed put. */
+.railfacts .vzf b {
+  flex: none;
+  width: 62px;
+  min-width: 0;
+  font-size: 12px;
+}
+/* A figure with nowhere to go stays a figure - no hover, no tab stop. */
+.vzf.static {
+  cursor: default;
+}
+/* An offer, not a record: a card with a verb on it. Two rows of them fit the band; the rest
+   is a scroll away, which is honest for a backlog that grows with the vault. */
+.offers {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 8px;
+  align-content: start;
+  padding: 9px 14px 10px;
+}
+.offer {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  text-align: left;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.offer:hover,
+.offer:focus-visible {
+  border-color: var(--research);
+}
+/* Two lines, always - the slot is fixed even when the title needs one line. Sized to its
+   own text, a two-line title made its card taller than its neighbours and pushed the second
+   row of the band out of view. */
+.of-t {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  height: 33px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--text);
+}
+.of-m {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.of-n {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.of-go {
+  padding: 2px 10px;
+  font-size: 11px;
+  color: var(--research);
+  border: 1px solid var(--research);
+  border-radius: 999px;
+}
+.offer:hover .of-go {
+  background: var(--research);
+  color: var(--accent-ink);
+}
+/* The conversation ledger: same table as the run ledger, its own columns. */
+/* ── One column template for both research ledgers ─────────────────────────────
+   A run and a conversation are listed in the same shape, so their columns line up: the
+   title takes whatever is left and the five fixed slots are the same width in both tables.
+   Percentages gave each table its own boundaries, and crushed "Cost" and "When" into the
+   right eighth of a 1300px pane while the title column carried 150px of slack. Sizing the
+   four to their own labels then left them unevenly spaced instead - one width for all four
+   is what makes the row scan. ── */
+.rtable {
+  --rledger-col: 130px;
+}
+.rtable th:nth-child(1) { width: auto; }
+.rtable th:nth-child(2),
+.rtable th:nth-child(3),
+.rtable th:nth-child(4),
+.rtable th:nth-child(5) { width: var(--rledger-col); }
+.rtable th:nth-child(6) { width: 76px; }
+.sess-table tr.active td {
+  background: var(--accent-soft);
+}
+/* The open conversation keeps its colour under the pointer. The generic row hover paints a
+   translucent grey OVER the cell, which muddied the one row that already says something by
+   being coloured - hovering it made it look like a different state. */
+.sess-table tr.active:hover td {
+  background: color-mix(in srgb, var(--accent-soft) 75%, var(--bg-elev-2));
+}
+/* The actions cell is a plain table cell; the flex row lives in a span inside it. Putting
+   `display: flex` on the `td` itself drops it out of the table layout - it stopped claiming
+   its column, so a coloured row ended before it. */
+.lt-acts-cell {
+  text-align: right;
+}
+/* Row actions appear on hover and on keyboard focus - a row whose actions only exist under
+   a pointer is a row a keyboard cannot rename. Visibility, not opacity: an opacity below 1
+   makes the element its own compositing layer, which left a hairline seam along the cell. */
+.rowacts {
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 4px;
+  visibility: hidden;
+}
+tr:hover .rowacts,
+tr:focus-within .rowacts {
+  visibility: visible;
+}
+
+/* ---- Home: the vault zone (redesign 2026-08-26) ----
+   Two zones stacked in the content column: the stock above (quiet, large, few words) and
+   the flow below (dense, small, many words). The contrast between them is the thing that
+   leads the eye - a rule between two panels of equal weight never did. */
+.home-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+/* The flow zone takes whatever the stock zone leaves, whether it has one row in it or five
+   hundred. Without the grow it sized itself to its content: filtering the stream down to a
+   single row shortened the box by 160px, so the table's own foot - and the bottom edge of
+   the screen's main object - jumped up the moment a filter was picked. The rows scroll
+   inside `.box-body`, which is what a fixed frame around a changing list is for. */
+.home-main > .box {
+  flex: 1 1 0;
+}
+/* Hero, the graph, and the panel that took the half the graph gave back. */
+.vaultzone {
+  display: grid;
+  grid-template-columns: 244px minmax(0, 1fr) minmax(0, 1fr);
+  flex: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.vz-hero {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  border-right: 1px solid var(--border);
+}
+.vz-n {
+  font-family: var(--display);
+  font-size: 54px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.vz-k {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+/* The countable facts. A force layout cannot be measured, so everything measurable is
+   written next to it - and each line is a door to the screen that shows it in full. */
+.vz-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+.vzf {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.vzf b {
+  min-width: 54px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.vzf:hover b,
+.vzf:focus-visible b {
+  color: var(--accent);
+}
+/* ── The stock zone's two panels ───────────────────────────────────────────────
+   Three columns now, not two: the graph filled the whole width and needed about half of it,
+   and a fitted force layout in a box twice its size is empty canvas rather than information.
+   Both panels are built the same way - head, a FIXED-height body, a foot of figures - so the
+   zone is one band whatever is in it. A body sized to its content made a list panel taller
+   than a chart one and moved every row below the zone (2026-08-27). ── */
+.vz-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 11px 14px 12px;
+}
+.vz-panel + .vz-panel {
+  border-left: 1px solid var(--border);
+}
+.vz-phead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 26px;
+}
+.vz-phead .spacer {
+  flex: 1;
+}
+.vz-body {
+  flex: none;
+  height: clamp(210px, 30vh, 300px);
+  min-height: 0;
+  overflow: hidden;
+  margin-top: 8px;
+}
+/* The second panel's ground. The graph carries its own dark inset (`.constell`), so a bare
+   list beside it read as two designs on one row rather than one band of two pictures. The
+   box is the SAME height as the unboxed body - border and padding sit inside it - so
+   switching views moves nothing below the zone. */
+.vz-body.inset {
+  padding: 9px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* A fixed height, not a minimum: the gaps foot is a button and came out one pixel taller
+   than the others, which moved the zone and everything under it on a panel switch. */
+.vz-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  flex: none;
+  height: 18px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+/* Domains, ranked. The count sits BESIDE its bar rather than adrift at the far right of the
+   label row, with the same 20px of air on each side - to the bar on the left, to the
+   scrollbar on the right (the list carries 2px of that itself). */
+.ranklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+.rank .lab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.rank .lab .nm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank:hover .lab {
+  color: var(--text);
+}
+.rank .barrow {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-right: 18px;
+}
+.rank .track {
+  flex: 1;
+  min-width: 0;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+.rank .track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+/* Body colour, not the faint one: it is the figure the bar is drawn for. */
+.rank .n {
+  flex: none;
+  width: 34px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What the vault learned, by day. */
+.newlist {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.daygroup .day {
+  margin-bottom: 5px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.daygroup .items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The backlog, as offers rather than a third list of records. */
+.gaplist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+  align-content: start;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 2px;
+}
+.gapcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  text-align: left;
+}
+.gapcard:hover {
+  border-color: color-mix(in srgb, var(--research) 45%, transparent);
+}
+.gapcard .t {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gapcard .m {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* A chip band's key is its own column, so a second row of pills starts where the first did
+   rather than half a label to its left. */
+.chipband .chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.vzl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.vzl .dot {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  flex: none;
+}
+.vzl b {
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.constell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+/* The whole picture is the button: it is a door to the Graph tab, and a door you can only
+   open by hitting a 3px dot is not a door. */
+.constell-hit {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.constell canvas {
+  display: block;
+}
+.constell-cap {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+
+/* ---- Home rail: the state grid and the status foot ----
+   Seven states are a closed set, so they read as one glance in two columns; the height that
+   saves goes to the channel list, which is the one list that grows with the vault. */
+.stategrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+}
+.stategrid .domrow {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+/* The queue is the machine's own state, not a filter: it sits at the foot of the column on
+   its own ground, the way a status bar does. Sticky, because the panel is allowed to scroll
+   on a short window - and "why is nothing moving" is exactly the question you ask when you
+   cannot be bothered to scroll for the answer. */
+.gp-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: auto;
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border-strong);
+}
+
+/* A section heading INSIDE the body, for screens that stack two lists (research runs
+   and the backlog) - not a second box, just a labelled break. It carries real weight now
+   (2026-08-26): under the console it is the only thing separating two lists, and at
+   `--text-faint` it was quieter than the rows it introduced. */
+.sub-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 13px 14px 9px;
+  border-bottom: 1px solid var(--border);
+}
+.sub-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+/* How many rows the section holds, as a figure rather than another grey word. */
+.count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* Page chips and the error line under a table row's title. The table's fixed layout means
+   this must clip rather than push its column wider. */
+.rowpages {
+  display: flex;
+  flex-wrap: wrap;
+  overflow: hidden;
+  gap: 4px;
+  margin-top: 5px;
+  padding-left: 15px;
+}
+.rowerr {
+  display: block;
+  margin-top: 3px;
+  padding-left: 15px;
+  font-size: 11.5px;
+  color: var(--err);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Home: intake in the control column ────────────────────────────────────── */
+.intake-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dropzone.slim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 10px;
+  border: 1.5px dashed var(--border-strong);
+  border-right: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  text-align: center;
+}
+.dropzone.slim:hover,
+.dropzone.slim.over {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone.slim svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+.dropzone.slim .dz-t {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dropzone.slim .dz-s {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.intake-panel .intake-note {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+}
+.ip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.ip-actions .ch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ip-actions .ch .d {
+  width: var(--dot-sm);
+  height: var(--dot-sm);
+  border-radius: 50%;
+  background: var(--muted);
+}
+.ip-actions .ch .d.ok { background: var(--ok); }
+.ip-actions .ch .d.warn { background: var(--warn); }
+
+/* A greyed-out control section: the lens has no effect while asking the vault. */
+.gp-sec.off {
+  opacity: 0.5;
+}
+.gp-sec.off .lensopt {
+  pointer-events: none;
+}
+.gp-sec.off .pillhint .linkish {
+  pointer-events: auto;
+}
+
+/* ── Research: the console (2026-08-26) ────────────────────────────────────────
+   Mode, topic, plan and phases used to be four strips of equal value stacked on the box's
+   own ground, hairline-separated, directly above a run table drawn the same way - six
+   horizontal rules of identical weight and no entry point for the eye. They are one raised
+   card now: inset from the box edge, a step up in surface, a 3px rail in the mode's colour
+   and a header tinted to match, with the step rail attached as its footer. Everything below
+   drops to `--bg`, so the console floats and the history recedes. ── */
+.console {
+  position: relative;
+  flex: none;
+  /* No margin: the column spaces its cards with a gap, and a margin here made the console
+     narrower than everything under it and its own edges not line up with theirs. */
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+/* The mode's own colour, down the whole left edge. Which mode is armed is legible from
+   the shape of the card, not only from the label inside it. */
+.console::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--research);
+}
+.console.ask::before {
+  background: var(--accent);
+}
+.console:focus-within {
+  border-color: color-mix(in srgb, var(--research) 55%, var(--border-strong));
+}
+.console.ask:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+}
+.console-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 13px 9px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--research) 13%, transparent), transparent);
+}
+.console.ask .console-head {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 11%, transparent), transparent);
+}
+/* One segmented control, not two loose pills: the modes are exclusive, and a segment
+   makes that structural. */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+}
+.seg.sm { padding: 2px; }
+.seg.sm button { height: 21px; padding: 0 9px; font-size: 11px; }
+.seg button {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.seg button:hover {
+  color: var(--text);
+}
+.seg button[aria-checked='true'] {
+  background: color-mix(in srgb, var(--research) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--research) 55%, transparent);
+  color: var(--research);
+  font-weight: 600;
+}
+.console.ask .seg button[aria-checked='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
+/* What the armed mode may do. A run that reaches the web and writes pages should not
+   announce itself in the same faint grey as a read-only query. */
+.caps {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.cap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--research) 32%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--research) 11%, transparent);
+  color: var(--research);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.console.ask .cap {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+/* A capability the mode does NOT have, stated in the same row - the absence is the point. */
+.cap.off,
+.console.ask .cap.off {
+  border-color: var(--border);
+  background: none;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+.cap svg {
+  width: 11px;
+  height: 11px;
+  flex: none;
+}
+.console-main {
+  display: flex;
+  align-items: stretch;
+  gap: 9px;
+  padding: 12px 13px 0 16px;
+}
+.console-main textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+.console-main textarea::placeholder {
+  color: var(--text-faint);
+}
+.console-main textarea:focus {
+  outline: none;
+  border-color: var(--research);
+}
+.console.ask .console-main textarea:focus {
+  border-color: var(--accent);
+}
+/* One width for every label this button can carry ("Start run", "Running…", "Ask",
+   "Asking…"). Sized to its own text, it was 46px narrower in ask mode, and the composer
+   beside it grew by exactly that much every time the mode changed. */
+.btn-run {
+  flex: none;
+  min-width: 132px;
+  align-self: stretch;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--research);
+  color: #17102b;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.console.ask .btn-run {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.btn-run:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+/* ── The step rail: the console's footer ───────────────────────────────────────
+   ONE line on a FIXED grid of `--steps` equal columns - the longer of the two step lists,
+   so a five-phase run fills every column and a three-phase ask fills the first three and
+   aligns to them. Sharing the width between three marks instead put "Answer" nowhere near
+   the run's second step (2026-08-27).
+
+   The connector belongs to the step it leaves, which is what keeps each step inside exactly
+   one column. The note rides beside its label rather than under it; stacking the two cost
+   43px of a screen that has to hold a readable detail below it.
+
+   The idle caption is gone - it said what the marks beside it already said. The live line
+   keeps a fixed slot to the right, so a starting run fills it without moving a mark. ── */
+.rail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 13px 9px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.rail-row {
+  display: grid;
+  grid-template-columns: repeat(var(--steps, 5), minmax(0, 1fr));
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.rail-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.rail-link {
+  flex: 1 1 0;
+  min-width: 8px;
+  height: 2px;
+  margin: 0 9px 0 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.rail-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.rail-mark svg {
+  width: 11px;
+  height: 11px;
+}
+.rail-nm {
+  font-size: 11.5px;
+  line-height: 20px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rail-note {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 20px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.rail-step.done .rail-mark {
+  border-color: var(--ok);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.rail-step.done .rail-nm {
+  color: var(--text-dim);
+}
+.rail-step.done .rail-link {
+  background: var(--ok);
+}
+.rail-step.now .rail-mark {
+  border-color: var(--research);
+  background: color-mix(in srgb, var(--research) 22%, transparent);
+  color: var(--research);
+}
+.rail.ask .rail-step.now .rail-mark {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.rail-step.now .rail-nm,
+.rail-step.now .rail-note {
+  color: var(--research);
+  font-weight: 600;
+}
+.rail.ask .rail-step.now .rail-nm,
+.rail.ask .rail-step.now .rail-note {
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rail.live .rail-step.now .rail-mark {
+    animation: rail-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes rail-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 4%, transparent);
+  }
+}
+/* The live slot. Fixed width in both states: the run's status arrives without shifting the
+   marks it describes. */
+.rail-live {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  width: 176px;
+  min-width: 0;
+}
+.rail-now {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rail.live .rail-now {
+  color: var(--text-dim);
+}
+.rail-el {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── One detail, two kinds ─────────────────────────────────────────────────────
+   A run and a conversation are the same object from the reader's side - something you
+   asked, and the record of what came back - so they get ONE shell (2026-08-27). Five bands
+   in a fixed order at fixed heights:
+
+     bar      back, kind mark, title, tag, state, the kind's own action
+     facts    five slots: what it filed / asked, when, how much work, what it cost, how many
+              pages it wrote / cited
+     chips    the pages it wrote, or the pages it cited
+     content  the synthesis page, or the conversation - the only band that scrolls
+     foot     where the facts came from, and the kind's own second action
+
+   They used to be two constructions: the run detail scrolled its own head away inside the
+   box body, while a conversation had a pinned bar OUTSIDE it and no facts at all - so
+   moving between them shifted every row on the screen. ── */
+.box.detail {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+/* The kind's mark, in the kind's own colour: violet writes, blue only reads. */
+.detail-bar > svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.detail-bar.web > svg {
+  color: var(--research);
+}
+.detail-bar.vault > svg {
+  color: var(--accent);
+}
+/* The facts strip is the shared component at detail size: five slots, one row, and a value
+   that fits a filed page title instead of a headline figure. */
+.box.detail > .facts.lead {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.box.detail > .facts.lead .fact {
+  padding: 6px 14px;
+  min-width: 0;
+}
+.box.detail > .facts.lead .v {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* What it wrote, or what it cited - the same band in the same place for both kinds, at one
+   height whatever the chip count, so moving between them shifts nothing. */
+.chipband {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: none;
+  /* Exactly two rows of chips: 2 × 26px chip + 5px row gap + this band's own 12px of
+     padding. At 57px the second row was cut, so the common case - an ingest that wrote
+     four or five pages - always carried a scrollbar for the twelve pixels it was short.
+     A third row is where scrolling starts, which is where it belongs. */
+  height: 69px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.chipband /* A fixed column, not a first-row sibling: as a sibling the second row of pills started at
+   the container edge, half a label to the left of the first. */
+.bandkey {
+  flex: none;
+  width: 44px;
+  padding-top: 3px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.chipband .empty {
+  padding: 0;
+  font-size: 12px;
+}
+/* The only band that scrolls. Full width in both kinds: a 74ch column left half a 1600px
+   pane empty, and the reader asked for the width they have. */
+.detail-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 14px 18px 18px;
+}
+.detail-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 36px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.detail-foot .prov {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The conversation, inside the content band. It no longer owns a scroll of its own - the
+   band does - so the bar above it and the action below it keep their places by construction. */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The way out of a detail view. It leads the row rather than trailing it, and it is a
+   BOX: as a `.btn.ghost` at the far right of a 1600px bar it was dim text with no border
+   until hovered, which is a label, not a control - the first reader looked straight past
+   it and asked where the button was. Arrow plus destination, at the start of the line,
+   which is where a back control is looked for. */
+.backlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 26px;
+  padding: 0 11px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.backlink:hover,
+.backlink:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.backlink svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: inherit;
+}
+
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.detail-head svg {
+  width: 17px;
+  height: 17px;
+  color: var(--research);
+}
+.detail-title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── System: sections, facts, subcards ─────────────────────────────────────── */
+.sys-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px 22px;
+}
+.sys-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+/* ── Figures: one label, one number, one optional line of context ────────────────────
+   Home's glance strip and System's fact grids were the same k/v/s markup written twice,
+   with six values drifted apart. One component now (components/Fact.tsx) in two densities:
+   `.lead` is the strip of doors under a box head, the default is a dense grid inside a
+   pane. Everything except size, separator and grid track is shared. */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+/* The lead strip spans the box: no card outline, a bottom border against the content, and
+   the separators are real borders rather than a 1px grid gap showing the ground through. */
+.facts.lead {
+  grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  flex: none;
+  gap: 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-items: flex-start;
+  padding: 9px 12px;
+  background: var(--bg-elev);
+  border: 0;
+  text-align: left;
+  color: var(--text);
+}
+.fact.lead {
+  gap: 2px;
+  padding: 9px 14px;
+  border-right: 1px solid var(--border);
+  background: none;
+}
+.fact.lead:last-child {
+  border-right: 0;
+}
+.fact.linky:hover {
+  background: var(--bg-elev-2);
+}
+.fact .k {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.fact .v {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fact.lead .v {
+  font-size: 20px;
+}
+.fact .v.warn { color: var(--warn); }
+.fact .v.err { color: var(--err); }
+.fact .s {
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.fact.lead .s {
+  font-size: 11.5px;
+}
+.subcard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+}
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.sc-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-body {
+  padding: 12px 13px;
+}
+/* The variant for a card that puts its body straight into the card rather than into an
+   `.sc-body`: the card carries the body padding and the head cancels it back out to the
+   edges. Same result as the old `.card-pad` + `.section-head` pair, in the subcard's
+   proportions, and without asking fourteen call sites to grow a wrapper element. */
+.subcard.sc-pad {
+  padding: 12px 13px;
+}
+.subcard.sc-pad > .sc-head {
+  margin: -12px -13px 12px;
+  padding: 9px 13px;
+}
+.subcard.sc-pad > .sc-head:last-child {
+  margin-bottom: -12px;
+}
+/* The head's trailing action group. `.sc-head` is a flex row, so this just claims the gap
+   to the right of the title - the same job `.spacer` does on the box heads. */
+.sc-head .right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.sc-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.kvlist {
+  display: flex;
+  flex-direction: column;
+}
+/* A key and its value on one line, label left, value right (the System panes). For a real
+   `<dl>` use `.deflist` above. */
+.kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  border-bottom: 1px dashed var(--border);
+}
+.kv:last-child {
+  border-bottom: 0;
+}
+.kv .k {
+  color: var(--text-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kv .k.warnish {
+  color: var(--warn);
+}
+.kv .v {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+/* The control column carries counts next to a section name. */
+.domlist .n.warn { color: var(--warn); }
+.domlist .n.ok { color: var(--ok); }
+
+/* State dots the activity table uses that the old inbox never rendered: a run in flight,
+   a queued job, and a hand edit. */
+.hrow-dot.running {
+  background: var(--busy);
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+.hrow-dot.queued { background: var(--warn); }
+.hrow-dot.edit { background: var(--type-meta); }
+
+/* ── Fixes 2026-08-25 (second pass, round two) ─────────────────────────────── */
+
+/* Home's activity table: `table-layout` and the sticky head now come from `.dtable`; what is
+   left here is this table's own column split. */
+/* The event takes the slack; the four figures after the channel share one width and read
+   off the same right edge. Sized to their own labels (8/8/9%) they bunched three values into
+   a third of the row, and a left-aligned "When" in an 18% column left the last sixth of every
+   row empty while its value sat pressed against the cost (2026-08-27). */
+.inbox-table th:nth-child(1) { width: 40%; }
+.inbox-table th:nth-child(2) { width: 16%; }
+.inbox-table th:nth-child(3),
+.inbox-table th:nth-child(4),
+.inbox-table th:nth-child(5),
+.inbox-table th:nth-child(6) { width: 11%; }
+.inbox-table th:nth-child(6),
+.inbox-table td:nth-child(6) { text-align: right; }
+/* The name may take the whole column now - the fixed width is the limit, not a magic px. */
+.box-body > .dtable .hrow-name .nm {
+  max-width: none;
+}
+/* The research run table shares the fixed layout; its columns are its own. */
+
+/* The graph's control bar: the search field is the tallest control in it, so everything
+   beside it takes the same box height. */
+.graph-controls .graph-search {
+  height: var(--control-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.graph-controls .shortcut-wrap {
+  align-items: center;
+}
+
+/* Ingests per day: bars, because a count per day is discrete. The shared Sparkline is a
+   fixed viewBox stretched to card width, which fattened its stroke and lost the days. */
+.daybars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.db-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 68px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--border);
+}
+.db-col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.db-bar {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.db-bar.zero {
+  background: var(--border-strong);
+}
+.db-bar.last {
+  background: var(--accent);
+}
+.db-axis {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.db-axis .db-max {
+  color: var(--text-dim);
+}
+
+/* A subcard whose body IS a table: the table brings its own row padding. */
+.sc-body.flush {
+  padding: 0;
+}
+.sc-body.flush .dtable td,
+.sc-body.flush .dtable th {
+  padding-left: 13px;
+  padding-right: 13px;
+}
+.runtable th:nth-child(1) { width: 46%; }
+.runtable th:nth-child(2) { width: 14%; }
+.runtable th:nth-child(3) { width: 12%; }
+.runtable th:nth-child(4) { width: 12%; }
+.runtable th:nth-child(5) { width: 16%; }
+.runtable .rt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The commit list in Vault stats: the subject takes what is left, the rest is fixed. */
+.committable th:nth-child(2) { width: 82px; }
+.committable th:nth-child(3) { width: 116px; }
+.committable th:nth-child(4) { width: 92px; }
+.committable .ct-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A table that lists everything it has, inside a card that cannot grow with it: it scrolls
+   in place. The head stays put and is painted in the card's own ground, or the rows scroll
+   straight through it. */
+.cardscroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.cardscroll .dtable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+}
+
+/* Vault stats: the figures stay on screen and the domain list scrolls on its own, rather
+   than the whole pane scrolling and taking the numbers with it. */
+.box-body:has(> .sys-pane.fill) {
+  overflow: hidden;
+}
+.sys-pane.fill {
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 14px;
+  /* The safety valve. `fill` budgets the height between fixed blocks and one growing list,
+     which only works while the fixed blocks fit - add a sixth card and every one of them
+     gets silently squeezed instead (the figures row lost its top edge that way). Scrolling
+     the pane is the honest outcome when the section is simply taller than the viewport. */
+  overflow-y: auto;
+}
+/* Fixed blocks keep their natural height; only `.grow` gives any of it back. */
+.sys-pane.fill > * {
+  flex: none;
+}
+.sys-pane.fill > .subcard.grow {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 150px;
+}
+.sys-pane.fill > .subcard.grow > .sc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The library table keeps ONE layout across every filter. Fixed columns mean the domain,
+   link and date columns never move because a domain happens to hold shorter titles; the
+   page column takes whatever is left, which is the layout the longest titles need. */
+/* Measured against the real vault, not guessed (2026-08-26). Domain was 150px while the
+   longest domain name needs 194, which clipped 21 of 50 rows on screen; Source was 104px
+   for a link that is never wider than 54. The actions column reserved 78px in every row
+   for two buttons that only appear on hover - it is zero-width now and they float (see
+   `.lt-actgroup`), which is what buys the title column its width back. */
+.lib-table {
+  --lib-source-w: 84px;
+  /* Wide enough for the longest bucket label ("Comparisons", 97px measured). */
+  --lib-kind-w: 100px;
+}
+.lib-table th:nth-child(2) { width: 194px; }
+.lib-table th:nth-child(3) { width: 96px; }
+.lib-table th:nth-child(4) { width: 132px; }
+.lib-table th:nth-child(5) { width: var(--lib-source-w); }
+.lib-table th:nth-child(6) { width: 0; padding: 0; }
+/* Bucket and flags keep their size; only the title itself gives way, on one line, so the
+   row height stays constant too. The full title is in the cell's tooltip. */
+/* The flex box is a span INSIDE the cell: a `td` with `display: flex` drops out of the
+   table layout, and its contents then drift vertically against the columns beside it, a
+   little further with every row. */
+.lib-table .lt-title {
+  overflow: hidden;
+}
+.lib-table .lt-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* A fixed slot for the type chip, so every title in the column starts at the same x. The
+   slot is fixed, not the chip: giving the CHIP the width would stretch "Meta" into a pill
+   the width of "Comparisons". An unknown bucket with a longer label than any shipped one
+   grows past the slot into the gap rather than being clipped. */
+.lib-table .lt-kind {
+  flex: 0 0 var(--lib-kind-w);
+  display: flex;
+  align-items: center;
+}
+.lib-table .lt-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.lib-table .badge.type,
+.lib-table .lt-flag {
+  flex: none;
+  margin: 0;
+}
+/* The action buttons appear on hover, floating out of a zero-width cell at the end of the
+   row. `overflow: visible` is required - `.dtable td` hides overflow, which would clip them
+   away entirely. They are offset by the width of the Source column so they cover "Changed"
+   instead: Source is the column you reach for, and hiding it under the buttons the moment
+   you point at the row would defeat it. */
+.lib-table .lt-acts {
+  width: 0;
+  padding: 0;
+  position: relative;
+  overflow: visible;
+}
+.lt-actgroup {
+  position: absolute;
+  top: 50%;
+  right: calc(var(--lib-source-w) + 4px);
+  transform: translateY(-50%);
+  display: flex;
+  gap: 3px;
+  padding: 3px 4px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  box-shadow: -10px 0 12px -8px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+}
+.lib-table tr:hover .lt-actgroup,
+.lt-actgroup:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── The Source column (2026-08-26) ────────────────────────────────────────────
+   Where the page came from, as an inline link to the document itself - a text link with an
+   icon, not a chip: it sits in a table of quiet cells, and a bordered pill in every row
+   would out-shout the page titles it belongs to. Dim until the pointer is on it, then it
+   behaves like the link it is. */
+.lt-source {
+  white-space: nowrap;
+}
+.src-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-decoration: none;
+}
+.src-link svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  opacity: 0.8;
+}
+.src-link:hover,
+.src-link:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.src-link:hover svg,
+.src-link:focus-visible svg {
+  opacity: 1;
+}
+/* No source, or the index has not arrived yet. Reserves the row height either way. */
+.src-none {
+  display: inline-block;
+  min-height: 1em;
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+
+/* The outcome of the run that just finished, in the same fixed head as the strip. */
+.runbanner {
+  flex: none;
+  margin: 0;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+/* ── Research start view: runs and backlog split the height, each scrolls ──
+   One step DOWN from the console's ground (2026-08-26): the console floats, the history
+   recedes, and the eye lands on the thing you act with before the thing you already did. */
+/* ── The Research screen's right-hand column ───────────────────────────────────
+   Three stacked cards, the way Home stacks its zones - not one box with hairlines inside
+   it. The middle region SWAPS: it holds the two ledgers, or one detail in their place, so
+   opening a run changes what fills one region and moves nothing above or below it.
+
+   The backlog keeps a fixed band at the foot in BOTH states: it is an offer, not history,
+   and opening a run should not cost the reader the thing they might do next. ── */
+/* The screen's right-hand column: console, the region that swaps, the backlog. Same shape
+   as Home's, which is the point - the two screens should not stack their zones differently. */
+.rmain {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.rstack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Whatever the region has, the two ledgers halve it. */
+.box.ledger {
+  flex: 1 1 0;
+  min-height: 0;
+}
+/* Exactly two rows of offers, both fully visible - a third scrolls. Sized to the two rows
+   rather than to a round number: a title that needs two lines used to push the second row
+   out of the band, so the row height is fixed (`.of-t`) and the band is fixed to two of
+   them. */
+.box.band {
+  flex: none;
+  height: 216px;
+}
+/* A denser section head on this screen: the column carries three of them plus a console,
+   and the shared padding spent 15px of it on air. Scoped, because the other screens are
+   not that tight. */
+.rmain .sub-head {
+  padding: 9px 14px 8px;
 }

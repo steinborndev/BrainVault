@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { dirtyPaths, newWikiPaths, commitVault } from '../src/pipeline/git.js'
+import { dirtyPaths, newWikiPaths, commitPaths, commitVault, unversionedWikiPages } from '../src/pipeline/git.js'
 
 // Runs against a REAL git repo: the bug this guards (finding F4) was about how git reports
 // paths — quoting, renames — which a mocked git could not reproduce.
@@ -57,6 +57,131 @@ describe('dirtyPaths', () => {
 
   it('is empty on a clean repo', async () => {
     expect((await dirtyPaths(repo)).size).toBe(0)
+  })
+})
+
+describe('unversionedWikiPages', () => {
+  // This is the reporting half of the F4 trade-off. The sweep in `newWikiPaths` is skipped
+  // whenever a run cannot prove it was the sole writer, on the stated grounds that "losing a
+  // page from a commit is visible and fixable" - nothing ever made it visible, so pages sat
+  // outside git for a month. These tests pin what "visible" means.
+
+  it('reports a page that was never committed', async () => {
+    write('wiki/concepts/Bash Written.md')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual(['wiki/concepts/Bash Written.md'])
+    expect(u.modified).toEqual([])
+  })
+
+  it('reports a committed page whose working copy has drifted', async () => {
+    write('wiki/concepts/Existing.md', 'changed')
+    const u = await unversionedWikiPages(repo)
+    expect(u.modified).toEqual(['wiki/concepts/Existing.md'])
+    expect(u.untracked).toEqual([])
+  })
+
+  it('is silent on a clean vault - the healthy state has to be reachable', async () => {
+    expect(await unversionedWikiPages(repo)).toEqual({ untracked: [], modified: [] })
+  })
+
+  it('ignores everything that is not a wiki page', async () => {
+    // .raw payloads, index scratch and plugin files are dirty constantly by design; counting
+    // them would bury the one number that means content is at risk.
+    write('.raw/01ABC/manifest.json')
+    write('.vault-meta/lint-scan.json')
+    write('wiki/concepts/Note.txt')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual([])
+    expect(u.modified).toEqual([])
+  })
+
+  it('handles page names with spaces and punctuation without unquoting artifacts', async () => {
+    // Vault titles routinely carry spaces, commas and parentheses; porcelain quotes those
+    // unless -z is used, and a quoted path would silently never match the wiki/ prefix.
+    write('wiki/concepts/Log P and Log D (HPLC, Shake-Flask).md')
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual(['wiki/concepts/Log P and Log D (HPLC, Shake-Flask).md'])
+  })
+
+  it('counts a page deleted-but-not-committed as neither - it is not content at risk', async () => {
+    fs.rmSync(path.join(repo, 'wiki/concepts/Existing.md'))
+    const u = await unversionedWikiPages(repo)
+    expect(u.untracked).toEqual([])
+    expect(u.modified).toEqual([])
+  })
+
+  it('degrades to empty outside a git repo rather than throwing', async () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-'))
+    try {
+      expect(await unversionedWikiPages(bare)).toEqual({ untracked: [], modified: [] })
+    } finally {
+      fs.rmSync(bare, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('index.lock discipline', () => {
+  // 2026-08-24: an ingest's `git add` failed with "Unable to create .git/index.lock: File
+  // exists" and its commit was dropped - the run's `.raw/` payload and address counter stayed
+  // unversioned, and only the wiki pages were recovered (by the reconcile pass, which covers
+  // nothing else). The lock holder was our own status polling: `/api/v1/stats` runs one on
+  // every SSE tick, and a job's `done` transition publishes that tick milliseconds before the
+  // run's own commit. Both halves of the fix are pinned here.
+
+  /** Stat info git has cached is now stale, so the next read WANTS to refresh the index. */
+  const staleTheIndex = (): void => {
+    const now = Date.now() / 1000 + 5
+    fs.utimesSync(path.join(repo, 'wiki/concepts/Existing.md'), now, now)
+  }
+  const indexMtime = (): number => fs.statSync(path.join(repo, '.git/index')).mtimeMs
+
+  it('a read does not take the lock - it never rewrites the index', async () => {
+    staleTheIndex()
+    const before = indexMtime()
+    await dirtyPaths(repo)
+    await unversionedWikiPages(repo)
+    // A plain `git status` writes the refreshed index back, and holds `.git/index.lock`
+    // while it does. `--no-optional-locks` is what skips that write; without it these two
+    // reads race every commit the service makes.
+    expect(indexMtime()).toBe(before)
+  })
+
+  it('the control: a plain status DOES rewrite it, which is the race being avoided', () => {
+    staleTheIndex()
+    const before = indexMtime()
+    execFileSync('git', ['-C', repo, 'status', '--porcelain', '-z', '--untracked-files=all'], { stdio: 'pipe' })
+    expect(indexMtime()).not.toBe(before)
+  })
+
+  it('a write retries through a lock held by someone else', async () => {
+    // Anything may hold it for a few milliseconds - Obsidian's git plugin, a terminal, our
+    // own reads before this fix. A command that loses the race did no work at all, so the
+    // retry is safe: this must end in a commit, not in pages left on disk.
+    write('wiki/concepts/Written While Locked.md', '# page')
+    const lock = path.join(repo, '.git/index.lock')
+    fs.writeFileSync(lock, '')
+    const release = setTimeout(() => fs.rmSync(lock, { force: true }), 150)
+    try {
+      const res = await commitPaths(repo, 'ingest: contested', ['wiki/concepts/Written While Locked.md'])
+      expect(res.committed).toBe(true)
+      expect(res.committedPages).toEqual(['wiki/concepts/Written While Locked.md'])
+    } finally {
+      clearTimeout(release)
+      fs.rmSync(lock, { force: true })
+    }
+  })
+
+  it('gives up on a lock that never clears, rather than hanging', async () => {
+    write('wiki/concepts/Never Committed.md', '# page')
+    const lock = path.join(repo, '.git/index.lock')
+    fs.writeFileSync(lock, '')
+    try {
+      await expect(commitPaths(repo, 'ingest: stuck', ['wiki/concepts/Never Committed.md'])).rejects.toThrow(
+        /index\.lock/,
+      )
+    } finally {
+      fs.rmSync(lock, { force: true })
+    }
   })
 })
 
@@ -141,5 +266,46 @@ describe('commitVault — no add -A sweep on an explicit pathspec', () => {
       .trim()
       .split('\n')
     expect(committed).toEqual(expect.arrayContaining(['wiki/concepts/A.md', 'wiki/concepts/B.md']))
+  })
+})
+
+/**
+ * Git QUOTES any path holding a byte outside plain ASCII, escaping it octally:
+ * `wiki/x — y.md` comes back as `"wiki/x \342\200\224 y.md"`. A reader that filters on
+ * `startsWith('wiki/')` drops it, so the page silently vanished from what a run reported
+ * having written - and in this vault every research synthesis page has an em dash in its
+ * name (2026-08-26). Every reader passes `-z` now, which never quotes.
+ */
+describe('paths git would quote', () => {
+  const NON_ASCII = 'wiki/questions/Research: Topic — State of the Art.md'
+
+  it('reports a page whose name holds an em dash', async () => {
+    write(NON_ASCII, '# synthesis')
+    write('wiki/concepts/Plain.md', '# plain')
+    const res = await commitVault(repo, 'maintenance: research', {
+      pathspec: [NON_ASCII, 'wiki/concepts/Plain.md'],
+    })
+
+    expect(res.committed).toBe(true)
+    expect(res.committedPages).toEqual(expect.arrayContaining([NON_ASCII, 'wiki/concepts/Plain.md']))
+  })
+
+  it('reports one whose name holds an umlaut, through the pathspec-limited commit too', async () => {
+    const UMLAUT = 'wiki/concepts/Größe und Maß.md'
+    write(UMLAUT, '# size')
+    const res = await commitPaths(repo, 'edit: size', [UMLAUT])
+
+    expect(res.committed).toBe(true)
+    expect(res.committedPages).toEqual([UMLAUT])
+  })
+
+  it('still reports nothing but wiki markdown', async () => {
+    write(NON_ASCII, '# synthesis')
+    write('.vault-meta/address-counter.txt', '42')
+    const res = await commitVault(repo, 'maintenance: research', {
+      pathspec: [NON_ASCII, '.vault-meta/address-counter.txt'],
+    })
+
+    expect(res.committedPages).toEqual([NON_ASCII])
   })
 })

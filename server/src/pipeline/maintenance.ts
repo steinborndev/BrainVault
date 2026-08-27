@@ -36,6 +36,7 @@ import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
+import type { AgentRunStore } from '../db/agent-runs.js'
 import { Mutex } from '../util/mutex.js'
 
 /**
@@ -77,12 +78,90 @@ export type TagFixAction =
   | { readonly kind: 'drop'; readonly tag: string }
   | { readonly kind: 'merge'; readonly from: string; readonly to: string }
 
+/**
+ * Domain keys that are ALSO a legitimate content tag, so a page carrying both is not
+ * repeating itself.
+ *
+ * `meta` says what a page IS - vault machinery: an index, a report, a fold - which is a fact
+ * about the page and not only about the shelf it sits on. Every other domain key in `tags:`
+ * is pure repetition of the `domain:` field.
+ *
+ * Kept in step with `DOMAIN_TAGS_THAT_STAY` in web/src/lib/tagReport.ts, which must not flag
+ * as redundant what this prompt deliberately leaves in place.
+ */
+export const DOMAIN_TAGS_THAT_STAY: readonly string[] = ['meta']
+
+/**
+ * The domain backfill's instructions (SPEC.md §12.4 Stufe 2).
+ *
+ * Frontmatter-only by construction, which is what makes it cheap and safe: the vault's
+ * semantic-tiling cache hashes page BODIES, so a backfill does not invalidate it.
+ *
+ * The domain lives in `domain:` and NOWHERE else. This prompt used to say the opposite - it
+ * required the domain key to be mirrored into `tags:` - and that closed a loop with the
+ * dashboard's tag hygiene, which correctly reads such a tag as repeating the field and
+ * offers to drop it: backfill sets the tag, tag repair removes it, the next backfill sets it
+ * again. Every new domain produced a due tag repair within minutes of being filled. The
+ * mirroring was also never a vault rule (the registry calls its tag lists "guidance for
+ * classification") and 94.7% of pages never carried it, so removing the tag - rather than
+ * silencing the report - is what matches both the rules and the vault as it stands.
+ *
+ * Exported for the test that keeps the instruction from coming back.
+ */
+export function domainBackfillPrompt(domainKeys: readonly string[]): string {
+  const keys = domainKeys.join(', ')
+  const keep = DOMAIN_TAGS_THAT_STAY.map((t) => `\`${t}\``).join(', ')
+  return (
+    `Read ${DOMAIN_REGISTRY_PATH} — it is the closed list of allowed domains. Then go through ` +
+    'EVERY markdown page under wiki/ (all subdirectories, all page types: concepts, entities, ' +
+    'sources, references, comparisons, questions, folds, meta, and the pages directly in wiki/) ' +
+    'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
+    `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
+    'Rules:\n' +
+    `- A page that already has a REAL domain from the list keeps it. A page whose current ` +
+    'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
+    '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
+    `- A page carrying \`${UNASSIGNED}\` is NOT settled: re-classify it against the list above — ` +
+    'a domain added after the last backfill may fit it now. It keeps ' +
+    `\`${UNASSIGNED}\` only when still no listed domain fits.\n` +
+    `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
+    `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
+    '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
+    'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
+    '- The domain belongs in the `domain:` field and NOWHERE else. A tag that merely names a ' +
+    'domain key repeats what the field already says, so while you are in a page\'s ' +
+    'frontmatter, REMOVE any tag equal to a domain key: the page\'s own domain, the domain it ' +
+    `used to carry if you re-file it, and \`${UNASSIGNED}\`. The only exception is ${keep}, ` +
+    'which is a real content tag as well as a domain key — leave it exactly as you find it, ' +
+    'on every page.\n' +
+    '- Beyond `domain:` and those redundant tags, change nothing: leave every other tag, all ' +
+    'other frontmatter fields, page bodies, titles, and wikilinks untouched. Do not create, ' +
+    'delete, rename or merge any page.\n' +
+    `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
+    'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
+    'Work through the pages systematically so none is skipped. When done, report the total ' +
+    'number of pages touched and a per-domain count, plus the list of pages you left as ' +
+    `\`${UNASSIGNED}\` and why.`
+  )
+}
+
 /** Thrown by `startDomainBackfill` when the vault has no registry installed → HTTP 409. */
 export class DomainRegistryMissingError extends Error {
   override readonly name = 'DomainRegistryMissingError'
 }
 
 /** Thrown by `startLintFix` when the vault has no lint report to fix against → HTTP 409. */
+/**
+ * Where a lint run parks machine-readable findings. Pinned by the service (not by the
+ * skill) so `startLintReport` knows where to look, and under `.vault-meta/` because that is
+ * the derived-artifact area the vault already keeps out of its git history.
+ */
+export const LINT_SCAN_PATH = '.vault-meta/lint-scan.json'
+
+export class LintScanMissingError extends Error {
+  override readonly name = 'LintScanMissingError'
+}
+
 export class LintReportMissingError extends Error {
   override readonly name = 'LintReportMissingError'
 }
@@ -121,6 +200,12 @@ export interface MaintenanceRunnerOptions {
    * behaves exactly as before (in-memory run history only).
    */
   readonly stateStore?: MaintenanceStateStore
+  /**
+   * Persistent per-RUN history (schema v12). `stateStore` keeps one row per kind, which is
+   * the right shape for "what's due" and the wrong one for a run list - a research run's
+   * topic, lens, cost and duration need a row of their own or they die with the process.
+   */
+  readonly runStore?: AgentRunStore
 }
 
 export interface MaintenanceResult {
@@ -152,6 +237,15 @@ export interface MaintenanceRun {
   /** SSE channel carrying this run's live log — the UI subscribes to it. */
   readonly channel: string
   readonly status: MaintenanceRunStatus
+  /**
+   * What this run is ABOUT, for surfaces outside the screen that started it (Home's
+   * in-flight list, the sidebar badge, the inbox). Only kinds whose subject is not implied
+   * by the kind itself set it: a research run's topic, a cleanup's page list. Without it
+   * the client falls back to the kind's title, which is exactly right for `lint`.
+   */
+  readonly label?: string
+  /** Research runs only: the lens key the run was started under (SPEC.md, "Achse A"). */
+  readonly profileKey?: string
   readonly startedAt: string
   readonly finishedAt?: string
   readonly result?: MaintenanceResult
@@ -166,6 +260,10 @@ const RUN_HISTORY_CAP = 25
 interface RunOptions {
   /** SDK session to resume, so the run inherits a conversation (used by `save`). */
   readonly resumeSessionId?: string
+  /** Human subject of the run, surfaced on the tracked record (see `MaintenanceRun.label`). */
+  readonly label?: string
+  /** Research lens key, surfaced on the tracked record. */
+  readonly profileKey?: string
   /** Overrides the default `maintenance: <kind>` commit subject. */
   readonly commitMessage?: string
   /** Vault-derived system-prompt extension; defaults to the domain registry for write runs. */
@@ -184,6 +282,7 @@ export class MaintenanceRunner {
   private readonly validate: Validator | undefined
   private readonly buildIndex: RetrieveIndexBuilder
   private readonly stateStore: MaintenanceStateStore | undefined
+  private readonly runStore: AgentRunStore | undefined
   /** One maintenance run at a time — they all write the vault. */
   private readonly runMutex = new Mutex()
   /**
@@ -213,6 +312,7 @@ export class MaintenanceRunner {
     this.validate = opts.validate
     this.buildIndex = opts.buildIndex ?? buildRetrieveIndex
     this.stateStore = opts.stateStore
+    this.runStore = opts.runStore
   }
 
   /** The credential for a run. The route 503s in setup mode, so this throwing is a wiring bug. */
@@ -221,22 +321,85 @@ export class MaintenanceRunner {
     return this.auth
   }
 
-  /** Starts a lint run in the background; returns its tracked run immediately. */
+  /**
+   * Starts a lint run in the background; returns its tracked run immediately.
+   *
+   * The prompt is written around what a lint at this vault's size actually does. At ~500
+   * pages the agent walked the wiki with Read/Grep and wrote the report directly. Past ~750
+   * it reaches for a scanner instead - a sound instinct, and the earlier wording did not
+   * forbid it because "use only the read-based checks" was attached to the semantic-tiling
+   * sentence and read as scoped to it. What went wrong was the step AFTER: a run wrote a
+   * 254-line scanner and a 472 KB JSON dump, then ended its turn without rendering the
+   * report, because rendering meant reading that dump back into context.
+   *
+   * So the scripting path is now explicit and steered rather than discouraged: script the
+   * scan if you like, but the SCRIPT emits the finished report. That removes the read-back
+   * entirely instead of asking the agent to be careful about it. Intermediate machine
+   * output has a pinned home (LINT_SCAN_PATH) that is excluded from vault history and that
+   * `startLintReport` can render from if a run still stops half way.
+   */
   startLint(): MaintenanceRun {
-    // Be explicit: run the skill, WRITE the report file (the dashboard reads it back), and
-    // report-only — never auto-fix, so a lint can't silently rewrite content pages.
     return this.start(
       'lint',
-      'Use the wiki-lint skill to health-check the entire wiki and WRITE the full report to ' +
-        'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD). Report only — do NOT auto-fix or ' +
-        'modify any existing wiki page. Keep the standard report sections (Orphan Pages, Dead Links, ' +
-        'Missing Pages, Frontmatter Gaps, Stale Claims, Cross-Reference Gaps). ' +
+      'Use the wiki-lint skill to health-check the entire wiki.\n\n' +
+        'THE DELIVERABLE is the report file at wiki/meta/lint-report-<today>.md (date as ' +
+        'YYYY-MM-DD). The run is not complete until that file exists. Keep the skill\'s ' +
+        'standard sections (Orphan Pages, Dead Links, Missing Pages, Frontmatter Gaps, ' +
+        'Stale Claims, Cross-Reference Gaps).\n\n' +
+        'The wiki is large, so scanning it with a script is fine and usually better than ' +
+        'reading page by page. If you do write a scanner:\n' +
+        `- have it WRITE THE REPORT ITSELF, or emit a small aggregate (counts plus the top ` +
+        `findings per section) at ${LINT_SCAN_PATH} and render the report from that.\n` +
+        '- never dump the full findings to a file and then read that file back to write the ' +
+        'report: that is how a run ends up having done all the work and produced no report.\n' +
+        `- keep scratch out of the wiki. ${LINT_SCAN_PATH} is the one intermediate path; it ` +
+        'is kept out of vault git history. Do not leave other scratch files behind.\n\n' +
+        'Report only - do NOT auto-fix, and do not modify any EXISTING wiki page. Writing ' +
+        'the new report file is expected and is not a modification.\n' +
         // Belt-and-braces with the hard kill (F1): the DragonScale Mechanism 3 "semantic tiling"
         // path runs embeddings via a long bash call. The runner will now group-kill a stuck run,
-        // but the report only needs the read-based checks, so still skip the heavy embedding pass.
-        'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass — ' +
-        'use only the read-based checks (Read/Grep/Glob).',
+        // but the report only needs the structural checks, so still skip the heavy embedding pass.
+        'Do NOT run DragonScale Mechanism 3 semantic tiling or any embedding/similarity pass.',
       'ingest',
+    )
+  }
+
+  /**
+   * Renders the report from a scan a previous run already produced - the cheap half of a
+   * lint, without repeating the expensive half.
+   *
+   * This exists because the two phases fail independently. Scanning 750 pages costs minutes
+   * and dollars; rendering the result costs a fraction of that. When a run leaves a fresh
+   * scan artifact and no report, re-running the whole lint throws away work that is sitting
+   * right there and still correct.
+   *
+   * Throws when there is nothing fresher than the newest report to render - same shape as
+   * `startLintFix`: the artifact is what BOUNDS the run, so its absence is a 409, not a
+   * prompt that invites the agent to improvise.
+   */
+  startLintReport(): MaintenanceRun {
+    const scan = this.latestLintScan()
+    if (!scan) {
+      throw new LintScanMissingError(
+        'no lint scan to render - nothing under .vault-meta/ holds findings newer than the ' +
+          'newest report. Run a lint instead.',
+      )
+    }
+    return this.start(
+      'lint',
+      `A previous lint run scanned the wiki and left its findings at ${scan.path}, but never ` +
+        'wrote the report. Render the report from that file - do NOT re-scan the wiki.\n\n' +
+        `1. Inspect ${scan.path} enough to learn its shape (its top-level keys and the shape ` +
+        'of one entry per key). It may be large: sample it, do not read it whole.\n' +
+        '2. Write a short script that reads it and emits the report to ' +
+        'wiki/meta/lint-report-<today>.md (date as YYYY-MM-DD), with the skill\'s standard ' +
+        'sections (Orphan Pages, Dead Links, Missing Pages, Frontmatter Gaps, Stale Claims, ' +
+        'Cross-Reference Gaps) plus a Summary with the page and issue counts.\n' +
+        '3. Where a section has more than 30 findings, list the first 30 and state the total ' +
+        'for the rest. The report is for a person to read.\n\n' +
+        'Do not modify any existing wiki page, and leave no scratch files behind.',
+      'ingest',
+      { commitMessage: 'maintenance: lint report (rendered from an existing scan)' },
     )
   }
 
@@ -324,6 +487,9 @@ export class MaintenanceRunner {
         lens +
         overlap,
       'research',
+      // The topic and lens ride on the run record so every OTHER screen can name what is
+      // running - the dashboard used to know this only inside the composer that started it.
+      { label: topic, profileKey: profile.key },
     )
   }
 
@@ -465,41 +631,9 @@ export class MaintenanceRunner {
         `no domain registry at ${DOMAIN_REGISTRY_PATH} — install it (scripts/install-domain-registry.sh) before running a backfill`,
       )
     }
-    const keys = registry.domains.map((d) => d.key).join(', ')
-    return this.start(
-      'domain-backfill',
-      `Read ${DOMAIN_REGISTRY_PATH} — it is the closed list of allowed domains. Then go through ` +
-        'EVERY markdown page under wiki/ (all subdirectories, all page types: concepts, entities, ' +
-        'sources, references, comparisons, questions, folds, meta, and the pages directly in wiki/) ' +
-        'and make sure each one carries a `domain:` field in its YAML frontmatter.\n\n' +
-        `Allowed values, and nothing else: ${keys}, ${UNASSIGNED}.\n\n` +
-        'Rules:\n' +
-        `- A page that already has a REAL domain from the list keeps it. A page whose current ` +
-        'value is NOT on the list (the field predates the registry, e.g. `investment-funds` or ' +
-        '`mrna-delivery`) must be re-filed to the correct listed domain.\n' +
-        `- A page carrying \`${UNASSIGNED}\` is NOT settled: re-classify it against the list above — ` +
-        'a domain added after the last backfill may fit it now. It keeps ' +
-        `\`${UNASSIGNED}\` only when still no listed domain fits.\n` +
-        `- If no listed domain fits, set \`${UNASSIGNED}\`. Do not invent new keys, and do not add ` +
-        `any key to ${DOMAIN_REGISTRY_PATH} — the registry is edited by humans only.\n` +
-        '- Classify by what the page is ABOUT. Tag hints in the registry are guidance, not a ' +
-        'lookup table; ignore entity-shaped tags (person, organization, product, researcher).\n' +
-        '- Frontmatter edits are limited to the `domain:` field and the domain tag mirrored into ' +
-        'the `tags:` list — and the two must be CONSISTENT on every page, not only on pages you ' +
-        `re-file: a page whose \`domain:\` is a real listed key must not carry a stale ` +
-        `\`${UNASSIGNED}\` tag. Remove it and make sure the current domain key is present as a ` +
-        'tag. When you re-file a page, also drop the tag mirroring its previous domain key. ' +
-        `Pages whose domain is \`${UNASSIGNED}\` keep the \`${UNASSIGNED}\` tag. Leave every ` +
-        'other tag, all other frontmatter fields, page bodies, titles, and wikilinks untouched. ' +
-        'Do not create, delete, rename or merge any page.\n' +
-        `- ${DOMAIN_REGISTRY_PATH} itself and other vault-machinery pages (index, hot, log, ` +
-        'overview, session records, folds, lint reports) belong to the `meta` domain.\n\n' +
-        'Work through the pages systematically so none is skipped. When done, report the total ' +
-        'number of pages touched and a per-domain count, plus the list of pages you left as ' +
-        `\`${UNASSIGNED}\` and why.`,
-      'ingest',
-      { commitMessage: 'maintenance: domain backfill' },
-    )
+    return this.start('domain-backfill', domainBackfillPrompt(registry.domains.map((d) => d.key)), 'ingest', {
+      commitMessage: 'maintenance: domain backfill',
+    })
   }
 
   /**
@@ -632,6 +766,8 @@ export class MaintenanceRunner {
       kind,
       channel: maintenanceChannel(kind),
       status: 'running',
+      ...(opts.label !== undefined ? { label: opts.label } : {}),
+      ...(opts.profileKey !== undefined ? { profileKey: opts.profileKey } : {}),
       startedAt: new Date().toISOString(),
     }
     this.runs.set(id, run)
@@ -702,6 +838,30 @@ export class MaintenanceRunner {
         /* swallowed — operational bookkeeping only */
       }
     }
+    // The run's own row (schema v12): everything the per-kind state deliberately drops -
+    // what it was about, which lens, what it cost, how long it took. Same discipline as
+    // above: bookkeeping may never corrupt the settle.
+    if (this.runStore !== undefined) {
+      try {
+        this.runStore.record({
+          id,
+          kind: prev.kind,
+          label: prev.label ?? null,
+          profileKey: prev.profileKey ?? null,
+          ok: status === 'done',
+          pages: patch.result?.pages ?? [],
+          tokensIn: patch.result?.usage.tokensIn ?? null,
+          tokensOut: patch.result?.usage.tokensOut ?? null,
+          costUsd: patch.result?.usage.costUsd ?? null,
+          error: patch.error ?? patch.result?.error ?? null,
+          startedAt: prev.startedAt,
+          finishedAt: settled.finishedAt ?? new Date().toISOString(),
+        })
+      } catch {
+        /* swallowed - operational bookkeeping only */
+      }
+    }
+
     const cb = this.settledCallbacks.get(id)
     if (cb !== undefined) {
       this.settledCallbacks.delete(id)
@@ -732,6 +892,9 @@ export class MaintenanceRunner {
   ): Promise<MaintenanceResult> {
     return this.runMutex.runExclusive(async () => {
       const channel = maintenanceChannel(kind)
+      // Stamped inside the mutex, i.e. when this run actually starts writing - the artifact
+      // check below asks "did THIS run produce it", not "does some old one exist".
+      const startedMs = Date.now()
       const log = (level: 'info' | 'warn' | 'error', message: string): void =>
         this.events.publish({ kind: 'log', log: { jobId: channel, ts: new Date().toISOString(), level, message } })
 
@@ -747,7 +910,7 @@ export class MaintenanceRunner {
       // Bracket the run and register as a writer, so pages the agent creates or renames via Bash
       // can still be committed — but only if we turn out to be the sole writer (F4).
       const dirtyBefore = await dirtyPaths(this.vaultRoot)
-      const endRun = this.runRegistry.begin()
+      const endRun = this.runRegistry.begin(dirtyBefore)
       const written = new Set<string>()
       const res = await this.runAgentFn({
         vaultRoot: this.vaultRoot,
@@ -814,15 +977,33 @@ export class MaintenanceRunner {
 
       const base: MaintenanceResult = { ok: true, kind, pages, usage: res.usage, answer: res.result }
       if (kind === 'lint') {
-        // Prefer the written report file; fall back to parsing the agent's inline answer, so
-        // a run that summarised in text instead of writing a file still yields structure.
-        const fromFile = this.readLatestLintReport()
-        if (fromFile && fromFile.report.totalFindings > 0) {
-          return { ...base, lint: fromFile.report, reportPath: fromFile.path }
+        // The report file IS the deliverable: lint-fix is bounded by it, and the status model
+        // dates the whole area from it. A run that exits cleanly without writing one leaves
+        // both of those reading a report that may be months old - which is why this settles as
+        // a FAILURE rather than a success with nothing behind it. Measured against the run's
+        // own start, so yesterday's report can never stand in for today's run.
+        const fresh = this.readLatestLintReport(startedMs)
+        if (fresh) {
+          return { ...base, lint: fresh.report, reportPath: fresh.path }
         }
+        // No file, but the agent may still have summarised inline - usable, and honest about
+        // where it came from, so the UI can say "no report written" while showing findings.
         const fromText = this.parseReportText(res.result)
-        if (fromFile) return { ...base, lint: fromFile.report, reportPath: fromFile.path }
-        if (fromText.totalFindings > 0 || fromText.sections.length > 0) return { ...base, lint: fromText }
+        if (fromText.totalFindings > 0 || fromText.sections.length > 0) {
+          log('warn', 'lint wrote no report file - reporting the findings from the answer text only')
+          return { ...base, lint: fromText }
+        }
+        log('error', 'lint finished without writing a report to wiki/meta/')
+        return {
+          ok: false,
+          kind,
+          pages,
+          usage: res.usage,
+          error:
+            'the lint run finished without writing a report to wiki/meta/ - nothing to base safe ' +
+            'fixes on, so the run counts as failed. Re-run the lint.',
+          ...(res.result !== undefined ? { answer: res.result } : {}),
+        }
       }
       if (kind === 'domain-review') {
         // The answer IS the deliverable here (nothing is written), so parse it directly. An
@@ -847,8 +1028,57 @@ export class MaintenanceRunner {
     }))
   }
 
-  /** Finds and parses the newest `wiki/meta/lint-report-*.md` the run just wrote. */
-  private readLatestLintReport(): { report: LintReport; path: string } | undefined {
+  /**
+   * The newest lint scan artifact worth rendering: a `.vault-meta/lint*scan*.json` that is
+   * NEWER than the newest report. The age comparison is the whole point - a scan older than
+   * the report has already been rendered, and offering to render it again would produce a
+   * report that goes backwards.
+   *
+   * The name match is loose on purpose. `LINT_SCAN_PATH` is what the prompt asks for, but a
+   * run that predates that instruction picked its own name, and those findings are just as
+   * renderable. Anything matching the shape counts; the newest wins.
+   */
+  private latestLintScan(): { path: string; mtimeMs: number } | undefined {
+    const metaDir = path.join(this.vaultRoot, '.vault-meta')
+    let names: string[]
+    try {
+      names = fs.readdirSync(metaDir).filter((f) => /^lint[-_].*scan.*\.json$/i.test(f))
+    } catch {
+      return undefined
+    }
+    let newest: { path: string; mtimeMs: number } | undefined
+    for (const name of names) {
+      try {
+        const mtimeMs = fs.statSync(path.join(metaDir, name)).mtimeMs
+        if (newest === undefined || mtimeMs > newest.mtimeMs) {
+          newest = { path: path.posix.join('.vault-meta', name), mtimeMs }
+        }
+      } catch {
+        /* vanished between readdir and stat */
+      }
+    }
+    if (newest === undefined) return undefined
+    const report = this.readLatestLintReport()
+    if (report !== undefined) {
+      try {
+        const reportMs = fs.statSync(path.join(this.vaultRoot, report.path)).mtimeMs
+        if (reportMs >= newest.mtimeMs) return undefined
+      } catch {
+        /* report listed but unreadable - treat the scan as renderable */
+      }
+    }
+    return newest
+  }
+
+  /**
+   * Finds and parses the newest `wiki/meta/lint-report-*.md`.
+   *
+   * `writtenAfterMs` is what separates "a report exists" from "THIS run wrote a report":
+   * pass a run's start time and a stale report is ignored, so a run that produced nothing
+   * cannot inherit an older run's artifact. Callers that just want the current report
+   * (lint-fix, which is deliberately bounded by whatever the newest one is) omit it.
+   */
+  private readLatestLintReport(writtenAfterMs?: number): { report: LintReport; path: string } | undefined {
     const metaDir = path.join(this.vaultRoot, 'wiki', 'meta')
     let files: string[]
     try {
@@ -861,6 +1091,15 @@ export class MaintenanceRunner {
     }
     const newest = files[files.length - 1]
     if (!newest) return undefined
+    if (writtenAfterMs !== undefined) {
+      // Second granularity on some filesystems - allow a small slack rather than rejecting a
+      // report written in the same second the run began.
+      try {
+        if (fs.statSync(path.join(metaDir, newest)).mtimeMs < writtenAfterMs - 1000) return undefined
+      } catch {
+        return undefined
+      }
+    }
     const markdown = fs.readFileSync(path.join(metaDir, newest), 'utf8')
     const pageIndex = indexWikiPages(this.vaultRoot)
     const report = parseLintReport(markdown, (label) => ({

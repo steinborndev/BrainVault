@@ -23,6 +23,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { parseWikilinks } from './citations.js'
+import { pluginDocPages } from './upstream-guard.js'
 import { parseFrontmatterMeta, type VaultGraph } from './graph.js'
 
 export type ValidationRule =
@@ -69,9 +70,14 @@ const isLintReport = (rel: string): boolean => /^wiki\/meta\/lint-report-.*\.md$
  * append-only records that legitimately keep referring to deleted pages (the same policy the
  * reference-cleanup run enforces). Every ingest appends to log.md, so flagging its historical
  * links would repeat the identical findings after every single run.
+ *
+ * `pluginDocs` adds the plugin-shipped pages under wiki/: claude-obsidian's own docs carry
+ * `related:` links into docs a Generic-mode vault has no page for, and upstream-guard refuses
+ * every agent write to those pages - so the finding names a fix that is structurally
+ * forbidden. The graph's gap list drops them for the same reason (graph.ts, GraphGap).
  */
-const skipLinkCheck = (rel: string): boolean =>
-  isLintReport(rel) || rel === 'wiki/log.md' || rel === 'wiki/hot.md'
+const skipLinkCheck = (rel: string, pluginDocs: ReadonlySet<string>): boolean =>
+  isLintReport(rel) || rel === 'wiki/log.md' || rel === 'wiki/hot.md' || pluginDocs.has(rel)
 
 const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, '')
 
@@ -131,12 +137,6 @@ function readDragonScale(vaultRoot: string): DragonScaleState {
     /* no manifest → default baseline, nothing grandfathered */
   }
   return { active: true, rollout, legacy, counter }
-}
-
-/** Wikilink targets minus code: fenced blocks and inline code hold illustrative `[[examples]]`
- * (the 2026-07-19 lint had to hand-annotate those as false positives — strip them up front). */
-function linkTargets(markdown: string): string[] {
-  return parseWikilinks(markdown.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]+`/g, ''))
 }
 
 /**
@@ -245,6 +245,7 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
   if (pages.length === 0) return findings
 
   const ds = readDragonScale(vaultRoot)
+  const pluginDocs = pluginDocPages(vaultRoot)
   // These cost a vault walk / edge scan — built only when a page actually needs them.
   let fileIndex: Set<string> | undefined
   let addresses: Map<string, string[]> | undefined
@@ -326,7 +327,7 @@ export function validatePages(vaultRoot: string, paths: readonly string[], graph
       }
     }
 
-    const targets = skipLinkCheck(rel) ? [] : linkTargets(markdown)
+    const targets = skipLinkCheck(rel, pluginDocs) ? [] : parseWikilinks(markdown)
     if (targets.length > 0) {
       fileIndex ??= buildFileIndex(vaultRoot)
       for (const t of targets) {

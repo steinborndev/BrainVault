@@ -1,6 +1,6 @@
 /**
  * A created/updated wiki page as a chip. The PRIMARY action is the in-dashboard vault viewer
- * (`/vault/page/…`) — it works from any browser, including Windows, where the obsidian://
+ * (`/vault/page/…`) - it works from any browser, including Windows, where the obsidian://
  * handler routes to Windows-Obsidian, which cannot open a WSL vault over `\\wsl$` (EISDIR,
  * won't-fix; SPEC.md §3/§11). Obsidian stays available as a secondary action for WSLg
  * setups, plus the copy-path fallback.
@@ -14,7 +14,7 @@ import { Icon } from './Icon.tsx'
 /**
  * Copies text with a legacy fallback: `navigator.clipboard` is undefined outside secure
  * contexts (and in some WSLg browsers), and this copy IS the documented fallback when the
- * obsidian:// handler isn't wired — it must not fail silently.
+ * obsidian:// handler isn't wired - it must not fail silently.
  */
 function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard) {
@@ -57,10 +57,15 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
     window.location.href = obsidianUri(vaultName, path)
   }
 
-  // The chip is a <span> holding an <a> plus sibling <button>s — interactive elements must
+  // The chip is a <span> holding an <a> plus sibling <button>s - interactive elements must
   // not nest inside the anchor (invalid HTML; breaks keyboard/screen-reader activation).
+  //
+  // The chip stops its own click here, so it can sit inside a row that opens something else
+  // (Home's activity table) without that row hijacking a link to a page. Scoped to the chip
+  // rather than to the band around it: the band is most of a row's height, and stopping the
+  // click there made "click the row" mean "hit the title line".
   return (
-    <span className="pagelink">
+    <span className="pagelink" onClick={(e) => e.stopPropagation()}>
       <a
         className="pagelink-main"
         href={pageRoute(path)}
@@ -79,7 +84,7 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
       <button
         className="copy"
         onClick={copy}
-        title={copied === 'failed' ? `Copy failed — path: ${path}` : 'Copy vault path'}
+        title={copied === 'failed' ? `Copy failed - path: ${path}` : 'Copy vault path'}
         aria-label="Copy path"
       >
         {copied === 'ok' ? <Icon name="check" /> : copied === 'failed' ? <Icon name="x" /> : <Icon name="copy" />}

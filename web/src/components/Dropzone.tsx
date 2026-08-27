@@ -1,11 +1,18 @@
 /**
- * The ingestion entry point (SPEC.md §6.2, TASKS-M3 §4): drag-and-drop files, browse, or
- * paste a URL / text. Multiple files in one drop go up as a batch (the server groups them).
- * Shows accepted/duplicate/error feedback. The size cap is enforced server-side (a 413
- * surfaces here as an error toast), so the UI doesn't hardcode the limit.
+ * The ingestion entry point (SPEC.md §6.2, redesign 2026-08-25 second pass): drag-and-drop
+ * files, browse, or paste a URL / note (multi-line, with an optional title). Multiple files
+ * in one drop go up as a batch (the server groups them).
+ *
+ * It lives in Home's control column now - dropping a file is a control, and it belongs where
+ * every other control on every other screen is. That is also why the wide card variant and
+ * its collapsed one-row state are gone: at column width there is nothing to collapse, and
+ * the surface no longer competes with the activity stream for the top of the screen.
+ *
+ * The channel dots stay: the watch folder and the Telegram bot are the other two ways in,
+ * and they used to be discoverable only through a popover hover.
  */
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type EnqueueResult } from '../api/client.ts'
 import { Icon } from './Icon.tsx'
@@ -22,12 +29,25 @@ function summarize(res: EnqueueResult): string {
   return parts.join(' · ') || 'Accepted'
 }
 
+/** One line that is a URL = a link job; anything else (or multi-line) = a note. */
+function looksLikeUrl(value: string): boolean {
+  return !value.includes('\n') && /^https?:\/\/\S+$/i.test(value.trim())
+}
+
 export function Dropzone(): React.ReactElement {
   const qc = useQueryClient()
   const [over, setOver] = useState(false)
   const [toast, setToast] = useState<Toast>(null)
-  const [url, setUrl] = useState('')
+  const [text, setText] = useState('')
+  const [title, setTitle] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+
+  // Success toasts dismiss themselves; errors stay until the next action replaces them.
+  useEffect(() => {
+    if (toast?.kind !== 'ok') return
+    const t = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const invalidate = (): void => {
     qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -43,11 +63,14 @@ export function Dropzone(): React.ReactElement {
   })
 
   const submit = useMutation({
-    mutationFn: (value: string) =>
-      /^https?:\/\//i.test(value.trim()) ? api.submitUrl(value.trim()) : api.submitText(value),
+    mutationFn: ({ value, noteTitle }: { value: string; noteTitle: string }) =>
+      looksLikeUrl(value)
+        ? api.submitUrl(value.trim())
+        : api.submitText(value, noteTitle.trim() === '' ? undefined : noteTitle.trim()),
     onSuccess: (res) => {
       setToast({ kind: 'ok', text: summarize(res) })
-      setUrl('')
+      setText('')
+      setTitle('')
       invalidate()
     },
     onError: (e: Error) => setToast({ kind: 'err', text: e.message }),
@@ -58,6 +81,10 @@ export function Dropzone(): React.ReactElement {
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
   const maxBytes = health.data?.limits?.maxUploadBytes
 
+  // The other two intake channels, visible where intake happens.
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const telegram = useQuery({ queryKey: ['telegram-status'], queryFn: api.telegramStatus, staleTime: 300_000 })
+
   const takeFiles = (files: File[]): void => {
     if (files.length === 0) return
     if (maxBytes !== undefined) {
@@ -66,7 +93,7 @@ export function Dropzone(): React.ReactElement {
         const mb = Math.round(maxBytes / 1024 / 1024)
         setToast({
           kind: 'err',
-          text: `${oversized.map((f) => f.name).join(', ')}: over the ${mb} MB limit — not uploaded`,
+          text: `${oversized.map((f) => f.name).join(', ')}: over the ${mb} MB limit - not uploaded`,
         })
         files = files.filter((f) => f.size <= maxBytes)
         if (files.length === 0) return
@@ -83,76 +110,96 @@ export function Dropzone(): React.ReactElement {
       takeFiles(files)
       return
     }
-    // A dragged link/text (no files) — treat as a URL/text submission.
-    const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
-    if (text.trim()) submit.mutate(text.trim())
+    // A dragged link/text (no files) - treat as a URL/text submission.
+    const dragged = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+    if (dragged.trim()) submit.mutate({ value: dragged.trim(), noteTitle: '' })
   }
 
   const busy = upload.isPending || submit.isPending
   const maxMb = maxBytes !== undefined ? Math.round(maxBytes / 1024 / 1024) : undefined
+  const isNote = text.trim() !== '' && !looksLikeUrl(text)
 
-  // One compact card, two equal entry paths: files (drop/click) left, link/note right —
-  // instead of two stacked blocks that cost twice the height.
   return (
-    <div className="section">
-      <div className={`card intake${over ? ' over' : ''}`}>
-        <div
-          className="dropzone"
-          onDragOver={(e) => {
+    <div className="intake-panel">
+      <div
+        className={`dropzone slim${over ? ' over' : ''}`}
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={onDrop}
+        onClick={() => fileInput.current?.click()}
+        onKeyDown={(e) => {
+          // role="button" promises keyboard activation - deliver it (Enter/Space open the picker).
+          if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()
-            setOver(true)
+            fileInput.current?.click()
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label="Choose files or drag them here"
+      >
+        <Icon name="upload" />
+        <span className="dz-t">{busy ? 'Uploading…' : 'Drop files here'}</span>
+        <span className="dz-s">or click to choose{maxMb !== undefined ? ` · max ${maxMb} MB` : ''}</span>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            takeFiles(Array.from(e.target.files ?? []))
+            e.target.value = ''
           }}
-          onDragLeave={() => setOver(false)}
-          onDrop={onDrop}
-          onClick={() => fileInput.current?.click()}
-          onKeyDown={(e) => {
-            // role="button" promises keyboard activation — deliver it (Enter/Space open the picker).
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              fileInput.current?.click()
-            }
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="Choose files or drag them here"
-        >
-          <div className="icon">
-            <Icon name="upload" />
-          </div>
-          <h3>{busy ? 'Uploading…' : 'Drop files here or click'}</h3>
-          <p>PDF, Office, images, text — multiple files become one batch.</p>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              takeFiles(Array.from(e.target.files ?? []))
-              e.target.value = ''
-            }}
-          />
-        </div>
+        />
+      </div>
 
-        <div className="intake-side">
-          <span className="intake-label">Or paste a link / note</span>
-          <div className="url-row">
-            <input
-              type="text"
-              placeholder="https://… or a quick note"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && url.trim()) submit.mutate(url.trim())
-              }}
-            />
-            <button className="btn primary" disabled={!url.trim() || busy} onClick={() => submit.mutate(url.trim())}>
-              Add
-            </button>
-          </div>
-          <span className="intake-cap">
-            {maxMb !== undefined ? `Max ${maxMb} MB per file · ` : ''}archives are not extracted
-          </span>
-        </div>
+      <textarea
+        className="intake-note"
+        rows={2}
+        placeholder="https://… or a quick note"
+        aria-label="Paste a link or write a note"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter submits a URL; notes are multi-line, so they submit via the button
+          // (or Ctrl+Enter, the common composer convention).
+          if (e.key === 'Enter' && (looksLikeUrl(text) || e.ctrlKey) && text.trim()) {
+            e.preventDefault()
+            submit.mutate({ value: text, noteTitle: title })
+          }
+        }}
+      />
+      {isNote && (
+        <input
+          type="text"
+          className="intake-title"
+          placeholder="Title (optional)"
+          aria-label="Note title"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+        />
+      )}
+
+      <div className="ip-actions">
+        <button
+          className="btn primary sm"
+          disabled={!text.trim() || busy}
+          onClick={() => submit.mutate({ value: text, noteTitle: title })}
+        >
+          {isNote ? 'Add note' : 'Add link'}
+        </button>
+        <span className="spacer" />
+        <span className="ch" title={stats.data?.watcher.folder}>
+          <span className={`d ${stats.data?.watcher.active === true ? 'ok' : 'warn'}`} />
+          watcher
+        </span>
+        <span className="ch">
+          <span className={`d ${telegram.data?.configured === true ? 'ok' : ''}`} />
+          bot
+        </span>
       </div>
 
       {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}

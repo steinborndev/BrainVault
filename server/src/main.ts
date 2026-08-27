@@ -12,6 +12,7 @@ import { ChatStore } from './db/chat.js'
 import { SettingsStore } from './db/settings.js'
 import { DomainDismissalStore } from './db/domain-dismissals.js'
 import { SqliteMaintenanceStateStore } from './db/maintenance-state.js'
+import { SqliteAgentRunStore } from './db/agent-runs.js'
 import { TelegramDropStore } from './db/telegram-drops.js'
 import { IngestQueue } from './pipeline/queue.js'
 import { EventBus } from './pipeline/events.js'
@@ -24,6 +25,8 @@ import { startRetrieveIndexScheduler, isRetrieveProvisioned, type RetrieveIndexS
 import { Mutex } from './util/mutex.js'
 import { refreshTransportPin } from './pipeline/transport.js'
 import { buildServer } from './api/server.js'
+import { ensureVaultExcludes } from './pipeline/vault-excludes.js'
+import { VaultReconciler } from './pipeline/reconcile.js'
 import { startWatcher, type Watcher } from './pipeline/watcher.js'
 import { startVaultWatcher, type VaultWatcher } from './pipeline/vault-watcher.js'
 import { startTelegramBot, type TelegramBot } from './telegram/bot.js'
@@ -46,6 +49,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   assertBindAllowed(config.server)
 
   const pin = refreshTransportPin(config.vaultRoot)
+  // Before anything can write: derived artifacts and agent scratch stay out of vault history.
+  // Startup, not first-index-build, because an agent run can leave scratch long before one.
+  ensureVaultExcludes(config.vaultRoot)
 
   const db = openDb(defaultDbPath())
   // The live-update bus is shared: the store publishes job/log events, the queue publishes
@@ -85,6 +91,17 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,
     validate,
   })
+  // The other half of the F4 rule: the per-run sweep sits out whenever runs overlap, which
+  // with concurrency above 1 is most of the time. This picks up what nobody staged, on the
+  // edge where the writer count returns to zero and attribution is no longer ambiguous.
+  const reconciler = new VaultReconciler({
+    vaultRoot: config.vaultRoot,
+    commitMutex,
+    runRegistry,
+    events,
+    autoCommit: () => settings.effective(config).gitAutoCommit,
+  })
+  reconciler.attach()
   // SETUP MODE (config.auth === null): serve the dashboard so the user can enter the
   // credential there, but start nothing that could spawn an agent — the queue never claims
   // and the inbox watcher stays off. A restart after the credential is written picks
@@ -98,6 +115,9 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Restart-proof per-kind settle state (SPEC.md §12.7 Stufe b): written by the runner,
   // read by the status endpoint the dashboard's "what's due" head polls.
   const maintenanceState = new SqliteMaintenanceStateStore(db)
+  // One row per settled agent run (schema v12) - the run list the Research screen shows,
+  // and the only place a failed run leaves a trace once the in-memory registry evicts it.
+  const agentRuns = new SqliteAgentRunStore(db)
 
   const maintenance = new MaintenanceRunner({
     vaultRoot: config.vaultRoot,
@@ -107,6 +127,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     runRegistry,
     validate,
     stateStore: maintenanceState,
+    runStore: agentRuns,
   })
 
   // The start-time-bound settings folded into the config the watcher and HTTP server see. The
@@ -156,6 +177,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     // Persistent, so a rejected domain candidate stays rejected across restarts.
     domainDismissals: new DomainDismissalStore(db),
     maintenanceState,
+    agentRuns,
     telegramDrops,
     graph,
   })

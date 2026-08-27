@@ -1,6 +1,6 @@
 /**
  * Deterministic draft description for a domain candidate (SPEC §12.7 Stufe a): the create
- * form must never start with an empty description — writing an extensible one from nothing
+ * form must never start with an empty description - writing an extensible one from nothing
  * is the hardest part of the flow, and the deterministic finder knows enough (key + member
  * tags) for a usable first draft. An agent-review proposal, when present, always wins over
  * this; the draft is the floor, not the ceiling.

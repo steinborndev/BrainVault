@@ -282,6 +282,49 @@ CREATE TABLE maintenance_state (
 );
 `
 
+/**
+ * v11: persist which job a duplicate duplicates. `duplicateOf` was only ever in the enqueue
+ * RESPONSE, so a duplicate in the history could never answer "duplicate of what?" - the
+ * dashboard's job drawer links the original now. Additive and nullable: existing duplicate
+ * rows simply keep no link.
+ */
+const V11 = `
+ALTER TABLE jobs ADD COLUMN duplicate_of TEXT;
+`
+
+/**
+ * v12 — a persistent record per agent run (research, lint, hot cache, tag-fix, …).
+ *
+ * The runner's own history is a bounded in-memory map, and `maintenance_state` (v10) keeps
+ * exactly one row per KIND, so a research run's topic, lens, cost and duration survived only
+ * until the next run of the same kind or the next restart, whichever came first. The
+ * Research screen had to reconstruct its history from the synthesis pages in the vault,
+ * which carry topic and date but no cost, no duration, and no trace of a run that failed
+ * before writing anything.
+ *
+ * One row per run, written when it settles. Operational state only (hard rule 1): losing it
+ * costs history, never vault content - the pages themselves are in git either way.
+ */
+const V12 = `
+CREATE TABLE agent_runs (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL DEFAULT 'local',
+  kind        TEXT NOT NULL,
+  label       TEXT,
+  profile_key TEXT,
+  ok          INTEGER NOT NULL,
+  pages       TEXT NOT NULL DEFAULT '[]',
+  tokens_in   INTEGER,
+  tokens_out  INTEGER,
+  cost_usd    REAL,
+  error       TEXT,
+  started_at  TEXT NOT NULL,
+  finished_at TEXT NOT NULL
+);
+CREATE INDEX idx_agent_runs_kind ON agent_runs (user_id, kind, finished_at DESC);
+CREATE INDEX idx_agent_runs_finished ON agent_runs (user_id, finished_at DESC);
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -293,4 +336,6 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 8, up: V8 },
   { version: 9, up: V9 },
   { version: 10, up: V10 },
+  { version: 11, up: V11 },
+  { version: 12, up: V12 },
 ]

@@ -8,10 +8,10 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import {
   RETRIEVE_EXCLUDE_ENTRIES,
   RetrieveScriptsMissingError,
-  ensureIndexExcluded,
   hasRetrieveScripts,
   isRetrieveProvisioned,
   retrieveIndexStats,
@@ -20,6 +20,7 @@ import {
   type ProcessRunner,
   type RetrieveIndexBuilder,
 } from '../src/pipeline/retrieve-index.js'
+import { ensureVaultExcludes } from '../src/pipeline/vault-excludes.js'
 import { MaintenanceRunner } from '../src/pipeline/maintenance.js'
 import { QUERY_SYSTEM_PROMPT, renderRetrievalBlock } from '../src/pipeline/system-prompt.js'
 import { retrieveCandidates } from '../src/pipeline/retrieve-index.js'
@@ -46,6 +47,15 @@ function makeVault(opts: { scripts?: boolean; git?: boolean } = {}): string {
   return root
 }
 
+/** A REAL repo, for the two tests that ask git itself what it would stage. */
+function makeGitVault(): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-git-'))
+  roots.push(root)
+  execFileSync('git', ['-C', root, 'init', '-q'])
+  fs.mkdirSync(path.join(root, '.vault-meta'), { recursive: true })
+  return root
+}
+
 function provision(root: string, chunks = 3): void {
   const chunkDir = path.join(root, '.vault-meta', 'chunks', 'addr-001')
   fs.mkdirSync(chunkDir, { recursive: true })
@@ -68,11 +78,11 @@ const settled = async (runner: MaintenanceRunner, id: string): Promise<void> => 
   throw new Error('run never settled')
 }
 
-describe('ensureIndexExcluded', () => {
+describe('ensureVaultExcludes', () => {
   it('writes all entries and is idempotent', () => {
     const root = makeVault()
-    ensureIndexExcluded(root)
-    ensureIndexExcluded(root)
+    ensureVaultExcludes(root)
+    ensureVaultExcludes(root)
     const content = fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf8')
     for (const entry of RETRIEVE_EXCLUDE_ENTRIES) {
       expect(content.split('\n').filter((l) => l.trim() === entry)).toHaveLength(1)
@@ -84,7 +94,7 @@ describe('ensureIndexExcluded', () => {
     const infoDir = path.join(root, '.git', 'info')
     fs.mkdirSync(infoDir, { recursive: true })
     fs.writeFileSync(path.join(infoDir, 'exclude'), '# custom\n.vault-meta/chunks/\n')
-    ensureIndexExcluded(root)
+    ensureVaultExcludes(root)
     const lines = fs.readFileSync(path.join(infoDir, 'exclude'), 'utf8').split('\n')
     expect(lines[0]).toBe('# custom')
     expect(lines.filter((l) => l.trim() === '.vault-meta/chunks/')).toHaveLength(1)
@@ -94,8 +104,36 @@ describe('ensureIndexExcluded', () => {
 
   it('is a no-op when the vault is not a git repo', () => {
     const root = makeVault({ git: false })
-    ensureIndexExcluded(root)
+    ensureVaultExcludes(root)
     expect(fs.existsSync(path.join(root, '.git'))).toBe(false)
+  })
+
+  it('excludes agent scratch, so a scanner an agent parks in .vault-meta cannot be committed', () => {
+    // The regression: a lint run wrote itself a scanner plus a 472 KB dump under
+    // .vault-meta, and BOOKKEEPING_PATHS stages that directory wholesale on every commit -
+    // so both landed in vault history permanently.
+    const root = makeGitVault()
+    ensureVaultExcludes(root)
+    fs.writeFileSync(path.join(root, '.vault-meta', 'lint_scan.py'), '# scratch\n')
+    fs.writeFileSync(path.join(root, '.vault-meta', 'lint_scan_out.json'), '{}')
+    fs.writeFileSync(path.join(root, '.vault-meta', 'lint-scan.json'), '{}')
+    const ignored = execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=all'], {
+      encoding: 'utf8',
+    })
+    expect(ignored).not.toContain('lint_scan.py')
+    expect(ignored).not.toContain('lint_scan_out.json')
+    expect(ignored).not.toContain('lint-scan.json')
+  })
+
+  it('leaves the vault own tracked .vault-meta state alone', () => {
+    // .vault-meta is not scratch wholesale - the plugin keeps real state there.
+    const root = makeGitVault()
+    ensureVaultExcludes(root)
+    fs.writeFileSync(path.join(root, '.vault-meta', 'address-counter.txt'), '717\n')
+    const status = execFileSync('git', ['-C', root, 'status', '--porcelain', '--untracked-files=all'], {
+      encoding: 'utf8',
+    })
+    expect(status).toContain('address-counter.txt')
   })
 })
 

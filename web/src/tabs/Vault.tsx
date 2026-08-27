@@ -1,12 +1,12 @@
 /**
- * The in-dashboard vault viewer (SPEC.md §12.4) — the tab that makes the Obsidian app
+ * The in-dashboard vault viewer (SPEC.md §12.4) - the tab that makes the Obsidian app
  * optional for everyday use. Two deep-linkable routes:
  *
  *   /vault                → the wikilink graph (search, type filters, local-neighborhood mode)
  *   /vault/page/<path>    → one rendered page: markdown with clickable [[wikilinks]],
  *                           a backlinks panel, and the obsidian:// bridge link
  *
- * Strictly read-only — everything here is derived from GET /graph and GET /pages
+ * Strictly read-only - everything here is derived from GET /graph and GET /pages
  * (hard rule 1: the vault is only ever written by agent runs).
  */
 
@@ -18,50 +18,14 @@ import type { GraphNode, VaultGraph, ValidationFinding, RepairTask } from '../ap
 import { GraphCanvas, domainColor, TYPE_VARS, type Lens } from '../components/GraphCanvas.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { Icon } from '../components/Icon.tsx'
-import { Tip } from '../components/Tip.tsx'
+import { queryState } from '../components/QueryState.tsx'
+import { frontmatter } from '../lib/frontmatter.ts'
+import { Shortcuts } from '../components/Shortcuts.tsx'
 import { linkifyText } from '../lib/linkify.tsx'
-import { navigate, pageRoute, pageFromPath } from '../lib/router.ts'
+import { navigate, pageRoute, pageFromPath, originPath } from '../lib/router.ts'
 import { detectClusters } from '../lib/communities.ts'
 import { obsidianUri } from '../lib/obsidian.ts'
 import { timeAgo } from '../lib/format.ts'
-
-/**
- * Splits YAML frontmatter off a page. Obsidian renders it as a properties panel rather than
- * body text, and so do we — dumping `type: concept created: …` into the prose is just noise.
- * Deliberately shallow (top-level `key: value` and `- item` lists); anything it can't read
- * stays in the body rather than being silently dropped.
- */
-function frontmatter(markdown: string): { fields: Array<[string, string]>; body: string } {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(markdown)
-  if (!m) return { fields: [], body: markdown }
-  const fields: Array<[string, string]> = []
-  let currentKey: string | null = null
-  let listItems: string[] = []
-  const flush = (): void => {
-    if (currentKey !== null && listItems.length > 0) fields.push([currentKey, listItems.join(', ')])
-    listItems = []
-  }
-  for (const line of m[1]!.split('\n')) {
-    const item = /^\s*-\s+(.*)$/.exec(line)
-    if (item && currentKey !== null) {
-      listItems.push(item[1]!.replace(/^["']|["']$/g, '').trim())
-      continue
-    }
-    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line)
-    if (!kv) continue
-    flush()
-    const key = kv[1]!
-    const value = kv[2]!.replace(/^["']|["']$/g, '').trim()
-    if (value === '') {
-      currentKey = key // a list or block follows
-    } else {
-      fields.push([key, value])
-      currentKey = null
-    }
-  }
-  flush()
-  return { fields, body: markdown.slice(m[0].length) }
-}
 
 /**
  * Renders a frontmatter value: wikilinks become in-app navigation, and the plain text around
@@ -101,27 +65,47 @@ const TYPE_LABELS: Record<string, string> = {
   folds: 'Folds',
 }
 
+/** The graph's key bindings, in the order someone learning the view meets them. */
+const GRAPH_SHORTCUTS = [
+  { keys: ['2x click'], what: 'open a page from the graph' },
+  { keys: ['click'], what: 'with Spotlight on: a cluster area drills in, a node opens it' },
+  { keys: ['Enter'], what: 'open the selected page' },
+  { keys: ['Esc'], what: 'leave fullscreen, clear search, close panel, leave cluster or focus' },
+  { keys: ['Esc', 'Esc'], what: 'reset all filters - show the whole vault' },
+  { keys: ['/'], what: 'search the graph' },
+  { keys: ['f'], what: 'fit the view' },
+  { keys: ['Ctrl', 'wheel'], what: 'zoom in and out' },
+  { keys: ['+', '-'], what: 'zoom' },
+  { keys: ['drag'], what: 'pan the canvas' },
+]
+
 export function Vault({ path }: { path: string }): React.ReactElement {
   const graphQ = useQuery({ queryKey: ['graph'], queryFn: api.graph, staleTime: 30_000 })
 
   const [pathname, search] = path.split('?') as [string, string | undefined]
   const page = pageFromPath(pathname)
-  const focus = new URLSearchParams(search ?? '').get('focus')
+  const params = new URLSearchParams(search ?? '')
+  const focus = params.get('focus')
+  // `?gaps=1` arrives from Home's Gaps card: open the graph with the gaps overlay already on.
+  const openGaps = params.get('gaps') === '1'
 
-  if (graphQ.isLoading) return <div className="empty">Loading graph…</div>
-  if (graphQ.isError || !graphQ.data) {
+  const state = queryState(graphQ, 'the graph')
+  if (state !== null) return state
+  // Neither loading nor failed, but nothing came back: the query settled empty. Rare, and
+  // the retry is still the only useful thing to offer.
+  if (!graphQ.data) {
     return (
       <div className="empty">
-        Failed to load the graph: {(graphQ.error as Error)?.message ?? 'unknown'}{' '}
+        <p className="qs-line">The graph came back empty.</p>
         <button className="btn" onClick={() => void graphQ.refetch()}>
-          Retry
+          Try again
         </button>
       </div>
     )
   }
 
   if (page !== null) return <PageView graph={graphQ.data} path={page} />
-  return <GraphView graph={graphQ.data} focusPath={focus} />
+  return <GraphView graph={graphQ.data} focusPath={focus} openGaps={openGaps} />
 }
 
 // ---------------------------------------------------------------------------- graph view
@@ -132,7 +116,7 @@ const NO_DOMAIN = ''
 /** Synthetic path prefix marking a ghost (gap) node in the canvas node list. */
 const GAP_PATH_PREFIX = '#gap:'
 
-/** Two Escape presses within this window are a "double Esc" — reset the whole graph view. */
+/** Two Escape presses within this window are a "double Esc" - reset the whole graph view. */
 const DOUBLE_ESC_MS = 400
 
 /** The explorer selection: a real page (by path) or a knowledge gap (by title). */
@@ -140,10 +124,10 @@ type Selection = { kind: 'page'; path: string } | { kind: 'gap'; title: string }
 
 /**
  * One level of isolated community (spotlight click, SPEC §12.4): the graph shows only these
- * pages until Esc. Levels stack — Louvain re-runs on the isolated subgraph and usually finds
+ * pages until Esc. Levels stack - Louvain re-runs on the isolated subgraph and usually finds
  * sub-communities, so a spotlight click inside a focused cluster drills one level deeper;
- * Esc pops one level. Each level is a snapshot by PATH, not by subgraph index — indices churn
- * on every filter change and SSE live update (same reasoning as `Selection`) — and a proper
+ * Esc pops one level. Each level is a snapshot by PATH, not by subgraph index - indices churn
+ * on every filter change and SSE live update (same reasoning as `Selection`) - and a proper
  * SUBSET of the level above, so the keep-filter only ever needs the top of the stack.
  * `anchor` is the clicked page, keying the camera re-fit; label/domain feed the clusterbar.
  * A cluster is NOT a domain: one domain typically splits into several Louvain communities,
@@ -157,11 +141,11 @@ interface ClusterFocus {
 }
 
 
-/** Missing `kind` (ghost nodes, old cached responses) counts as knowledge — never hide it. */
+/** Missing `kind` (ghost nodes, old cached responses) counts as knowledge - never hide it. */
 const isKnowledge = (n: GraphNode): boolean => (n.kind ?? 'knowledge') === 'knowledge'
 
 /**
- * Tags that mirror a page's `type:`/kind rather than its subject — they say WHAT a page is,
+ * Tags that mirror a page's `type:`/kind rather than its subject - they say WHAT a page is,
  * not what it's ABOUT, so they carry no thematic signal for "Related by tag". Every source
  * page shares `#source`, so matching on it drags in the whole source corpus. Mirrors the
  * server's KNOWLEDGE_TYPES/ARTIFACT_TYPES plus structural markers (server/src/pipeline/graph.ts).
@@ -172,16 +156,16 @@ const STRUCTURAL_TAGS: ReadonlySet<string> = new Set([
 ])
 const isThematicTag = (t: string): boolean => !STRUCTURAL_TAGS.has(t.toLowerCase())
 
-/** localStorage key of the RETIRED standalone System toggle — read once as a migration
+/** localStorage key of the RETIRED standalone System toggle - read once as a migration
  *  fallback when the combined prefs key below doesn't exist yet. */
 const SHOW_SYSTEM_KEY = 'vault.showSystem'
 
 /**
- * localStorage key for the graph view preferences — the how-it's-drawn choices (lens, type
+ * localStorage key for the graph view preferences - the how-it's-drawn choices (lens, type
  * visibility, domain filter, overlay toggles, System). Persisted so an F5 keeps the graph
  * the user set up; System used to be the only survivor, which read as random amnesia.
  * Exploration state (search, selection, trail, cluster drill-down) stays session-only on
- * purpose — it describes where the user currently IS, not how they like the graph shown.
+ * purpose - it describes where the user currently IS, not how they like the graph shown.
  * The payload carries a `v` field: bump it on shape changes and stale prefs fall back to
  * defaults instead of half-applying.
  */
@@ -192,7 +176,7 @@ const LENS_VALUES: ReadonlySet<string> = new Set(['domain', 'type', 'authority',
 interface ViewPrefs {
   // v2: the type filter flipped from hide-set (`hiddenTypes`) to solo-select (`selectedTypes`),
   // mirroring the domain filter. The two carry OPPOSITE meaning, so a v1 payload must be
-  // discarded, not read as the new field — the version bump is what makes the loader do that.
+  // discarded, not read as the new field - the version bump is what makes the loader do that.
   v: 2
   lens: Lens
   selectedTypes: string[]
@@ -231,7 +215,7 @@ export function loadViewPrefs(): LoadedPrefs {
       showSystem: bool(o.showSystem),
     }
   } catch {
-    return {} // storage unavailable (private mode) or corrupt JSON — defaults win
+    return {} // storage unavailable (private mode) or corrupt JSON - defaults win
   }
 }
 
@@ -239,7 +223,7 @@ const savedPrefs = loadViewPrefs()
 
 /**
  * GraphView state that OUTLIVES the component: graph and page view are mutually exclusive
- * routes, so opening an article unmounts the graph — without this, a double-click →
+ * routes, so opening an article unmounts the graph - without this, a double-click →
  * article → Escape round trip would come back to reset filters, lens, search, selection
  * and trail. Same module-scope pattern (and rationale) as the canvas's camera memory in
  * GraphCanvas.tsx; safe because the app has exactly one graph view. The ViewPrefs subset
@@ -260,7 +244,7 @@ const viewMemory = {
   trail: [] as string[],
 }
 
-/** Last-written prefs JSON — the snapshot effect runs on every commit, writes only on change. */
+/** Last-written prefs JSON - the snapshot effect runs on every commit, writes only on change. */
 let lastSavedPrefs: string | null = null
 
 function saveViewPrefs(): void {
@@ -281,7 +265,7 @@ function saveViewPrefs(): void {
   try {
     localStorage.setItem(VIEW_PREFS_KEY, json)
   } catch {
-    // Storage unavailable (private mode) — the prefs still hold for this session.
+    // Storage unavailable (private mode) - the prefs still hold for this session.
   }
 }
 
@@ -294,7 +278,7 @@ interface SuspiciousEdge {
 /**
  * Deterministic connectivity findings over the FULL graph (filters don't change whether a
  * page is isolated). Feeds the explorer panel's "Repair" action:
- *  - isolated: knowledge pages with no edge to another knowledge page — invisible to graph
+ *  - isolated: knowledge pages with no edge to another knowledge page - invisible to graph
  *    exploration (their only neighbors, if any, are system pages like lint reports).
  *  - suspicious: the SINGLE edge between two domains that share no other link. One lone
  *    wire between e.g. cooking and finance is almost always an incidental aside, not
@@ -344,12 +328,37 @@ function computeGraphHealth(graph: VaultGraph): GraphHealth {
   return { isolated, suspiciousByPage }
 }
 
-function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string | null }): React.ReactElement {
-  const [query, setQuery] = useState(viewMemory.query)
+/** Search settle delay: long enough to swallow a burst of keystrokes, short enough to feel live. */
+const SEARCH_DEBOUNCE_MS = 220
+
+/** `value`, but only after it has stopped changing for `delay` ms. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), delay)
+    return () => clearTimeout(t)
+  }, [value, delay])
+  return settled
+}
+
+function GraphView({
+  graph,
+  focusPath,
+  openGaps,
+}: {
+  graph: VaultGraph
+  focusPath: string | null
+  openGaps: boolean
+}): React.ReactElement {
+  // `input` is what the field shows; `query` is what the graph reacts to. Without the delay
+  // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera - typing a
+  // six-letter word moved the view six times.
+  const [input, setInput] = useState(viewMemory.query)
+  const query = useDebounced(input, SEARCH_DEBOUNCE_MS)
   /**
    * Type filter, SOLO-select like the domains (was a hide-set): clicking "concepts" means
    * "show me concepts", so an empty set = every type visible and a non-empty set = only those
-   * types. Same inclusion semantics on both axes — a checked box now means "shown", not "not
+   * types. Same inclusion semantics on both axes - a checked box now means "shown", not "not
    * hidden" (the old double negative).
    */
   const [selectedTypes, setSelectedTypes] = useState<ReadonlySet<string>>(viewMemory.selectedTypes)
@@ -359,7 +368,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
    * domains. (The old hide-semantics did the exact opposite of what a click intends.)
    */
   const [selectedDomains, setSelectedDomains] = useState<ReadonlySet<string>>(viewMemory.selectedDomains)
-  // The color lens. Domain is the default — the meta-categories are the axis the user
+  // The color lens. Domain is the default - the meta-categories are the axis the user
   // actually thinks in; type + the metric lenses (authority/orphans/stubs/recency) live in
   // the lens dropdown.
   const [lens, setLens] = useState<Lens>(viewMemory.lens)
@@ -367,7 +376,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   // Cluster hulls: auto-detected communities as tinted, tag-labelled blobs. Off by default.
   const [showClusters, setShowClusters] = useState(viewMemory.showClusters)
   // Gaps view: overlays the unresolved link targets as ghost nodes (SPEC §12.4). Off by
-  // default — it is an exploration mode, not the resting state of the graph.
+  // default - it is an exploration mode, not the resting state of the graph.
   const [showGaps, setShowGaps] = useState(viewMemory.showGaps)
   // Network lens: lift the connection lines out of the point-cloud read (intra-cluster edges
   // brighten, cross-cluster bridges get a directional gradient). Off by default. Reuses the
@@ -379,7 +388,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   const [spotlight, setSpotlight] = useState(viewMemory.spotlight)
   // The stack of isolated communities: each spotlight click pushes one level (the clicked
   // node's community, re-detected on the isolated subgraph), Esc pops one, the clusterbar
-  // jumps to any level. Empty = the full graph. The spotlight stays live inside a focus —
+  // jumps to any level. Empty = the full graph. The spotlight stays live inside a focus -
   // it highlights the SUB-communities of the current level; when a level doesn't subdivide
   // any further, the canvas falls back to the 1-hop neighborhood and clicks select normally
   // (the drill-down ends exactly where there is nothing left to subdivide).
@@ -395,18 +404,42 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   /**
    * The explorer selection, keyed stably (path for a page, title for a gap) so it survives
    * the index churn a filter change causes. Clicking a node opens the panel instead of
-   * navigating; "Open page" inside the panel is the explicit navigation — or a double-click
+   * navigating; "Open page" inside the panel is the explicit navigation - or a double-click
    * right on the node.
    */
   const [selection, setSelection] = useState<Selection>(viewMemory.selection)
-  /** Breadcrumb of visited PAGES (not gaps) — every hop is a chip you can jump back to. */
+  /** Breadcrumb of visited PAGES (not gaps) - every hop is a chip you can jump back to. */
   const [trail, setTrail] = useState<string[]>(viewMemory.trail)
+  /**
+   * Fullscreen: the graph on its own, with only the controls that belong to the drawing.
+   * Deliberately NOT persisted - it is a posture for one look, not a preference, and
+   * restoring a session into a chromeless screen is disorienting.
+   */
+  const [fullscreen, setFullscreen] = useState(false)
+
+  /**
+   * `?gaps=1` (Home's Gaps card) lands here with the gaps overlay on. It is a one-shot
+   * COMMAND, not view state, so the param is consumed and dropped from the URL right away.
+   * That matters twice: the screens stay mounted behind [hidden], so seeding useState would
+   * only ever fire on the app's first visit to the graph - and without dropping the param,
+   * a second click from Home would pass the identical path string, this effect would not
+   * re-run, and the toggle would stay wherever the user last left it.
+   */
+  useEffect(() => {
+    if (!openGaps) return
+    setShowGaps(true)
+    navigate(focusPath === null ? '/graph' : `/graph?focus=${encodeURIComponent(focusPath)}`, {
+      replace: true,
+    })
+  }, [openGaps, focusPath])
 
   // Write-through into the module-scope memory: every committed render snapshots the view
   // state, so the next mount (returning from an article) restores exactly this view.
   useEffect(() => {
     Object.assign(viewMemory, {
-      query,
+      // The raw input, not the debounced value: a view round trip must restore what the
+      // field showed, including a query the user had not finished typing.
+      query: input,
       selectedTypes,
       selectedDomains,
       lens,
@@ -443,7 +476,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   )
 
   // Type/domain lists reflect the system filter: with system pages hidden, the meta/root
-  // buckets and the `meta` domain would be dead entries — chips that filter nothing.
+  // buckets and the `meta` domain would be dead entries - chips that filter nothing.
   const types = useMemo(() => {
     const counts = new Map<string, number>()
     for (const n of graph.nodes) {
@@ -453,7 +486,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return [...counts.entries()].sort((a, b) => b[1] - a[1])
   }, [graph, showSystem])
 
-  // Meta-categories from frontmatter `domain:`. Pages without one gather under NO_DOMAIN —
+  // Meta-categories from frontmatter `domain:`. Pages without one gather under NO_DOMAIN -
   // deliberately a visible bucket, not a blind spot: it shows how much of the vault is still
   // uncategorized (the evidence base for the domain-registry backfill, SPEC §12.4).
   const domains = useMemo(() => {
@@ -472,7 +505,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
 
   // Displayed subgraph: type + domain filters first, then (optionally) the BFS neighborhood
   // of the focused page. Indices are remapped so the canvas gets a dense, self-contained
-  // graph — that is also what keeps the force layout small in local mode on a huge vault.
+  // graph - that is also what keeps the force layout small in local mode on a huge vault.
   // When the gaps view is on, the unresolved targets are appended as synthetic ghost nodes.
   const { nodes, edges, focusIndex, ghostIndices, realCount, realEdgeCount, matches } = useMemo(() => {
     let keep: boolean[] = graph.nodes.map(
@@ -510,8 +543,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     }
 
     // Search NARROWS the graph, it does not merely highlight (the old behaviour): with a
-    // query present, keep only the pages related to it — the ones that match, plus their
-    // direct neighbours so a match keeps its context — intersected with the filters already
+    // query present, keep only the pages related to it - the ones that match, plus their
+    // direct neighbours so a match keeps its context - intersected with the filters already
     // applied above. Emptying the query restores the full (filtered) graph. Multi-word
     // queries are AND: every term must hit the title, a tag, or the domain.
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -519,6 +552,10 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
       terms.every(
         (t) =>
           n.title.toLowerCase().includes(t) ||
+          // The page's own title and aliases, not just its file name. The two differ
+          // whenever the filesystem refused a character, so typing the title the dashboard
+          // shows elsewhere used to find nothing.
+          (n.names?.some((name) => name.toLowerCase().includes(t)) ?? false) ||
           n.tags.some((tag) => tag.toLowerCase().includes(t)) ||
           (n.domain?.toLowerCase().includes(t) ?? false),
       )
@@ -576,7 +613,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     }
 
     // The exact matches, in SUBGRAPH indices, for the ring highlight and the results list.
-    // Neighbours pulled in for context are deliberately NOT matches — they render as plain
+    // Neighbours pulled in for context are deliberately NOT matches - they render as plain
     // context around the ringed hits.
     const matches = new Set<number>()
     for (const f of matchFull) {
@@ -597,9 +634,9 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   }, [nodes, selection])
 
   // Community detection (Louvain) over the currently-visible page graph. Computed when the
-  // hulls OR the network lens OR the spotlight are on — the network lens classifies edges as
+  // hulls OR the network lens OR the spotlight are on - the network lens classifies edges as
   // intra-cluster vs bridge and so needs the ids even when no hull is drawn, and the spotlight
-  // highlights (and isolates on click) whole communities. Ghost nodes are excluded (id -1) — a
+  // highlights (and isolates on click) whole communities. Ghost nodes are excluded (id -1) - a
   // missing page has no community. Small clusters (< MIN_CLUSTER) are dropped so the canvas
   // isn't peppered with singleton blobs. Each surviving cluster is labelled by its tags.
   const { clusterIds, clusterLabels, clusterDomains } = useMemo(() => {
@@ -608,7 +645,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return detectClusters(nodes, edges, realCount)
   }, [showClusters, showNetwork, spotlight, nodes, edges, realCount])
 
-  // The clickable result list under the search box — the rings in the graph show WHERE the
+  // The clickable result list under the search box - the rings in the graph show WHERE the
   // matches are, this shows WHAT they are. Every match is listed (the dropdown scrolls);
   // capping it forced the user to hunt the rest in the graph, which is the exact friction
   // a result list should remove. Title matches first (they read as more direct than
@@ -627,7 +664,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return list
   }, [matches, nodes, query])
 
-  // Known domains matching the query — surfaced ABOVE the page hits so "carbon" offers the
+  // Known domains matching the query - surfaced ABOVE the page hits so "carbon" offers the
   // carbon-fiber domain as its first result; picking one solo-selects that domain filter.
   const domainResults = useMemo(() => {
     const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -644,7 +681,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setSelectedTypes(next)
   }
 
-  // Persisted with the rest of the view prefs by the snapshot effect — no standalone key.
+  // Persisted with the rest of the view prefs by the snapshot effect - no standalone key.
   const toggleSystem = (): void => setShowSystem((v) => !v)
 
   // Solo-select semantics: empty = all; a click adds/removes a domain from the selection,
@@ -656,6 +693,24 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setSelectedDomains(next)
   }
 
+  /**
+   * The tail of the scope sentence - what the current filters narrowed to, in words. A
+   * shrinking count alone cannot tell a domain filter from a type filter from a search.
+   */
+  const scopeTail = useMemo(() => {
+    const parts: string[] = []
+    if (selectedDomains.size === 1) {
+      const only = [...selectedDomains][0]!
+      parts.push(only === NO_DOMAIN ? 'pages with no domain' : `the ${only} domain`)
+    } else if (selectedDomains.size > 1) parts.push(`${selectedDomains.size} domains`)
+    if (selectedTypes.size > 0) parts.push([...selectedTypes].map((t) => TYPE_LABELS[t] ?? t).join(' + '))
+    if (query.trim() !== '') parts.push(`matching “${query.trim()}”`)
+    return parts.length === 0 ? ' - the whole vault' : ` - ${parts.join(', ')}`
+  }, [selectedDomains, selectedTypes, query])
+
+  /** What the "System pages" toggle would add - the number it shows has to be that. */
+  const systemCount = useMemo(() => graph.nodes.filter((n) => !isKnowledge(n)).length, [graph])
+
   const focusNode = focusIndexFull >= 0 ? graph.nodes[focusIndexFull] : undefined
 
   const health = useMemo(() => computeGraphHealth(graph), [graph])
@@ -663,11 +718,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   /**
    * Reset every VIEW control to its default so the whole vault is shown again (the double-Esc
    * escape hatch out of a deep filter/drill state). Clears filters, lens, overlays, cluster
-   * drill-down, focus depth, search and selection. `showSystem` is deliberately kept — it is a
+   * drill-down, focus depth, search and selection. `showSystem` is deliberately kept - it is a
    * persistent preference (localStorage), not a filter the user is trying to escape.
    */
   const resetView = (): void => {
-    setQuery('')
+    setFullscreen(false)
+    setInput('')
     setSelectedTypes(new Set())
     setSelectedDomains(new Set())
     setLens('domain')
@@ -678,12 +734,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     setClusterStack([])
     setLocalDepth(0)
     closeExplorer() // selection + trail
-    if (focusPath !== null) navigate('/vault')
+    if (focusPath !== null) navigate('/graph')
   }
 
   // ---- keyboard layer. Window-level (the canvas isn't focusable), via the same stable-
   // listener ref pattern the canvas uses for wheel/zoom keys; gated on this view being the
-  // VISIBLE tab — tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
+  // VISIBLE tab - tabs stay mounted but hidden (App.tsx), and hidden = no offsetParent.
   // Escape peels back one UI layer per press: search → explorer panel → cluster focus →
   // gaps list → focus; a DOUBLE Escape (two presses within DOUBLE_ESC_MS) resets the whole
   // view at once.
@@ -693,7 +749,13 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {})
   keyRef.current = (e: KeyboardEvent): void => {
     if (e.metaKey || e.ctrlKey || e.altKey) return
-    if (rootRef.current === null || rootRef.current.offsetParent === null) return
+    // "Is this screen actually on screen?" - the shell keeps every screen mounted and
+    // hides it with [hidden], so a key must not act on a graph nobody can see. Measured
+    // by box size, NOT by offsetParent: a position:fixed element (which is exactly what
+    // fullscreen makes this) reports offsetParent === null, and that swallowed Escape in
+    // the one state where it is the only way out.
+    const root = rootRef.current
+    if (root === null || (root.offsetWidth === 0 && root.offsetHeight === 0)) return
     const el = e.target as HTMLElement
     const typing =
       el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable
@@ -707,11 +769,17 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
         resetView() // second quick press: back to the full vault in one go
         return
       }
-      if (query !== '') setQuery('')
+      // Fullscreen is the outermost posture: leave it first, and only it - a press that
+      // also cleared a filter underneath would undo two things at once.
+      if (fullscreen) {
+        setFullscreen(false)
+        return
+      }
+      if (input !== '') setInput('')
       else if (selection !== null) closeExplorer()
       else if (clusterStack.length > 0) setClusterStack((prev) => prev.slice(0, -1)) // pop one level
       else if (showGaps) setShowGaps(false)
-      else if (focusPath !== null) navigate('/vault')
+      else if (focusPath !== null) navigate('/graph')
       return
     }
     if (typing) return
@@ -728,17 +796,17 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // The search lives INSIDE the drawing area (top-right), like the zoom controls
-  // (top-left) — it searches the canvas, so it sits on the canvas.
+  // The search sits in the canvas bar with Fit and the view actions: it acts on the
+  // canvas, and a second floating box was claiming the same corner as the bar.
   const searchOverlay = (
-    <div className="graph-search graph-search-overlay">
+    <div className="graph-search graph-search-inbar">
       <Icon name="search" />
       <input
         ref={searchRef}
         type="search"
         placeholder="Search pages or tags…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
           // Enter on an unambiguous match opens the page.
           if (e.key === 'Enter' && matches.size === 1) {
@@ -746,16 +814,16 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             if (only) navigate(pageRoute(only.path))
           }
           // Escape: first press restores the full graph, on an empty box it leaves the
-          // field — so the next press reaches the window-level Escape ladder.
+          // field - so the next press reaches the window-level Escape ladder.
           if (e.key === 'Escape') {
             e.preventDefault()
-            if (query !== '') setQuery('')
+            if (input !== '') setInput('')
             else e.currentTarget.blur()
           }
         }}
         aria-label="Search the graph for a page or tag"
       />
-      {query && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
+      {input && <span className="graph-matches">{matches.size} match{matches.size === 1 ? '' : 'es'}</span>}
       {query.trim() !== '' && (results.length > 0 || domainResults.length > 0) && (
         <ul className="graph-search-results">
           {domainResults.map(([d, count]) => (
@@ -763,12 +831,12 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               <button
                 className="dom-hit"
                 // REPLACES the domain selection, deliberately diverging from the accumulating
-                // chips/panel: search is a refocus — whoever had cooking soloed and then
+                // chips/panel: search is a refocus - whoever had cooking soloed and then
                 // searches carbon fiber has moved on; the old selection lost its relevance
                 // the moment they typed. The tooltip says so.
                 onClick={() => {
                   setSelectedDomains(new Set([d]))
-                  setQuery('')
+                  setInput('')
                 }}
                 title={`Show only the ${d} domain (replaces the current domain filter)`}
               >
@@ -783,7 +851,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             <li key={n.path}>
               <button
                 onClick={() => {
-                  setQuery('')
+                  setInput('')
                   navigate(pageRoute(n.path))
                 }}
               >
@@ -798,122 +866,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
   )
 
   return (
-    <div className="vault-graph" ref={rootRef}>
+    <div className={`vault-graph${fullscreen ? ' fullscreen' : ''}`} ref={rootRef}>
       <StaleLinksBanner />
-      {/* ═══ Tier 1 — the VIEW bar: how the graph is drawn (color lens, type visibility,
-          overlays, stats). Deliberately stable: nothing in this row grows with the vault,
-          so a filter change can never reflow the render controls (mockup 2026-07-21). ═══ */}
-      <div className="viewbar">
-        <span className="vb-eyebrow">View</span>
-        <LensDropdown lens={lens} onSelect={setLens} hasDomains={hasDomains} />
-        <TypesDropdown types={types} selected={selectedTypes} onToggle={toggleType} onClear={() => setSelectedTypes(new Set())} />
-        <button
-          className={`ctl${showSystem ? ' on' : ''}`}
-          onClick={toggleSystem}
-          title="Show system pages: index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default — they organize or document the vault rather than hold knowledge."
-        >
-          <Icon name="wrench" /> System
-        </button>
-        <span className="vb-sep" aria-hidden />
-        <span className="overlays">
-          <span className="grp-label">Overlays</span>
-          {/* Communities: one grouped control for the two views of the SAME clustering —
-              Areas (tinted hulls) and Bridges (edge emphasis). Was two loose "Clusters" and
-              "Network" buttons whose shared basis and hull-vs-edge split weren't legible. The
-              two aspects stay independent (both can be on); state is unchanged underneath. */}
-          <span className={`communities${showClusters || showNetwork ? ' active' : ''}`}>
-            <span className="cm-label"><Icon name="cluster" /> Communities</span>
-            <button
-              className={`cm-seg${showClusters ? ' on' : ''}`}
-              onClick={() => setShowClusters((v) => !v)}
-              aria-pressed={showClusters}
-              title="Areas: outline each auto-detected community as a tinted, tag-labelled hull — which pages group together."
-            >
-              Areas
-            </button>
-            <button
-              className={`cm-seg${showNetwork ? ' on' : ''}`}
-              onClick={() => setShowNetwork((v) => !v)}
-              aria-pressed={showNetwork}
-              title="Bridges: brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead — how the groups connect."
-            >
-              Bridges
-            </button>
-          </span>
-          <button
-            className={`ctl${spotlight ? ' on' : ''}`}
-            onClick={() => setSpotlight((v) => !v)}
-            title="Spotlight: hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities as it subdivides); click a node to open its page. Esc backs out one level, double-Esc resets everything. Off by default."
-          >
-            <Icon name="spotlight" /> Spotlight
-          </button>
-          {graph.gaps.length > 0 && (
-            <button
-              className={`ctl${showGaps ? ' on' : ''}`}
-              onClick={() => {
-                const next = !showGaps
-                setShowGaps(next)
-                if (!next && selection?.kind === 'gap') closeExplorer()
-              }}
-              title="Show unresolved links as ghost nodes — the pages your vault still wants written"
-            >
-              <Icon name="gap" /> Gaps
-            </button>
-          )}
-        </span>
-        <span className="vb-spacer" />
-        <span className="vtool-stats">
-          {realCount} of {graph.nodes.length} pages · {realEdgeCount} links
-          {graph.unresolved > 0 && (
-            <>
-              {' · '}
-              <button
-                className="linklike"
-                // Same landing as the Gaps overlay toggle: the gaps view with the explorer's
-                // ranked list (it shows whenever gaps are on and nothing is selected) — the
-                // two entry points used to diverge, this one additionally auto-selecting the
-                // first gap, which surprise-opened a specific page's panel.
-                onClick={() => setShowGaps(true)}
-                title="Explore the unresolved links as knowledge gaps"
-              >
-                {graph.unresolved} gaps
-              </button>
-            </>
-          )}
-        </span>
-        <Tip
-          text={
-            <span className="shortcuts">
-              <span className="k"><kbd>2× click</kbd></span> <span>open a page from the graph</span>
-              <span className="k"><kbd>Spotlight</kbd></span> <span>click a cluster area to drill in, a node to open it</span>
-              <span className="k"><kbd>Enter</kbd></span> <span>open the selected page</span>
-              <span className="k"><kbd>Esc</kbd></span> <span>clear search · close panel · leave cluster · leave focus — and back out of a page</span>
-              <span className="k"><kbd>Esc</kbd> <kbd>Esc</kbd></span> <span>reset all filters — show the whole vault</span>
-              <span className="k"><kbd>/</kbd></span> <span>search the graph</span>
-              <span className="k"><kbd>f</kbd></span> <span>fit the view</span>
-              <span className="k"><kbd>+</kbd> <kbd>−</kbd></span> <span>zoom</span>
-            </span>
-          }
-        />
-      </div>
-
-      {/* ═══ Tier 2 — the DOMAIN filter band: what is in the graph. The one zone that
-          grows with the vault, so it owns its own row: the chips (legend + filter + count
-          in one control) scroll horizontally, and the full set lives in the searchable
-          "All domains" panel. ═══ */}
-      {hasDomains && (
-        <DomainBand
-          domains={domains}
-          selected={selectedDomains}
-          onToggle={toggleDomain}
-          onClear={() => setSelectedDomains(new Set())}
-          onSelectAll={() => setSelectedDomains(new Set(domains.map(([d]) => d)))}
-        />
-      )}
-
+      <div className="workspace graph-workspace">
+        {(clusterFocus !== null || focusNode) && (
+          <div className="ws-bar">
       {/* The isolated community as its own row (the spotlight-click result), mirroring the
           focusbar: what is isolated, how big it is, and the one way back. The domain dot and
-          the "· domain" suffix make the cluster ≠ domain distinction visible — one domain
+          the "· domain" suffix make the cluster ≠ domain distinction visible - one domain
           usually splits into several communities, and this row names exactly one of them. */}
       {clusterFocus !== null && (
         <div className="clusterbar" role="status">
@@ -932,7 +892,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
                   <strong>{label}</strong>
                 ) : (
                   <button
-                    className="linklike"
+                    className="linkish"
                     onClick={() => setClusterStack((prev) => prev.slice(0, i + 1))}
                     title={`Back to this level (${cf.paths.size} pages)`}
                   >
@@ -973,12 +933,44 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
               Whole graph
             </button>
           </span>
-          <button className="btn ghost" onClick={() => navigate('/vault')} title="Clear focus">
+          <button className="btn ghost" onClick={() => navigate('/graph')} title="Clear focus">
             <Icon name="x" /> Clear
           </button>
         </div>
       )}
 
+          </div>
+        )}
+        <GraphPanel
+          lens={lens}
+          onLens={setLens}
+          hasDomains={hasDomains}
+          types={types}
+          selectedTypes={selectedTypes}
+          onToggleType={toggleType}
+          domains={domains}
+          selectedDomains={selectedDomains}
+          onToggleDomain={toggleDomain}
+          onClearDomains={() => setSelectedDomains(new Set())}
+          showClusters={showClusters}
+          onClusters={() => setShowClusters((v) => !v)}
+          showNetwork={showNetwork}
+          onNetwork={() => setShowNetwork((v) => !v)}
+          spotlight={spotlight}
+          onSpotlight={() => setSpotlight((v) => !v)}
+          showSystem={showSystem}
+          onSystem={toggleSystem}
+          systemCount={systemCount}
+          showGaps={showGaps}
+          onGaps={() => {
+            const next = !showGaps
+            setShowGaps(next)
+            if (!next && selection?.kind === 'gap') closeExplorer()
+          }}
+          gapCount={graph.gaps.length}
+          onReset={resetView}
+        />
+        <div className="graph-main">
       <div className="graph-stage">
         <GraphCanvas
           nodes={nodes}
@@ -995,17 +987,64 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           network={showNetwork}
           spotlight={spotlight}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
-          fitKey={`${[...selectedDomains].sort().join(',')}|${[...selectedTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}`}
+          // Fullscreen rides along: entering or leaving changes the canvas width by ~40%,
+          // and re-fitting through the fitKey also clears `userMoved` - so a graph the user
+          // had panned is re-framed too, instead of staying parked off-screen.
+          fitKey={`${[...selectedDomains].sort().join(',')}|${[...selectedTypes].sort().join(',')}|${localDepth}|${focusPath ?? ''}|${showGaps}|${showSystem}|${query.trim()}|${clusterStack.length}:${clusterFocus?.anchor ?? ''}|${fullscreen}`}
+          barExtra={
+            <>
+              <span className="scopeline">
+                Showing{' '}
+                <strong>
+                  {realCount} of {graph.nodes.length}
+                </strong>{' '}
+                pages and <strong>{realEdgeCount}</strong> links
+                {scopeTail}
+                {graph.gaps.length > 0 && !showGaps && (
+                  <>
+                    {' · '}
+                    <button
+                      className="linkish"
+                      // Same landing as the Gaps toggle in the panel: the gaps view with the
+                      // explorer's ranked list. The two entry points used to diverge.
+                      onClick={() => setShowGaps(true)}
+                      // The GAP count, not `graph.unresolved`: this button opens the gap list,
+                      // and that list is shorter. `unresolved` counts every dangling wikilink,
+                      // most of which nominate nothing to write - `.raw/…` staging references,
+                      // links a lint report or a session log quotes while reporting on them,
+                      // and the plugin's own doc pages pointing into upstream docs. It said
+                      // "54 gaps" over a list of ten.
+                      title="Explore the links that point at pages nobody has written yet"
+                    >
+                      {graph.gaps.length} gaps
+                    </button>
+                  </>
+                )}
+              </span>
+              <span className="spacer" />
+              <Shortcuts rows={GRAPH_SHORTCUTS} />
+              <button
+                className="btn ghost"
+                onClick={() => setFullscreen((v) => !v)}
+                title={fullscreen ? 'Back to the full view (Esc)' : 'Show the graph on its own - Esc returns'}
+              >
+                <Icon name={fullscreen ? 'shrink' : 'expand'} /> {fullscreen ? 'Exit' : 'Fullscreen'}
+              </button>
+              {/* Last in the row: search is the control you come back to, and its result
+                  list drops out of the field - at the end of the bar it has room to. */}
+              {searchOverlay}
+            </>
+          }
           onSelect={(n) =>
             n.path.startsWith(GAP_PATH_PREFIX) ? selectGap(n.title) : selectPage(n.path)
           }
           // The spotlight click, on a member node or anywhere in the community's hull: it
-          // isolates the community (the hover previews exactly this set) — recursively:
+          // isolates the community (the hover previews exactly this set) - recursively:
           // inside a focus the ids come from re-detection on the isolated subgraph, so the
           // click drills into a sub-community. It deliberately does NOT open the explorer
-          // panel — the click means "zoom in", not "inspect". The canvas only fires this
+          // panel - the click means "zoom in", not "inspect". The canvas only fires this
           // for isolatable communities (spotlight on, proper subset of the visible real
-          // nodes) — a level that doesn't subdivide, and any unclustered node, falls back
+          // nodes) - a level that doesn't subdivide, and any unclustered node, falls back
           // to the plain select above; the subset guard here is belt-and-braces.
           onClusterClick={(cid) => {
             if (clusterIds === null) return
@@ -1032,15 +1071,14 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
             if (!n.path.startsWith(GAP_PATH_PREFIX)) navigate(pageRoute(n.path))
           }}
           // Click on empty canvas: drop the selection (an accidental node tap is undone
-          // with one click). Deliberately keeps the trail — only the panel's ✕ resets it.
+          // with one click). Deliberately keeps the trail - only the panel's ✕ resets it.
           onClear={() => setSelection(null)}
           overlay={
             <>
-              {searchOverlay}
               {query.trim() !== '' && realCount === 0 && (
                 <div className="graph-empty" role="status">
                   No pages match “{query.trim()}”.
-                  <button className="linklike" onClick={() => setQuery('')}>
+                  <button className="linkish" onClick={() => setInput('')}>
                     Clear search
                   </button>
                 </div>
@@ -1075,6 +1113,8 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
           onSelectGap={selectGap}
           onClose={closeExplorer}
         />
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -1086,7 +1126,7 @@ function GraphView({ graph, focusPath }: { graph: VaultGraph; focusPath: string 
  * The node explorer: click a page or a knowledge gap in the graph and browse it as lists.
  * Backlinks, outgoing links and tag-siblings are computed from the FULL graph (not the
  * filtered subgraph), so the panel is complete even when filters hide neighbors. Clicking a
- * link re-selects that page in place — you browse without leaving the graph; "Open page"
+ * link re-selects that page in place - you browse without leaving the graph; "Open page"
  * is the explicit navigation.
  */
 function GraphExplorer({
@@ -1170,7 +1210,7 @@ function PageExplorer({
     return idf
   }, [graph])
 
-  // Related by shared tag, excluding pages already linked either way — the tag axis surfaces
+  // Related by shared tag, excluding pages already linked either way - the tag axis surfaces
   // neighbors the wikilinks don't. Structural tags (`#source`, …) carry no subject and are
   // dropped; candidates are ranked by summed IDF of the shared thematic tags so the closest
   // neighbors win, not the alphabetically-first ones. Capped so the panel stays a summary.
@@ -1213,7 +1253,7 @@ function PageExplorer({
   const repairRunning = repairId !== null && (repairRun === undefined || repairRun.status === 'running')
   useEffect(() => {
     if (repairRun?.status === 'done') {
-      // The run edited pages and committed — refresh everything derived from the vault.
+      // The run edited pages and committed - refresh everything derived from the vault.
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
@@ -1261,7 +1301,7 @@ function PageExplorer({
           <div className="gx-health-head">Graph health</div>
           {isolated && (
             <p>
-              Isolated: no knowledge page links here or is linked from here — the page is
+              Isolated: no knowledge page links here or is linked from here - the page is
               invisible to graph exploration.
             </p>
           )}
@@ -1271,7 +1311,7 @@ function PageExplorer({
               {' → '}
               <button className="gx-link inline" onClick={() => onSelectPage(e.to.path)}>{e.to.title}</button>
               {' is the only link between '}
-              <strong>{e.from.domain}</strong> and <strong>{e.to.domain}</strong> — possibly an
+              <strong>{e.from.domain}</strong> and <strong>{e.to.domain}</strong> - possibly an
               incidental aside rather than knowledge.
             </p>
           ))}
@@ -1281,7 +1321,7 @@ function PageExplorer({
                 className="btn"
                 disabled={startRepair.isPending}
                 onClick={() => startRepair.mutate(repairTasks())}
-                title="A bounded agent run: weaves an isolated page into the graph and/or reviews the flagged link. Edits only the pages involved — one revertable commit."
+                title="A bounded agent run: weaves an isolated page into the graph and/or reviews the flagged link. Edits only the pages involved - one revertable commit."
               >
                 {startRepair.isPending ? 'Starting…' : 'Repair (agent run)'}
               </button>
@@ -1290,7 +1330,7 @@ function PageExplorer({
               )}
             </div>
           )}
-          {repairRunning && <p className="dim">Repair is running — the agent edits only the pages involved…</p>}
+          {repairRunning && <p className="dim">Repair is running - the agent edits only the pages involved…</p>}
           {repairRun?.status === 'done' && (
             <p>
               Repair finished: {repairRun.result?.pages.length ?? 0} page
@@ -1314,7 +1354,7 @@ function PageExplorer({
         <button className="btn primary" onClick={() => navigate(pageRoute(node.path))}>
           Open page <Icon name="link" />
         </button>
-        <button className="btn" onClick={() => navigate(`/vault?focus=${encodeURIComponent(node.path)}`)}>
+        <button className="btn" onClick={() => navigate(`/graph?focus=${encodeURIComponent(node.path)}`)}>
           Focus neighborhood
         </button>
       </div>
@@ -1337,7 +1377,9 @@ function GapExplorer({
     [graph, gap],
   )
   if (!gap) return <div className="gx-empty">This link is resolved now.</div>
-  const prefill = `Research and write a vault page about "${gap.title}". ${gap.refBy.length} existing pages already link to it.`
+  // A CLEAN topic (just the page name): the research pipeline pins its synthesis-page title
+  // to `Research: <topic><lens suffix>`, so instruction prose here would end up IN the title.
+  const prefill = gap.title
   return (
     <>
       <div className="gx-head">
@@ -1351,7 +1393,7 @@ function GapExplorer({
       </div>
       <div className="gx-note">
         No page named <strong>“{gap.title}”</strong> exists yet, but {gap.refBy.length} page
-        {gap.refBy.length === 1 ? '' : 's'} already link to it — the vault telling you what to write next.
+        {gap.refBy.length === 1 ? '' : 's'} already link to it - the vault telling you what to write next.
       </div>
       <div className="gx-body">
         <LinkSection title="Referenced by" list={refPages} onSelect={onSelectPage} />
@@ -1390,7 +1432,7 @@ function GapList({
         </div>
       </div>
       <div className="gx-note">
-        Every dashed node is a page other pages link to but that doesn’t exist yet — ranked by how
+        Every dashed node is a page other pages link to but that doesn’t exist yet - ranked by how
         many content pages are waiting. A ready-made research backlog.
       </div>
       <div className="gx-body">
@@ -1446,292 +1488,332 @@ function LinkSection({
 }
 
 /**
- * The wiki-bucket visibility filters, tucked behind a dropdown: they are an occasional
- * refinement (hide meta noise, isolate sources), not something worth a permanent row of
- * nine chips above the graph. Checkbox = visible.
+ * The graph's VIEW PANEL - the structural half of the graph rework (2026-08-24).
+ *
+ * It replaces four stacked control rows above the canvas (the view bar, the domain band,
+ * and the two dropdowns inside them) with one standing column beside it. Three reasons:
+ *
+ *  1 The canvas gets its height back. Four rows of chrome, plus the cluster and focus bars
+ *    when they appear, pushed the drawing into the lower half of the screen.
+ *  2 Every parameter is visible at once. The colour lens - the control that decides which
+ *    question the graph answers - used to sit inside a dropdown, while the four overlay
+ *    toggles sat permanently open. That is the priority upside down.
+ *  3 A column grows downward, so the domain list (the one control that grows with the
+ *    vault) can take the leftover height and scroll on its own, instead of forcing the
+ *    whole toolbar to reflow.
+ *
+ * What still folds: the diagnostic lenses and the two include-toggles. Both say what is on
+ * inside them when collapsed - a fold that hides the state in force is worse than no fold.
  */
-/**
- * Tier-2 filter band (mockup 2026-07-21): the domain chips — legend + filter + count in one
- * control — in a horizontally scrolling strip with edge fades, plus the searchable
- * "All domains" panel. This is the part of the toolbar that grows as the vault gains
- * domains, isolated in its own row so it can never reflow the view controls above it.
- * Solo-select semantics unchanged: empty selection = everything; clicks accumulate.
- */
-function DomainBand({
-  domains,
-  selected,
-  onToggle,
-  onClear,
-  onSelectAll,
-}: {
-  domains: Array<[string, number]>
-  selected: ReadonlySet<string>
-  onToggle: (d: string) => void
-  onClear: () => void
-  onSelectAll: () => void
-}): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState('')
-  const moreRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
-  const dot = (d: string): string => (d === NO_DOMAIN ? 'var(--muted)' : domainColor(d))
-  /**
-   * Honest, state-aware tooltip for a toggle target (chip or panel row). The old static
-   * "Show only this domain" was only true for the FIRST click; every further click adds to
-   * the selection, and claiming "only" there mislabeled the accumulate semantics. (The graph
-   * search's domain hit is the one place that genuinely replaces — its own tooltip says so.)
-   */
-  const toggleTitle = (d: string, active: boolean): string =>
-    active
-      ? selected.size === 1
-        ? 'Deselect — back to all domains'
-        : `Remove ${label(d)} from the filter`
-      : selected.size === 0
-        ? 'Show only this domain'
-        : `Add ${label(d)} to the current selection`
-  const q = filter.trim().toLowerCase()
-  // The band orders by size (biggest domains first); the panel is for FINDING a domain,
-  // so it orders alphabetically — the no-domain pseudo-bucket stays last either way.
-  const alphabetical = [...domains].sort(([a], [b]) =>
-    a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b),
-  )
-  const panelRows = q === '' ? alphabetical : alphabetical.filter(([d]) => label(d).toLowerCase().includes(q))
-
-  return (
-    <div className="domainband">
-      <div className="db-head">
-        <span className="lab">Filter · Domain</span>
-        <span className="sel">{selected.size === 0 ? 'showing all' : `${selected.size} selected`}</span>
-      </div>
-      <span className="db-divider" aria-hidden />
-      <div className="db-scroll">
-        {domains.map(([d, count]) => {
-          const active = selected.has(d)
-          return (
-            <button
-              key={d || '∅'}
-              className={`chip${active ? ' active' : ''}${selected.size > 0 && !active ? ' dimmed' : ''}`}
-              onClick={() => onToggle(d)}
-              title={toggleTitle(d, active)}
-            >
-              <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
-              {label(d)} <span className="chip-n">{count}</span>
-            </button>
-          )
-        })}
-      </div>
-      <div className="db-actions">
-        {selected.size > 0 && (
-          <button className="db-clear" onClick={onClear} title="Show all domains">
-            <Icon name="x" /> Clear
-          </button>
-        )}
-        <div className="db-more" ref={moreRef}>
-          <button
-            className={`db-more-btn${open ? ' on' : ''}`}
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-haspopup="true"
-          >
-            All domains ▾
-          </button>
-          {open && (
-            <div className="db-panel">
-              <div className="p-search">
-                <Icon name="search" />
-                <input
-                  type="search"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Filter domains…"
-                  aria-label="Filter the domain list"
-                />
-              </div>
-              <div className="p-grid">
-                {panelRows.map(([d, count]) => {
-                  const active = selected.has(d)
-                  return (
-                    <button
-                      key={d || '∅'}
-                      className={`p-row${active ? ' active' : ''}`}
-                      onClick={() => onToggle(d)}
-                      title={toggleTitle(d, active)}
-                    >
-                      <span className="chip-dot" style={{ background: dot(d) }} aria-hidden />
-                      <span className="nm">{label(d)}</span>
-                      <span className="n">{count}</span>
-                      <span className="chk" aria-hidden>
-                        {active ? '✓' : ''}
-                      </span>
-                    </button>
-                  )
-                })}
-                {panelRows.length === 0 && <span className="p-none">No domain matches “{filter.trim()}”.</span>}
-              </div>
-              <div className="p-foot">
-                <button className="linklike" onClick={onSelectAll}>
-                  Select all
-                </button>
-                <span className="count">
-                  {selected.size || domains.length} of {domains.length}
-                </span>
-                <button className="linklike" onClick={onClear}>
-                  Clear
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function TypesDropdown({
-  types,
-  selected,
-  onToggle,
-  onClear,
-}: {
-  types: Array<[string, number]>
-  /** Solo-select set (same semantics as the domain filter): empty = every type shown. */
-  selected: ReadonlySet<string>
-  onToggle: (t: string) => void
-  onClear: () => void
-}): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const all = selected.size === 0
-  return (
-    <div className="dropdown" ref={ref}>
-      <button
-        className={`ctl${all ? '' : ' on'}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="true"
-      >
-        Types: <span className="ctl-val">{all ? 'all' : `${selected.size} of ${types.length}`}</span> ▾
-      </button>
-      {open && (
-        <div className="dropdown-menu" role="menu">
-          {/* "All types" is the empty selection — the reset, mirroring the domain band's Clear.
-              Checked when nothing is soloed, so the menu always shows one active state. */}
-          <label className="dropdown-item">
-            <input type="checkbox" checked={all} onChange={onClear} />
-            <em>All types</em>
-          </label>
-          <div className="dropdown-sep" role="separator" />
-          {types.map(([t, count]) => (
-            // Checked = this type is soloed (in the active filter), like a highlighted domain
-            // chip. With nothing soloed no box is checked and "All types" carries the state —
-            // a click then means "show me only this type", not "uncheck one of all".
-            <label key={t} className="dropdown-item">
-              <input type="checkbox" checked={selected.has(t)} onChange={() => onToggle(t)} />
-              {TYPE_LABELS[t] ?? t}
-              <span className="count">{count}</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The color lenses offered in the dropdown, with the one-line description each shows. */
-const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
-  { key: 'domain', label: 'Domain', desc: 'hash color per meta-category' },
-  { key: 'type', label: 'Page type', desc: 'wiki bucket (concept, entity, …)' },
-  { key: 'authority', label: 'Authority', desc: 'brighter = more backlinks' },
-  { key: 'orphans', label: 'Orphans', desc: 'red = no backlinks' },
-  { key: 'stubs', label: 'Stubs', desc: 'amber = thin page (< 1 KB)' },
-  { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
-]
-
-/**
- * The color-lens picker: one dropdown that re-encodes the graph to answer a different
- * question. Replaces the old two-state "by domain / by type" toggle — same job, four more
- * axes. Domain is disabled when no page carries one.
- */
-function LensDropdown({
+function GraphPanel({
   lens,
-  onSelect,
+  onLens,
   hasDomains,
+  types,
+  selectedTypes,
+  onToggleType,
+  domains,
+  selectedDomains,
+  onToggleDomain,
+  onClearDomains,
+  showClusters,
+  onClusters,
+  showNetwork,
+  onNetwork,
+  spotlight,
+  onSpotlight,
+  showSystem,
+  onSystem,
+  systemCount,
+  showGaps,
+  onGaps,
+  gapCount,
+  onReset,
 }: {
   lens: Lens
-  onSelect: (l: Lens) => void
+  onLens: (l: Lens) => void
   hasDomains: boolean
+  types: Array<[string, number]>
+  selectedTypes: ReadonlySet<string>
+  onToggleType: (t: string) => void
+  domains: Array<[string, number]>
+  selectedDomains: ReadonlySet<string>
+  onToggleDomain: (d: string) => void
+  onClearDomains: () => void
+  showClusters: boolean
+  onClusters: () => void
+  showNetwork: boolean
+  onNetwork: () => void
+  spotlight: boolean
+  onSpotlight: () => void
+  showSystem: boolean
+  onSystem: () => void
+  systemCount: number
+  showGaps: boolean
+  onGaps: () => void
+  gapCount: number
+  onReset: () => void
 }): React.ReactElement {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-  const current = LENSES.find((l) => l.key === lens) ?? LENSES[0]!
+  const [domFilter, setDomFilter] = useState('')
+  const includeOn = (showSystem ? 1 : 0) + (showGaps ? 1 : 0)
+  /** Hovering a pill previews its meaning; leaving falls back to the one in force. */
+  const [lensPreview, setLensPreview] = useState<Lens | null>(null)
+  const shownLens = LENSES.find((l) => l.key === (lensPreview ?? lens)) ?? LENSES[0]!
+
+  const label = (d: string): string => (d === NO_DOMAIN ? 'no domain' : d)
+  const q = domFilter.trim().toLowerCase()
+  // The list is for FINDING a domain, so it orders alphabetically (the old band ordered by
+  // size, which is right for a legend and wrong for a lookup). The no-domain bucket is last.
+  const domainRows = [...domains]
+    .sort(([a], [b]) => (a === NO_DOMAIN ? 1 : b === NO_DOMAIN ? -1 : a.localeCompare(b)))
+    .filter(([d]) => q === '' || label(d).toLowerCase().includes(q))
+
   return (
-    <div className="dropdown" ref={ref}>
-      <button
-        className={`ctl${lens !== 'domain' ? ' on' : ''}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-haspopup="true"
-        title="Change how nodes are colored"
-      >
-        <Icon name="palette" /> Color: <span className="ctl-val">{current.label}</span> ▾
-      </button>
-      {open && (
-        <div className="dropdown-menu lens-menu" role="menu">
+    <aside className="gpanel" aria-label="Graph view controls">
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">View</span>
+          <span className="spacer" />
+          <button className="btn ghost" onClick={onReset} title="Back to the whole vault, coloured by domain">
+            Reset
+          </button>
+        </div>
+        <div className="pillrow" role="radiogroup" aria-label="Colour by">
           {LENSES.map((l) => {
             const disabled = l.key === 'domain' && !hasDomains
             return (
               <button
                 key={l.key}
-                role="menuitemradio"
-                aria-checked={l.key === lens}
-                className={`lens-item${l.key === lens ? ' sel' : ''}`}
+                className="viewpill"
+                role="radio"
+                aria-checked={lens === l.key}
                 disabled={disabled}
-                onClick={() => {
-                  onSelect(l.key)
-                  setOpen(false)
-                }}
+                onClick={() => onLens(l.key)}
+                onMouseEnter={() => setLensPreview(l.key)}
+                onMouseLeave={() => setLensPreview(null)}
+                onFocus={() => setLensPreview(l.key)}
+                onBlur={() => setLensPreview(null)}
               >
-                <span className="lens-name">{l.label}</span>
-                <span className="lens-desc">{disabled ? 'no domains assigned yet' : l.desc}</span>
+                <span className="pd" aria-hidden />
+                {l.label}
               </button>
             )
           })}
         </div>
+        <div className="pillhint">{shownLens.desc}</div>
+      </div>
+
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">Overlays</span>
+        </div>
+        <div className="gp-toggles">
+          <RowToggle
+            on={showClusters}
+            onToggle={onClusters}
+            name="Areas"
+            desc="tinted hull per community"
+            title="Outline each auto-detected community as a tinted, tag-labelled hull - which pages group together."
+          />
+          <RowToggle
+            on={showNetwork}
+            onToggle={onNetwork}
+            name="Bridges"
+            desc="brighten links between communities"
+            title="Brighten the connections. Intra-community links lift into view; cross-community bridges show link direction as a colour gradient with an arrowhead."
+          />
+          <RowToggle
+            on={spotlight}
+            onToggle={onSpotlight}
+            name="Spotlight"
+            desc="hover isolates one community"
+            title="Hovering highlights a whole community and dims the rest. Click inside a cluster's area to isolate it (and keep drilling into sub-communities); click a node to open its page. Esc backs out one level."
+          />
+        </div>
+        <Fold label="Include" state={includeOn === 0 ? 'none' : `${includeOn} on`} lit={includeOn > 0} openWhen={includeOn > 0}>
+          <div className="gp-toggles">
+            <RowToggle
+              on={showSystem}
+              onToggle={onSystem}
+              name="System pages"
+              desc="index hubs, MOCs, reports"
+              count={systemCount}
+              title="Index hubs, MOCs and the domain registry, plus maintenance artifacts (lint/release reports, session logs). Hidden by default - they organize or document the vault rather than hold knowledge."
+            />
+            <RowToggle
+              on={showGaps}
+              onToggle={onGaps}
+              name="Gaps"
+              desc="unwritten link targets, as ghosts"
+              count={gapCount}
+              title="Show unresolved links as ghost nodes - the pages your vault still wants written."
+            />
+          </div>
+        </Fold>
+      </div>
+
+      <div className="gp-sec">
+        <div className="gp-head">
+          <span className="gp-eyebrow">Page types</span>
+          <span className="spacer" />
+          <span className="gp-state">{selectedTypes.size === 0 ? 'all' : `${selectedTypes.size} of ${types.length}`}</span>
+        </div>
+        <div className="typechips">
+          {types.map(([t, count]) => {
+            const active = selectedTypes.has(t)
+            return (
+              <button
+                key={t}
+                className={`chip${active ? ' active' : ''}${selectedTypes.size > 0 && !active ? ' dimmed' : ''}`}
+                aria-pressed={active}
+                onClick={() => onToggleType(t)}
+                title={active ? `Remove ${TYPE_LABELS[t] ?? t}` : selectedTypes.size === 0 ? 'Show only this type' : `Add ${TYPE_LABELS[t] ?? t}`}
+              >
+                <span className="chip-dot" style={{ background: `var(${TYPE_VARS[t] ?? '--type-meta'})` }} aria-hidden />
+                {TYPE_LABELS[t] ?? t} <span className="chip-n">{count}</span>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {hasDomains && (
+        <div className="gp-sec grow">
+          <div className="gp-head">
+            <span className="gp-eyebrow">Domains</span>
+            <span className="spacer" />
+            {selectedDomains.size > 0 ? (
+              <button className="btn ghost" onClick={onClearDomains} title="Show all domains">
+                <Icon name="x" /> Clear
+              </button>
+            ) : (
+              <span className="gp-state">showing all</span>
+            )}
+          </div>
+          <div className="gp-search">
+            <Icon name="search" />
+            <input
+              type="search"
+              value={domFilter}
+              placeholder="Filter domains…"
+              onChange={(e) => setDomFilter(e.target.value)}
+              aria-label="Filter the domain list"
+            />
+          </div>
+          <div className="domlist">
+            {domainRows.map(([d, count]) => {
+              const active = selectedDomains.has(d)
+              return (
+                <button
+                  key={d || '∅'}
+                  className={`domrow${active ? ' active' : ''}${selectedDomains.size > 0 && !active ? ' dimmed' : ''}`}
+                  aria-pressed={active}
+                  onClick={() => onToggleDomain(d)}
+                  title={
+                    active
+                      ? selectedDomains.size === 1
+                        ? 'Deselect - back to all domains'
+                        : `Remove ${label(d)} from the filter`
+                      : selectedDomains.size === 0
+                        ? 'Show only this domain'
+                        : `Add ${label(d)} to the current selection`
+                  }
+                >
+                  <span className="dot" style={{ background: d === NO_DOMAIN ? 'var(--muted)' : domainColor(d) }} aria-hidden />
+                  <span className="nm">{label(d)}</span>
+                  <span className="n">{count}</span>
+                </button>
+              )
+            })}
+            {domainRows.length === 0 && <div className="gp-none">No domain matches “{domFilter.trim()}”.</div>}
+          </div>
+        </div>
       )}
+    </aside>
+  )
+}
+
+/** A binary view option as a switch row: name, one line of why, optional count. */
+function RowToggle({
+  on,
+  onToggle,
+  name,
+  desc,
+  count,
+  title,
+}: {
+  on: boolean
+  onToggle: () => void
+  name: string
+  desc: string
+  count?: number
+  title: string
+}): React.ReactElement {
+  return (
+    <button className="rowtoggle" aria-pressed={on} onClick={onToggle} title={title}>
+      <span className="sw" aria-hidden />
+      <span className="rt-text">
+        <span className="tname">{name}</span>
+        <span className="tdesc">{desc}</span>
+      </span>
+      {count !== undefined && <span className="tn">{count}</span>}
+    </button>
+  )
+}
+
+/**
+ * A disclosure for controls that are reached for rather than browsed. `state` is shown on
+ * the closed summary and `lit` colours it, so a collapsed fold can never hide the fact that
+ * something inside it is switched on. `openWhen` forces it open when that happens.
+ */
+function Fold({
+  label,
+  state,
+  lit,
+  openWhen,
+  children,
+}: {
+  label: string
+  state: string
+  lit: boolean
+  openWhen: boolean
+  children: React.ReactNode
+}): React.ReactElement {
+  const [open, setOpen] = useState(openWhen)
+  // Something inside became active (via reset, restore or a keyboard path) - show it.
+  useEffect(() => {
+    if (openWhen) setOpen(true)
+  }, [openWhen])
+  return (
+    <div className={`fold${open ? ' open' : ''}`}>
+      <button className="fold-summary" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="caret" aria-hidden />
+        {label}
+        <span className={`fold-state${lit ? ' lit' : ''}`}>{state}</span>
+      </button>
+      {open && <div className="fold-body">{children}</div>}
     </div>
   )
 }
 
 /**
+ * The colour lenses, as pills. Each description says what the COLOUR means, in the same
+ * grammar and - load-bearing - on ONE line: the hint sits above the rest of the panel, so
+ * a description that wraps for some lenses and not others makes everything below it jump
+ * as the pointer crosses the row. The pill carries the name, so the hint never repeats it.
+ */
+const LENSES: Array<{ key: Lens; label: string; desc: string }> = [
+  { key: 'domain', label: 'Domain', desc: 'one colour per field of knowledge' },
+  { key: 'authority', label: 'Authority', desc: 'brighter = more pages link here' },
+  { key: 'recency', label: 'Recency', desc: 'green = edited recently' },
+  { key: 'type', label: 'Page type', desc: 'a colour per wiki bucket' },
+  { key: 'orphans', label: 'Orphans', desc: 'red = nothing links here' },
+  { key: 'stubs', label: 'Stubs', desc: 'amber = thin page, under 1 KB' },
+]
+
+/**
  * A small canvas-corner legend (bottom-right). The metric lenses each get a one-line key; the
- * `type` lens gets a swatch per page-type color present. The `domain` lens has no legend here —
+ * `type` lens gets a swatch per page-type color present. The `domain` lens has no legend here -
  * the domain filter chips at the top ARE its legend. `types` is the [type, count] list of what
  * is currently visible, so the legend lists only colors actually on screen.
  */
@@ -1745,7 +1827,7 @@ function LensLegend({
   let body: React.ReactNode = null
   if (lens === 'type') {
     // Distinct color buckets present, in a stable order; everything without its own color
-    // (meta, references, comparisons, folds, …) collapses to one muted "Meta / other" row —
+    // (meta, references, comparisons, folds, …) collapses to one muted "Meta / other" row -
     // mirroring colorFor(), which paints exactly those buckets muted.
     const present = new Set(types.map(([t]) => t))
     const colored = Object.entries(TYPE_VARS).filter(([, v]) => v !== '--muted')
@@ -1839,7 +1921,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       staleLinks.add(res.staleLinks, pageQ.data?.title ?? path)
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
-      navigate('/vault')
+      navigate('/graph')
     },
   })
 
@@ -1847,6 +1929,43 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     setDraft(pageQ.data?.markdown ?? '')
     save.reset()
     setEditing(true)
+  }
+
+  /**
+   * Unsaved-draft guard. Every way out of the editor used to drop the draft silently: the
+   * back button, "In graph", the sidebar, browser back, Cancel. `dirty` drives a visible
+   * badge, an armed Cancel and a beforeunload prompt; `leaveEditor` is what every in-app
+   * exit path asks first.
+   */
+  const dirty = editing && draft !== (pageQ.data?.markdown ?? '')
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent): void => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [dirty])
+  useEffect(() => {
+    if (!confirmLeave) return
+    const t = setTimeout(() => setConfirmLeave(false), 4000)
+    return () => clearTimeout(t)
+  }, [confirmLeave])
+  /** Returns true when the caller may proceed; otherwise it armed the confirm. */
+  const leaveEditor = (): boolean => {
+    if (!dirty) {
+      setEditing(false)
+      return true
+    }
+    if (!confirmLeave) {
+      setConfirmLeave(true)
+      return false
+    }
+    setConfirmLeave(false)
+    setEditing(false)
+    return true
   }
   const requestDelete = (): void => {
     if (!confirmDelete) {
@@ -1873,11 +1992,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   }, [menuOpen])
   const [copiedPath, setCopiedPath] = useState(false)
 
-  // Escape returns to the graph — the round-trip partner of the canvas double-click. It
-  // goes straight to /vault (not history.back): after a chain of wikilink hops, one press
-  // means "out to the graph", not one step back per hop. Deliberately inert while editing —
-  // Escape must never cost a draft — and while typing or a menu is open; gated on this tab
-  // being visible (tabs stay mounted, hidden via [hidden]).
+  // Escape leaves the page for the screen it was opened from (library, graph, wherever) -
+  // `originPath()` tracks the last non-page route. After a chain of wikilink hops one press
+  // still means "out to that screen", not one step back per hop. The back BUTTON does
+  // exactly the same thing, so the two gestures can't disagree (they used to: the button
+  // ran history.back and could leave the screen entirely). Inert while editing - Escape
+  // must never cost a draft - and while typing or a menu is open; gated on this screen
+  // being visible (screens stay mounted, hidden via [hidden]).
   const rootRef = useRef<HTMLDivElement>(null)
   const escRef = useRef<(e: KeyboardEvent) => void>(() => {})
   escRef.current = (e: KeyboardEvent): void => {
@@ -1891,7 +2012,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
       return
     }
     e.preventDefault()
-    navigate('/vault')
+    navigate(originPath())
   }
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => escRef.current(e)
@@ -1899,7 +2020,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Title → path map for resolving clicked wikilinks — same first-wins, case-insensitive
+  // Title → path map for resolving clicked wikilinks - same first-wins, case-insensitive
   // rule as the server, so the viewer and the graph can never disagree.
   const byTitle = useMemo(() => {
     const m = new Map<string, string>()
@@ -1953,21 +2074,50 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
     [pageQ.data],
   )
 
+  // What the back gesture is called: it names the screen this page was opened from, so the
+  // hint can never promise a destination the key does not go to.
+  const origin = originPath().split('?')[0]!
+  const backLabel = origin.startsWith('/library')
+    ? 'library'
+    : origin.startsWith('/research')
+      ? 'research'
+      : origin.startsWith('/system')
+        ? 'system'
+        : origin === '/'
+          ? 'home'
+          : 'graph'
+
   return (
     <div className="vault-page" ref={rootRef}>
       <div className="page-head">
-        <button className="btn ghost" onClick={() => window.history.back()} title="Back — Esc returns to the graph">
+        <button
+          className="btn ghost"
+          onClick={() => {
+            if (editing && !leaveEditor()) return
+            navigate(originPath())
+          }}
+          title={`Back to the ${backLabel} (same as Esc)`}
+        >
           <Icon name="back" />
         </button>
         <h1>{pageQ.data?.title ?? node?.title ?? path.split('/').pop()?.replace(/\.md$/, '')}</h1>
         {node && <span className="bucket">{TYPE_LABELS[node.type] ?? node.type}</span>}
-        <span className="key-hint" aria-hidden>
-          <kbd>Esc</kbd> graph
-        </span>
+        {dirty ? (
+          <span className="dirty-badge" role="status">
+            <Icon name="edit" /> Unsaved changes
+          </span>
+        ) : (
+          <span className="key-hint" aria-hidden>
+            <kbd>Esc</kbd> {backLabel}
+          </span>
+        )}
         <span className="spacer" />
         <button
           className="btn"
-          onClick={() => navigate(`/vault?focus=${encodeURIComponent(path)}`)}
+          onClick={() => {
+            if (editing && !leaveEditor()) return
+            navigate(`/graph?focus=${encodeURIComponent(path)}`)
+          }}
           title="Focus this page in the graph"
         >
           <Icon name="graph" /> In graph
@@ -2012,7 +2162,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                       .slice(0, 3)
                       .map((b) => b.title)
                       .join(', ')}
-                    {backlinks.length > 3 ? ', …' : ''}) — deleting leaves dangling links.
+                    {backlinks.length > 3 ? ', …' : ''}) - deleting leaves dangling links.
                   </div>
                 )}
                 <button
@@ -2020,7 +2170,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
                   className="danger"
                   disabled={del.isPending}
                   onClick={requestDelete}
-                  title="Deleted as a git commit — recoverable"
+                  title="Deleted as a git commit - recoverable"
                 >
                   <Icon name="x" />{' '}
                   {del.isPending ? 'Deleting…' : confirmDelete ? 'Really delete?' : 'Delete page…'}
@@ -2050,7 +2200,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
 
       {editing ? (
         <div className="page-editor">
-          {/* Markdown left, live rendering right — wikilinks and frontmatter are visible
+          {/* Markdown left, live rendering right - wikilinks and frontmatter are visible
               while typing instead of only after saving. Stacks on small screens. */}
           <div className="editor-split">
             <textarea
@@ -2065,8 +2215,13 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
             <button className="btn primary" onClick={() => save.mutate()} disabled={save.isPending}>
               {save.isPending ? 'Saving…' : 'Save (commit)'}
             </button>
-            <button className="btn" onClick={() => setEditing(false)} disabled={save.isPending}>
-              Cancel
+            <button
+              className={`btn${confirmLeave ? ' armed' : ''}`}
+              onClick={() => leaveEditor()}
+              disabled={save.isPending}
+              title={dirty ? 'Discard the unsaved draft' : 'Close the editor'}
+            >
+              {confirmLeave ? 'Discard draft?' : 'Cancel'}
             </button>
             {saveConflict && (
               <span className="toast err">
@@ -2100,7 +2255,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
               {parsed.fields.map(([k, v]) => (
                 <div key={k}>
                   <dt>{k}</dt>
-                  {/* Frontmatter carries wikilinks too (`related: [[index]]`) — make them
+                  {/* Frontmatter carries wikilinks too (`related: [[index]]`) - make them
                       navigable rather than showing the raw brackets. */}
                   <dd>{renderMetaValue(v, linkTo)}</dd>
                 </div>
@@ -2161,7 +2316,7 @@ function PageView({ graph, path }: { graph: VaultGraph; path: string }): React.R
   )
 }
 
-/** Live rendering of the editor draft — frontmatter as properties, wikilinks clickable. */
+/** Live rendering of the editor draft - frontmatter as properties, wikilinks clickable. */
 function EditorPreview({
   draft,
   linkTo,
@@ -2189,7 +2344,7 @@ function EditorPreview({
 
 /**
  * Banner shown after manual deletions: N backlinks now point at nothing. Primary action is
- * the bounded reference-cleanup agent run (maintenance kind `cleanup`) — one click instead
+ * the bounded reference-cleanup agent run (maintenance kind `cleanup`) - one click instead
  * of leaving the dangling references to be discovered weeks later by a lint. The banner
  * tracks the run inline (poll every 2 s) so the user never has to leave the tab.
  */
@@ -2211,7 +2366,7 @@ function StaleLinksBanner(): React.ReactElement | null {
   const settled = run !== undefined && run.status !== 'running'
   useEffect(() => {
     if (run?.status === 'done') {
-      // The run edited pages and committed — refresh everything derived from the vault.
+      // The run edited pages and committed - refresh everything derived from the vault.
       qc.invalidateQueries({ queryKey: ['graph'] })
       qc.invalidateQueries({ queryKey: ['stats'] })
     }
@@ -2229,7 +2384,7 @@ function StaleLinksBanner(): React.ReactElement | null {
   if (runId !== null && !settled) {
     body = (
       <span>
-        Reference cleanup is running — removing dangling links to <strong>{pages}</strong>…
+        Reference cleanup is running - removing dangling links to <strong>{pages}</strong>…
       </span>
     )
   } else if (run?.status === 'done') {

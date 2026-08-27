@@ -2,7 +2,7 @@
  * A citation chip with an inline page preview (SPEC.md §6.3: "klickbare Chips … Obsidian-
  * Deep-Link + Inline-Preview des Seiteninhalts").
  *
- * The deep link stays the chip's primary action — the preview is a separate toggle, so clicking
+ * The deep link stays the chip's primary action - the preview is a separate toggle, so clicking
  * the chip still opens Obsidian as before. The page content is fetched lazily on first expand
  * (and cached by TanStack afterwards), because a long answer can cite a dozen pages and eagerly
  * loading all of them would be wasted work for previews nobody opens.
@@ -54,7 +54,7 @@ export function CitationChip({
           {preview.data && (
             <>
               <Markdown source={preview.data.markdown} />
-              {preview.data.truncated && <div className="tab-hint">… truncated — open in Obsidian for the full page.</div>}
+              {preview.data.truncated && <div className="tab-hint">… truncated - open in Obsidian for the full page.</div>}
             </>
           )}
         </div>

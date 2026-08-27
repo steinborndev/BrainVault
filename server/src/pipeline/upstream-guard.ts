@@ -80,6 +80,23 @@ export function protectedWikiPages(vaultRoot: string): ReadonlySet<string> {
   }
 }
 
+/**
+ * Memoized `protectedWikiPages`. The derivation shells out to git twice, and the read-only
+ * consumers ask per graph build and per page validation - a plugin upgrade means a service
+ * restart anyway, which is exactly when the answer may change. The bare function stays
+ * uncached so its own tests can re-derive against changing git state.
+ */
+const pluginDocsCache = new Map<string, ReadonlySet<string>>()
+
+export function pluginDocPages(vaultRoot: string): ReadonlySet<string> {
+  let pages = pluginDocsCache.get(vaultRoot)
+  if (pages === undefined) {
+    pages = protectedWikiPages(vaultRoot)
+    pluginDocsCache.set(vaultRoot, pages)
+  }
+  return pages
+}
+
 export interface UpstreamGuard {
   /** Refusal reason for a WRITE to `resolvedPath` (absolute), or undefined to allow. */
   writeRefusalReason(resolvedPath: string): string | undefined
@@ -92,7 +109,7 @@ export function createUpstreamGuard(vaultRoot: string): UpstreamGuard {
   const cached = guards.get(vaultRoot)
   if (cached !== undefined) return cached
 
-  const protectedPages = protectedWikiPages(vaultRoot)
+  const protectedPages = pluginDocPages(vaultRoot)
   const guard: UpstreamGuard = {
     writeRefusalReason(resolvedPath: string): string | undefined {
       const rel = toPosix(path.relative(vaultRoot, resolvedPath))

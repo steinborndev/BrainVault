@@ -1,5 +1,5 @@
 /**
- * Tiny inline trend line for the KPI tiles — one series, no axes, emphasized endpoint.
+ * Tiny inline trend line for the KPI tiles - one series, no axes, emphasized endpoint.
  * Purely supplementary (aria-hidden): the tile's value + delta carry the information.
  */
 

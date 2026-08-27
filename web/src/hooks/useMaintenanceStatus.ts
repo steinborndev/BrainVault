@@ -1,11 +1,11 @@
 /**
  * Feeds the deterministic status model (lib/maintenanceStatus.ts, SPEC §12.7 Stufe b) from
- * the queries the dashboard already runs — every key here is shared with the Maintenance
+ * the queries the dashboard already runs - every key here is shared with the Maintenance
  * tab's cards, so mounting this hook in a second place (the Overview badge) costs no extra
  * fetches thanks to TanStack's dedup. SSE keeps `stats`/`graph` fresh; the candidate and
  * state queries refetch with the tab's own invalidations.
  *
- * Returns null until every input is loaded — a half-derived status would flicker between
+ * Returns null until every input is loaded - a half-derived status would flicker between
  * severities on first paint.
  */
 
@@ -22,7 +22,15 @@ export interface MaintenanceStatusData {
   readonly lastRuns: ReadonlyMap<string, MaintenanceAreaState>
 }
 
-export function useMaintenanceStatus(): MaintenanceStatusData | null {
+export interface MaintenanceStatusResult {
+  /** Null while loading - or while failed (check `failed` to tell the two apart). */
+  readonly data: MaintenanceStatusData | null
+  /** True when any input query errored: the head must offer a retry, not spin forever. */
+  readonly failed: boolean
+  readonly retry: () => void
+}
+
+export function useMaintenanceStatus(): MaintenanceStatusResult {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
@@ -35,7 +43,14 @@ export function useMaintenanceStatus(): MaintenanceStatusData | null {
     [graph.data],
   )
 
-  return useMemo(() => {
+  const failed = stats.isError || graph.isError || domains.isError || candidates.isError
+  const retry = (): void => {
+    for (const q of [stats, graph, domains, candidates, index, state]) {
+      if (q.isError) void q.refetch()
+    }
+  }
+
+  const data = useMemo(() => {
     if (
       stats.data === undefined ||
       domains.data === undefined ||
@@ -44,6 +59,9 @@ export function useMaintenanceStatus(): MaintenanceStatusData | null {
     ) {
       return null
     }
+    // The lint area needs the RUN record, not just the report file - a run that finished
+    // without writing one is otherwise indistinguishable from no run at all.
+    const lintRun = (state.data?.areas ?? []).find((a) => a.kind === 'lint')
     const status = deriveMaintenanceStatus({
       undomained: candidates.data.undomainedCount,
       registryInstalled: domains.data.installed,
@@ -51,11 +69,15 @@ export function useMaintenanceStatus(): MaintenanceStatusData | null {
       missingDomainEchoes: report.domainEchoes.filter((e) => e.domain === 'unassigned').length,
       tagRepairCount: recommendedKeys(report, MAX_TAG_ACTIONS).size,
       lintReport: stats.data.lintReport,
+      lastLintRun: lintRun !== undefined ? { finishedAt: lintRun.finishedAt, ok: lintRun.ok } : null,
       hotCacheUpdatedAt: stats.data.hotCacheUpdatedAt,
       index: index.data ?? null,
+      unversioned: stats.data.unversioned ?? null,
       now: new Date(),
     })
     const lastRuns = new Map((state.data?.areas ?? []).map((a) => [a.kind, a]))
     return { status, lastRuns }
   }, [stats.data, domains.data, candidates.data, report, index.data, state.data])
+
+  return { data, failed, retry }
 }

@@ -36,7 +36,16 @@ import {
 } from './preprocess/index.js'
 import { preprocessUrl } from './preprocess/web.js'
 import { extensionOf } from './preprocess/detect.js'
-import { commitVault, commitPaths, dirtyPaths, newWikiPaths, BOOKKEEPING_PATHS, type CommitResult, type CommitOptions } from './git.js'
+import {
+  commitVault,
+  commitPaths,
+  commitTouching,
+  dirtyPaths,
+  newWikiPaths,
+  BOOKKEEPING_PATHS,
+  type CommitResult,
+  type CommitOptions,
+} from './git.js'
 import { RunRegistry } from './run-registry.js'
 import { extractWrittenPaths } from './written-paths.js'
 import { msUntilReset } from './budget.js'
@@ -311,6 +320,9 @@ export class IngestQueue {
     this.running = true
     this.reconciling = true
     this.ready = this.reconcileInterrupted()
+      // Runs whether or not anything was interrupted: what it repairs is a bookkeeping gap
+      // left by a FINISHED run, not a crash.
+      .then(() => this.backfillPageRecords())
       .catch((err: unknown) => {
         // 'queue' is a pseudo-source, not a job row, so this goes to the event bus (job_logs
         // would break its FK to jobs.id) — the same channel the reconcile warn uses.
@@ -829,7 +841,7 @@ export class IngestQueue {
     // Bracket + register as a writer so Bash-written pages can be swept into the commit, but
     // only when this turns out to be the sole writer (finding F4).
     const dirtyBefore = await dirtyPaths(this.vaultRoot)
-    const endRun = this.runRegistry.begin()
+    const endRun = this.runRegistry.begin(dirtyBefore)
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,
@@ -941,7 +953,6 @@ export class IngestQueue {
         return this.commit(this.vaultRoot, `ingest: ${label}`, { pathspec })
       })
       if (result.committed) {
-        this.store.setCreatedPages(job.id, result.committedPages)
         // Anchor for "revert this ingest" (v9): persisted, not scraped back out of the log text.
         if (result.hash) this.store.setCommitHash(job.id, result.hash)
         this.store.log(
@@ -951,9 +962,20 @@ export class IngestQueue {
         )
         // Vault-visible numbers (page counts, git history) changed → refresh the Overview.
         this.events?.publish({ kind: 'stats' })
-        return result.committedPages
+        if (result.committedPages.length > 0) {
+          this.store.setCreatedPages(job.id, result.committedPages)
+          return result.committedPages
+        }
+        // Committed, but not a single wiki page: this commit carried only the raw payload,
+        // and the run's pages went into someone else's - the ingest skill's own commit, or
+        // a sibling's sweep at concurrency 2. Recording nothing here is what left a finished
+        // ingest showing "-" pages in the dashboard.
+        return await this.recoverPageRecord(job, scope.written)
       }
+      // Staging nothing does NOT mean this run produced nothing - the ingest skill commits
+      // its own work, and when it wins that race the index is empty by the time we get here.
       this.store.log(job.id, 'info', `not committed: ${result.note ?? 'no changes'}`)
+      return await this.recoverPageRecord(job, scope.written)
     } catch (err) {
       // A commit failure must not undo a completed ingest — the pages are on disk. Note the job
       // is already `done` (terminal) by now, and the old net that eventually swept these in (a
@@ -963,6 +985,71 @@ export class IngestQueue {
       // where a silent later sweep would have failed too. Surface it loudly, don't fail the job.
       this.store.log(job.id, 'warn', `git commit failed (pages are on disk, commit manually): ${(err as Error).message}`)
     }
+    return []
+  }
+
+  /**
+   * Re-derives the page list and commit hash for finished ingests that never recorded
+   * either (see {@link JobStore.settledWithoutPages}). Startup-only and bounded; every
+   * repair is logged against its own job, so the correction is as traceable as the ingest.
+   */
+  private async backfillPageRecords(): Promise<void> {
+    const missing = this.store.settledWithoutPages()
+    let repaired = 0
+    for (const job of missing) {
+      const pages = await this.recoverPageRecord(job, new Set())
+      if (pages.length > 0) repaired++
+    }
+    if (repaired > 0) {
+      this.events?.publish({ kind: 'stats' })
+    }
+  }
+
+  /**
+   * What a run produced, when the service's own commit staged nothing.
+   *
+   * Without this the job kept an empty `created_pages` and no `commit_hash` whenever the
+   * ingest skill committed first (2026-08-26): the dashboard's job row showed "-" pages and
+   * no links, and the run's commit surfaced as a second, unexplained row beside it because
+   * nothing could join the two. Two sources, in order of authority:
+   *
+   *  1. THE COMMIT that touched this job's `.raw/<job-id>/`. Whoever wrote it, that is what
+   *     landed in git, and the raw directory makes it attributable to this job alone.
+   *  2. The paths the run itself wrote. Only reached when nothing committed at all, so these
+   *     pages are on disk and unversioned - said plainly in the log, because that is a state
+   *     the operator has to resolve (the dashboard's "unversioned pages" figure counts them).
+   */
+  private async recoverPageRecord(job: JobRow, written: ReadonlySet<string>): Promise<string[]> {
+    const rawDir = path.posix.join('.raw', job.id)
+    const since = job.started_at !== null ? new Date(job.started_at) : null
+    try {
+      const own = await commitTouching(this.vaultRoot, rawDir, since)
+      if (own !== null && own.pages.length > 0) {
+        this.store.setCreatedPages(job.id, own.pages)
+        this.store.setCommitHash(job.id, own.hash)
+        this.store.log(
+          job.id,
+          'info',
+          `the run committed its own work as ${own.hash.slice(0, 8)} (${own.pages.length} wiki page(s)) - recorded against this job`,
+        )
+        this.events?.publish({ kind: 'stats' })
+        return own.pages
+      }
+    } catch (err) {
+      this.store.log(job.id, 'warn', `could not read git for this job's commit: ${(err as Error).message}`)
+    }
+
+    const onDisk = [...written].filter((p) => p.startsWith('wiki/') && p.endsWith('.md')).sort()
+    if (onDisk.length === 0) return []
+    this.store.setCreatedPages(job.id, onDisk)
+    // Deliberately not "these are uncommitted": at concurrency 2 a sibling's commit may
+    // legitimately carry them. What IS certain is that no commit of this job's own did, and
+    // that the run wrote them - which is exactly what the row should show.
+    this.store.log(
+      job.id,
+      'info',
+      `${onDisk.length} wiki page(s) recorded from the run's own writes; no commit of this job's own carried them`,
+    )
     return []
   }
 
@@ -1039,7 +1126,7 @@ export class IngestQueue {
 
     // Same F4 bracket as the single-job path.
     const dirtyBefore = await dirtyPaths(this.vaultRoot)
-    const endRun = this.runRegistry.begin()
+    const endRun = this.runRegistry.begin(dirtyBefore)
     const written = new Set<string>()
     const res = await this.runIngest({
       vaultRoot: this.vaultRoot,

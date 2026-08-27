@@ -1,12 +1,12 @@
 /**
  * The maintenance status model (SPEC §12.7 Stufe b): a deterministic, token-free derivation
  * of "what's due" from data the dashboard already loads. Every item carries the three fields
- * the concept demands — WHAT (title), WHY NOW (the concrete number), COST (agent run vs.
- * deterministic) — plus a severity with tab-wide semantics:
+ * the concept demands - WHAT (title), WHY NOW (the concrete number), COST (agent run vs.
+ * deterministic) - plus a severity with tab-wide semantics:
  *
  *   due          blocks other maintenance or degrades quality until handled
  *   recommended  worth doing soon, nothing depends on it
- *   healthy      explicitly fine — "all healthy" is a state, not an empty screen
+ *   healthy      explicitly fine - "all healthy" is a state, not an empty screen
  *
  * Pure function over plain inputs (no fetching, no Date.now inside) so the thresholds stay
  * unit-testable; the `useMaintenanceStatus` hook feeds it from the live queries.
@@ -15,7 +15,7 @@
 export type MaintSeverity = 'due' | 'recommended' | 'healthy'
 
 /** Stable area ids; `anchor` is the DOM id of the expert card the item jumps to. */
-export type MaintAreaId = 'backfill' | 'domains' | 'tags' | 'lint' | 'hot-cache' | 'index'
+export type MaintAreaId = 'backfill' | 'domains' | 'tags' | 'lint' | 'hot-cache' | 'index' | 'unversioned'
 
 export interface MaintStatusItem {
   readonly id: MaintAreaId
@@ -32,16 +32,28 @@ export interface MaintStatusInput {
   readonly registryInstalled: boolean
   /** Open (non-dismissed) domain candidates waiting for a decision. */
   readonly candidateCount: number
-  /** `unassigned` domain echoes in the tag report — likely missing domains. */
+  /** `unassigned` domain echoes in the tag report - likely missing domains. */
   readonly missingDomainEchoes: number
   /** Preselected conflict-free tag repairs (recommendedKeys().size). */
   readonly tagRepairCount: number
-  /** Newest lint report: its date (YYYY-MM-DD, possibly null) — or null when none exists. */
+  /** Newest lint report: its date (YYYY-MM-DD, possibly null) - or null when none exists. */
   readonly lintReport: { date: string | null } | null
+  /**
+   * The last lint RUN, independent of whether it produced a report. Dating the area from the
+   * report file alone was wrong in both directions: a run that finished without writing
+   * anything was invisible here - reported as "last report is 31 days old" while the activity
+   * feed said a report had just been written. Null when no lint has ever run.
+   */
+  readonly lastLintRun: { finishedAt: string; ok: boolean } | null
   /** mtime of wiki/hot.md, or null when never refreshed. */
   readonly hotCacheUpdatedAt: string | null
   /** Retrieval-index card facts; null while still loading (item omitted then). */
   readonly index: { scriptsPresent: boolean; provisioned: boolean } | null
+  /**
+   * Wiki pages on disk with no committed copy. Null while still loading (item omitted).
+   * See `unversionedWikiPages` server-side for why these accumulate silently.
+   */
+  readonly unversioned: { untracked: number; modified: number } | null
   readonly now: Date
 }
 
@@ -52,9 +64,9 @@ export interface MaintStatus {
   readonly healthy: number
 }
 
-/** A lint report older than this counts as stale (recommended, never due — nothing blocks on it). */
+/** A lint report older than this counts as stale (recommended, never due - nothing blocks on it). */
 export const LINT_STALE_DAYS = 14
-/** The hot cache serves every agent run's first read — stale earlier than the lint report. */
+/** The hot cache serves every agent run's first read - stale earlier than the lint report. */
 export const HOT_CACHE_STALE_DAYS = 7
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -62,6 +74,100 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const daysSince = (iso: string, now: Date): number => Math.floor((now.getTime() - Date.parse(iso)) / DAY_MS)
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/**
+ * The lint area, derived from BOTH facts the service holds: the report file in the vault and
+ * the run record in SQLite. Three outcomes, in the order they are checked:
+ *
+ *   1. a lint ran recently and its report exists → healthy
+ *   2. a lint ran recently and no report exists  → due, and it says exactly that
+ *   3. nothing ran recently                      → the report's own age decides (as before)
+ *
+ * Case 2 is the one that used to be unrepresentable. It is `due`, not `recommended`, because
+ * it is a broken outcome rather than an ageing one: safe fixes stay bounded by whatever stale
+ * report is still lying there until someone re-runs.
+ */
+/**
+ * Does the newest report belong to the last run? Compared as CALENDAR DAYS, not as ages:
+ * the report's date comes from its file name (midnight) while the run carries a real
+ * instant, so age arithmetic reports a report written minutes after its run as a day older
+ * than it. One day of slack absorbs that, plus the timezone gap between the run's UTC
+ * timestamp and the agent naming the file after its local today.
+ */
+function reportCoversRun(input: MaintStatusInput): boolean {
+  const reportDate = input.lintReport?.date
+  if (reportDate == null || input.lastLintRun === null) return false
+  const runDay = new Date(Date.parse(input.lastLintRun.finishedAt) - DAY_MS).toISOString().slice(0, 10)
+  return reportDate >= runDay
+}
+
+function lintItem(input: MaintStatusInput): MaintStatusItem {
+  const reportAge = input.lintReport?.date != null ? daysSince(input.lintReport.date, input.now) : null
+  const runAge = input.lastLintRun !== null ? daysSince(input.lastLintRun.finishedAt, input.now) : null
+  const ranRecently = runAge !== null && runAge <= LINT_STALE_DAYS
+
+  if (ranRecently && input.lastLintRun !== null) {
+    // "in the last 24 hours" rather than "today": a run at 22:40 read the next morning is
+    // not today, and every other age here is day-granular anyway.
+    const ago = runAge === 0 ? 'in the last 24 hours' : `${plural(runAge, 'day')} ago`
+    // The ARTIFACT decides, not the run's exit status. A covering report means safe fixes
+    // have something current to be bounded by, however it got there - a later render, a
+    // manual run, a retry. Keeping the area due because one run failed while a fresh report
+    // sits in the vault would be the same lie in the other direction, and the failed run is
+    // already visible on its own in the run history.
+    if (reportCoversRun(input)) {
+      return {
+        id: 'lint',
+        severity: 'healthy',
+        title: 'Lint report is recent',
+        why: `Lint ran ${ago}; its report is in the vault.`,
+        cost: 'nothing to do',
+        anchor: 'card-lint',
+      }
+    }
+    return {
+      id: 'lint',
+      severity: 'due',
+      title: 'Lint ran, but wrote no report',
+      why:
+        `Lint ran ${ago} but left no report in wiki/meta/` +
+        (reportAge !== null
+          ? ` - the newest one there is ${plural(reportAge, 'day')} old, so safe fixes stay bounded by stale findings.`
+          : ' - there is no report to base safe fixes on.'),
+      cost: 'agent run · re-run lint',
+      anchor: 'card-lint',
+    }
+  }
+
+  if (input.lintReport === null) {
+    return {
+      id: 'lint',
+      severity: 'recommended',
+      title: 'Run a first lint',
+      why: 'No lint report in the vault yet - a baseline report is what bounds safe auto-fixes.',
+      cost: 'agent run',
+      anchor: 'card-lint',
+    }
+  }
+  if (reportAge !== null && reportAge > LINT_STALE_DAYS) {
+    return {
+      id: 'lint',
+      severity: 'recommended',
+      title: 'Lint the wiki, then apply safe fixes',
+      why: `Last report is ${plural(reportAge, 'day')} old.`,
+      cost: 'two agent runs',
+      anchor: 'card-lint',
+    }
+  }
+  return {
+    id: 'lint',
+    severity: 'healthy',
+    title: 'Lint report is recent',
+    why: reportAge !== null ? `Last report is ${plural(reportAge, 'day')} old.` : 'A lint report exists.',
+    cost: 'nothing to do',
+    anchor: 'card-lint',
+  }
+}
 
 export function deriveMaintenanceStatus(input: MaintStatusInput): MaintStatus {
   const items: MaintStatusItem[] = []
@@ -143,37 +249,7 @@ export function deriveMaintenanceStatus(input: MaintStatusInput): MaintStatus {
     })
   }
 
-  if (input.lintReport === null) {
-    items.push({
-      id: 'lint',
-      severity: 'recommended',
-      title: 'Run a first lint',
-      why: 'No lint report in the vault yet - a baseline report is what bounds safe auto-fixes.',
-      cost: 'agent run',
-      anchor: 'card-lint',
-    })
-  } else {
-    const age = input.lintReport.date !== null ? daysSince(input.lintReport.date, input.now) : null
-    if (age !== null && age > LINT_STALE_DAYS) {
-      items.push({
-        id: 'lint',
-        severity: 'recommended',
-        title: 'Lint the wiki, then apply safe fixes',
-        why: `Last report is ${plural(age, 'day')} old.`,
-        cost: 'two agent runs',
-        anchor: 'card-lint',
-      })
-    } else {
-      items.push({
-        id: 'lint',
-        severity: 'healthy',
-        title: 'Lint report is recent',
-        why: age !== null ? `Last report is ${plural(age, 'day')} old.` : 'A lint report exists.',
-        cost: 'nothing to do',
-        anchor: 'card-lint',
-      })
-    }
-  }
+  items.push(lintItem(input))
 
   if (input.hotCacheUpdatedAt === null) {
     items.push({
@@ -203,6 +279,40 @@ export function deriveMaintenanceStatus(input: MaintStatusInput): MaintStatus {
         why: `Last refresh ${plural(age, 'day')} ago.`,
         cost: 'nothing to do',
         anchor: 'card-hot-cache',
+      })
+    }
+  }
+
+  if (input.unversioned !== null) {
+    const { untracked, modified } = input.unversioned
+    const total = untracked + modified
+    if (total > 0) {
+      // `due`, not `recommended`: this is not an ageing artifact, it is content outside the
+      // guarantee the whole git-backed design exists to provide. It also cannot fix itself -
+      // every further run leaves these pages exactly where they are.
+      const parts = [
+        untracked > 0 ? `${plural(untracked, 'page')} never committed` : '',
+        modified > 0 ? `${plural(modified, 'page')} changed since its last commit` : '',
+      ].filter(Boolean)
+      items.push({
+        id: 'unversioned',
+        severity: 'due',
+        title: `${plural(total, 'page')} outside the vault's history`,
+        why:
+          `${parts.join(', ')}. They render and resolve links normally, so nothing looks wrong - ` +
+          'but they have no history, cannot be reverted, and would not survive restoring the ' +
+          'vault from git.',
+        cost: 'one commit, after a look at what they are',
+        anchor: 'card-unversioned',
+      })
+    } else {
+      items.push({
+        id: 'unversioned',
+        severity: 'healthy',
+        title: 'Every page is in git',
+        why: 'Nothing under wiki/ is missing from the vault history.',
+        cost: 'nothing to do',
+        anchor: 'card-unversioned',
       })
     }
   }
@@ -254,7 +364,7 @@ export interface RunPlanStep {
 
 /**
  * The guided run's plan: only what the status model says is actually due or worth doing,
- * in dependency order (SPEC §12.7). `backfill2` is planned whenever domain decisions are —
+ * in dependency order (SPEC §12.7). `backfill2` is planned whenever domain decisions are -
  * whether it RUNS depends on what the user decides (skipped when nothing was created).
  * The retrieval index never appears: it refreshes itself after ingests.
  */

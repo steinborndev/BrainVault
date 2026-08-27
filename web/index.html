@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#5b8def" />
+    <!-- The chrome matches the app's ground per scheme (it used to be the accent in both). -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0c101b" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f4f9" />
     <meta name="description" content="BrainVault — ingestion service & dashboard for the claude-obsidian vault" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/manifest.webmanifest" />

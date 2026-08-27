@@ -15,7 +15,9 @@ import type {
   QueryResponse,
   Citation,
   MaintenanceRun,
+  MaintenanceRunsResponse,
   MaintenanceStateResponse,
+  AgentRunHistoryResponse,
   RevertResponse,
   RetrieveIndexStatus,
   RepairTask,
@@ -31,6 +33,7 @@ import type {
   PagePreview,
   PageFull,
   VaultGraph,
+  SourceIndex,
   PageWriteResult,
   PageDeleteResult,
 } from './types.ts'
@@ -43,7 +46,7 @@ async function json<T>(res: Response): Promise<T> {
     try {
       const body = (await res.json()) as { error?: string; issues?: string[] }
       detail = body.error ? `: ${body.error}` : ''
-      // Validation endpoints (e.g. PUT /settings) return per-field issues — surfacing them
+      // Validation endpoints (e.g. PUT /settings) return per-field issues - surfacing them
       // turns "400 Bad Request" into something the user can actually act on.
       if (Array.isArray(body.issues) && body.issues.length > 0) detail += ` (${body.issues.join('; ')})`
     } catch {
@@ -111,11 +114,16 @@ export const api = {
 
   // ---- Query / Chat ----
 
-  query: (question: string, sessionId?: string): Promise<QueryResponse> =>
+  query: (question: string, sessionId?: string, requestId?: string): Promise<QueryResponse> =>
     fetch(`${BASE}/query`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(sessionId ? { question, sessionId } : { question }),
+      body: JSON.stringify({
+        question,
+        ...(sessionId ? { sessionId } : {}),
+        // Streamed deltas echo this id, so a FIRST question (no session id yet) can render live.
+        ...(requestId ? { requestId } : {}),
+      }),
     }).then(json<QueryResponse>),
 
   sessions: (): Promise<{ sessions: Session[] }> => fetch(`${BASE}/sessions`).then(json<{ sessions: Session[] }>),
@@ -151,6 +159,9 @@ export const api = {
   /** The vault's wikilink graph (server-side cached; cheap to refetch). */
   graph: (): Promise<VaultGraph> => fetch(`${BASE}/graph`).then(json<VaultGraph>),
 
+  /** Where each page came from - the Library's source column joins this onto the graph. */
+  sources: (): Promise<SourceIndex> => fetch(`${BASE}/sources`).then(json<SourceIndex>),
+
   /**
    * User edit of one page (SPEC.md §12.4). `baseMtime` is the optimistic lock: the server
    * 409s if the page changed since it was loaded, instead of silently overwriting.
@@ -166,7 +177,7 @@ export const api = {
   deletePage: (path: string): Promise<PageDeleteResult> =>
     fetch(`${BASE}/pages?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).then(json<PageDeleteResult>),
 
-  /** "Session in Vault sichern" — starts an async write-enabled run; poll it like a maintenance run. */
+  /** "Session in Vault sichern" - starts an async write-enabled run; poll it like a maintenance run. */
   saveSession: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/sessions/${id}/save`, { method: 'POST' }).then(json<MaintenanceRun>),
 
@@ -227,7 +238,25 @@ export const api = {
   maintenanceRun: (id: string): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/runs/${id}`).then(json<MaintenanceRun>),
 
-  /** Per-kind last-settle state (SPEC §12.7 Stufe b) — feeds the status head's "last run" facts. */
+  /**
+   * Every tracked maintenance run, newest first. This is what makes an agent run visible
+   * from OUTSIDE the screen that started it: the run state used to live only in the
+   * starting component's hook, so a research run was invisible on Home and gone after a
+   * reload. Home's in-flight list and the sidebar badge read this.
+   */
+  maintenanceRuns: (): Promise<MaintenanceRunsResponse> =>
+    fetch(`${BASE}/maintenance/runs`).then(json<MaintenanceRunsResponse>),
+
+  /** Per-kind last-settle state (SPEC §12.7 Stufe b) - feeds the status head's "last run" facts. */
+  /** The persistent run log (schema v12). `kind` narrows it, e.g. to research runs. */
+  maintenanceHistory: (params: { kind?: string; limit?: number } = {}): Promise<AgentRunHistoryResponse> => {
+    const q = new URLSearchParams()
+    if (params.kind !== undefined) q.set('kind', params.kind)
+    if (params.limit !== undefined) q.set('limit', String(params.limit))
+    const suffix = q.toString() === '' ? '' : `?${q.toString()}`
+    return fetch(`${BASE}/maintenance/history${suffix}`).then(json<AgentRunHistoryResponse>)
+  },
+
   maintenanceState: (): Promise<MaintenanceStateResponse> =>
     fetch(`${BASE}/maintenance/state`).then(json<MaintenanceStateResponse>),
 
@@ -235,7 +264,7 @@ export const api = {
   retrieveIndexStatus: (): Promise<RetrieveIndexStatus> =>
     fetch(`${BASE}/maintenance/retrieve-index`).then(json<RetrieveIndexStatus>),
 
-  /** Rebuild (or first-time provision) the retrieval index — deterministic, no credential. */
+  /** Rebuild (or first-time provision) the retrieval index - deterministic, no credential. */
   retrieveIndex: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/retrieve-index`, { method: 'POST' }).then(json<MaintenanceRun>),
 

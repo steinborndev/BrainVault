@@ -1,6 +1,6 @@
 /**
  * Settings editor (SPEC.md §6.4 "Einstellungen"): watch folder, concurrency, file limit,
- * git commit behaviour — plus the read-only API-key STATUS. The key itself is never shown:
+ * git commit behaviour - plus the read-only API-key STATUS. The key itself is never shown:
  * the server only ever sends its source/mode (hard rule 3).
  *
  * Precedence mirrors the server's single model: env/env-file is the start-time baseline, these
@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { queryState } from './QueryState.tsx'
 import { CredentialSetup } from './CredentialSetup.tsx'
 import { TelegramSetup } from './TelegramSetup.tsx'
 import type { EffectiveSettings, SettingsPatch, SettingsResponse } from '../api/types.ts'
@@ -27,7 +28,14 @@ const READ_ONLY_LABELS: Record<string, string> = {
   telegram: 'Telegram bot',
 }
 
-export function SettingsEditor(): React.ReactElement {
+/**
+ * Which half of the settings to render. The System screen shows them as two sections -
+ * `service` is the configuration form plus the read-only environment facts, `integrations`
+ * is the credential and the bot. `all` keeps the original single-column form.
+ */
+export type SettingsSection = 'all' | 'service' | 'integrations'
+
+export function SettingsEditor({ section = 'all' }: { section?: SettingsSection } = {}): React.ReactElement {
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const [draft, setDraft] = useState<EffectiveSettings | null>(null)
@@ -49,8 +57,9 @@ export function SettingsEditor(): React.ReactElement {
     },
   })
 
-  if (q.isError) return <div className="toast err">{(q.error as Error).message}</div>
-  if (!q.data || !draft) return <div className="tab-hint">Loading settings…</div>
+  const state = queryState(q, 'the settings')
+  if (state !== null) return state
+  if (!q.data || !draft) return <div className="empty">Loading the settings…</div>
 
   const data = q.data
   // The budget's unit follows the Anthropic auth mode: ingests/day on a subscription (where
@@ -98,7 +107,22 @@ export function SettingsEditor(): React.ReactElement {
     </div>
   )
 
-  // The baseline/override explanation lives in the card title's ⓘ tooltip (Maintenance tab).
+  if (section === 'integrations') {
+    return (
+      <div>
+        <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
+        <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+        <div className="settings-ro">
+          <div className="settings-ro-row">
+            <span className="settings-ro-label">Obsidian</span>
+            <code>page links open through the obsidian:// handler</code>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // The baseline/override explanation lives in the section head's ⓘ tooltip.
   return (
     <div>
       <div className="settings-grid">
@@ -116,7 +140,7 @@ export function SettingsEditor(): React.ReactElement {
         {row(
           'concurrency',
           'Concurrency',
-          'Simultaneous ingest runs (1–8). Takes effect immediately.',
+          'Simultaneous ingest runs (1-8). Takes effect immediately.',
           <input
             type="number"
             min={1}
@@ -204,11 +228,15 @@ export function SettingsEditor(): React.ReactElement {
         )}
       </div>
       <p className="setting-hint">
-        The API key itself is never shown or stored — only its source. The bind address is
+        The API key itself is never shown or stored - only its source. The bind address is
         deliberately not changeable through the UI.
       </p>
-      <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
-      <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+      {section === 'all' && (
+        <>
+          <CredentialSetup configured={data.readOnly['credentialConfigured'] !== 'no'} />
+          <TelegramSetup status={data.readOnly['telegram'] ?? 'off'} />
+        </>
+      )}
     </div>
   )
 }

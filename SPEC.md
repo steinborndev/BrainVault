@@ -139,17 +139,38 @@ Das Preprocessing ist als Plugin-Kette implementiert (`detect → normalize → 
 
 Single-Page-App (React + Vite + TypeScript), ausgeliefert vom Backend-Service, gebunden an `127.0.0.1:8420`. Vier Tabs:
 
+**Korrektur 2026-08-26 (Ist-Stand nachgezogen): die Shell hat fünf Screens, keine vier Tabs.** Die Struktur wurde in zwei Durchgängen umgebaut (2026-08-23 Sidebar-Shell, 2026-08-25 zweiter Durchgang: Navigation als Browser-Tabs in der Kopfzeile, Inbox in Home aufgegangen, Health und Einstellungen zu System verschmolzen). Die Unterabschnitte 6.1 bis 6.5 bleiben unverändert stehen - sie sind der Stand, gegen den gebaut wurde, und Code-Kommentare verweisen auf ihre Nummern; jeder trägt am Ende eine Zeile, wo sein Inhalt heute liegt.
+
+| Screen | Route | Inhalt | Kommt aus |
+|---|---|---|---|
+| **Home** | `/` | Kennzahlen (Seiten, in Arbeit, Fehler 7 d, Ausgaben heute, fällige Checks), Intake (Dropzone + URL/Notiz) und **ein** Aktivitätsstrom über Jobs, Agent-Runs und Vault-Commits der letzten 30 Tage, filterbar nach Art, Zustand, Kanal und Zeitraum. Eine Zeile öffnet den vollen Datensatz (Log, Commit, erzeugte Seiten, Retry, Revert). | 6.1 + 6.2 |
+| **Research** | `/research` | Eine Konsole mit zwei Modi: *Research the web* (Web-Egress, schreibt Seiten, ein Commit) und *Ask the vault* (lesend, Antworten mit Seiten-Zitaten). Dazu die Linsen-Profile, die Planzeile (Linse, Zielseite, Fetch-Budget), die Phasen-Leiste des laufenden Runs, die Liste vergangener Runs und der Rückstand „Worth a run" aus den offenen Graph-Lücken. | 6.3 + Autoresearch aus 6.4 |
+| **Graph** | `/graph`, `/page/<pfad>` | Der Vault-Viewer: Graph-Canvas und Seitenansicht, zwei Routen, ein Screen. | 12.4 |
+| **Library** | `/library` | Die tabellarische Sicht auf alle Seiten: Filter nach Typ, Domain und Teilmenge (Orphans, Stubs, System), Sortierung, und je Zeile die Herkunft als Link auf das ingestierte Rohdokument. | neu (2026-08) |
+| **System** | `/system` | Fünf Sektionen in der Steuerspalte: *Status & checks* (der geführte Turnus aus 12.7, inkl. Hot-Cache-Inhalt und -Refresh), *Usage & cost*, *Vault stats* (inkl. Commit-Historie), *Service & config*, *Integrations* (Credential, Telegram, Obsidian). | 6.4 |
+
+Zwei Dinge, die in keinen Unterabschnitt gehören:
+
+- **Der Dienststatus liegt in der Kopfzeile**, nicht mehr in der Übersicht: drei Chips (Watcher, Telegram, Verbindung), je ein Statuspunkt plus Substantiv, Details bei Hover. Der Live-Chip öffnet zusätzlich Queue, Tagesbudget und letzten Commit.
+- **Alte Routen werden normalisiert**, nicht gebrochen: `/inbox`, `/ingestion`, `/vault`, `/chat`, `/wartung`, `/maintenance`, `/health` und `/settings` werden per `replaceState` auf die aktuellen umgeschrieben, Suffixe (Seitenpfade, `?filter=`) bleiben erhalten.
+
 ### 6.1 Tab "Übersicht"
 
 Vault-Statistiken und letzte Aktivität auf einen Blick: Seitenzahlen je Typ (Konzepte, Entities, Quellen — aus dem Dateisystem gezählt und gecacht), Wachstum über Zeit (aus Git-History), zuletzt erstellte/geänderte Seiten (klickbar mit `obsidian://open?vault=…&file=…`-Deep-Link), Inhalt des Hot Cache (`wiki/hot.md` gerendert), Kennzahlen der letzten 7 Tage (Ingests, Fehler, verarbeitete Quellen), Service-Status (Watcher aktiv, Queue-Länge, letzte Git-Commits).
+
+**Ist-Stand 2026-08-26:** Kennzahlen, Wachstum und Seitenzahlen je Typ liegen in **System → Vault stats**, die Aktivität in **Home**, der Dienststatus in der Kopfzeile, der Hot-Cache-Inhalt in **System → Status & checks**. Nicht gebaut: `recentPages` („zuletzt erstellte/geänderte Seiten") wird vom `/stats`-Endpunkt geliefert, aber von keiner Ansicht gerendert - die Rolle übernimmt die Library, nach *Changed* sortiert.
 
 ### 6.2 Tab "Ingestion"
 
 Herzstück der Bedienung. Oben die Dropzone (Dateien + URLs), darunter drei Bereiche: **Aktiv** (laufende Jobs mit Live-Log-Stream aus dem Agent-Run), **Warteschlange** (Reihenfolge änderbar, Jobs abbrechbar) und **Verlauf** (filterbar nach Status/Typ/Zeitraum; pro Job: Quelle, erzeugte/aktualisierte Wiki-Seiten mit Links, Dauer, Token-/Kostenschätzung aus den SDK-Usage-Daten). Fehlgeschlagene Jobs zeigen die Fehlermeldung und bieten "Erneut versuchen". `deferred`-Jobs (Audio/Video) sind als eigene Kategorie sichtbar.
 
+**Ist-Stand 2026-08-26:** Der Tab ist in **Home** aufgegangen. Dropzone und URL-Feld sitzen in der Steuerspalte, die drei Bereiche (Aktiv / Warteschlange / Verlauf) sind zu **einem** Strom verschmolzen, in dem der Zustand eine Filterdimension ist statt eines eigenen Bereichs - Jobs, Agent-Runs und Vault-Commits stehen darin nebeneinander, weil sie aus Sicht des Lesers dasselbe sind: was mit dem Vault passiert ist. Nicht gebaut: die Warteschlange ist **nicht** umsortierbar (kein Endpunkt, keine Bedienung); Abbrechen, Retry und Revert gibt es.
+
 ### 6.3 Tab "Query/Chat"
 
 Chat-Oberfläche gegen den Query-Runner. Antworten enthalten die vom wiki-query-Skill gelieferten Seiten-Zitate; zitierte Seiten werden als klickbare Chips gerendert (Obsidian-Deep-Link + Inline-Preview des Seiteninhalts). Mehrere Chat-Sessions parallel, Sessions benennbar; Button "Session in Vault sichern" löst den `/save`-Flow des Repos aus.
+
+**Ist-Stand 2026-08-26:** Liegt in **Research**, zusammen mit dem Autoresearch aus 6.4 (siehe die Korrektur dort). Beide Modi teilen sich eine Konsole; Sessions sind umbenennbar und löschbar.
 
 ### 6.4 Tab "Wartung"
 
@@ -158,6 +179,8 @@ Chat-Oberfläche gegen den Query-Runner. Antworten enthalten die vom wiki-query-
 - **Weiterentwicklung:** Der Tab wächst von einer Karten-Sammlung zum geführten Wartungs-Workflow — Konzept, Begründung und Stufenplan in **12.7**.
 - **Hot Cache:** manueller Refresh-Button + Anzeige des letzten Refresh-Zeitpunkts.
 - **Einstellungen:** Watch-Ordner-Pfad, Parallelität, Datei-Limits, Git-Commit-Verhalten, API-Key-Status (Key selbst wird nie angezeigt). **Ergänzt 2026-07-19:** hier liegt zusätzlich die Credential-Eingabe der Ersteinrichtung (Abo-Token vs. API-Key zur Auswahl, je mit Anleitung) — im Setup-Modus aufgeklappt und über ein app-weites Banner verlinkt, mit konfiguriertem Credential hinter "Replace credential…" verborgen. Angezeigt wird weiterhin nur der Status, nie der Wert.
+
+**Ist-Stand 2026-08-26:** Liegt in **System**, aufgeteilt auf fünf Sektionen (siehe die Tabelle am Anfang von 6). Der Wartungs-Workflow selbst ist 12.7 Stufe c und sitzt in *Status & checks*.
 
 ### 6.5 API (Auszug)
 
@@ -176,6 +199,29 @@ GET    /api/v1/events               SSE: Job-Updates, Log-Streams, Statistik-Inv
 GET/PUT /api/v1/settings            Konfiguration
 POST   /api/v1/settings/credential  Credential der Ersteinrichtung entgegennehmen (7.1);
                                     schreibt die Service-Env-Datei, liefert den Wert nie zurück
+```
+
+**Ergänzt 2026-08-26 (Ist-Stand nachgezogen).** Der Auszug oben ist der M4-Stand; seither sind
+diese Familien dazugekommen. Weiterhin ein Auszug, nicht die Liste - maßgeblich ist
+`server/src/api/routes/`:
+
+```
+GET    /api/v1/graph                Wikilink-Graph: Knoten, Kanten, offene Lücken (12.4)
+GET    /api/v1/pages?path=[&full=1] Eine Wiki-Seite lesen (Zitat-Vorschau bzw. ganze Seite)
+PUT    /api/v1/pages                Seite bearbeiten - ein sofortiger Commit (12.4)
+DELETE /api/v1/pages?path=          Seite löschen - ebenso
+GET    /api/v1/sources              Seite → ingestiertes Dokument, aus `.raw/` gelesen
+GET    /api/v1/sources/raw?path=    Das Dokument selbst; nur ein Allow-List-Format
+                                    ausgeliefert, alles andere als Download (§9)
+GET    /api/v1/domains              Domain-Registry; …/candidates + …/dismiss (12.4 Stufe 3)
+POST   /api/v1/maintenance/…        Die Wartungs-Runs: lint, lint-fix, hot-cache, repair,
+                                    tag-fix, domain-backfill, domain-review, retrieve-index
+GET    /api/v1/maintenance/state    Turnus-Status je Bereich (12.7 Stufe b)
+GET    /api/v1/maintenance/history  Persistente Run-Historie (Schema v12)
+GET    /api/v1/sessions[/:id]       Chat-Sessions; …/save löst den `/save`-Flow aus (6.3)
+GET    /api/v1/settings/telegram    Bot-Status + abgewiesene Absender (4.3); PUT/DELETE
+                                    schreiben bzw. entfernen Token und Allowlist gemeinsam
+POST   /api/v1/jobs/:id/revert      Einen Ingest zurücknehmen (revert seines Commits)
 ```
 
 ---

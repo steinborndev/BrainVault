@@ -21,6 +21,10 @@ import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
 import { IngestQueue, type IngestRunner } from '../src/pipeline/queue.js'
 import type { ToolAvailability } from '../src/pipeline/preprocess/index.js'
+import { RunRegistry } from '../src/pipeline/run-registry.js'
+import { VaultReconciler } from '../src/pipeline/reconcile.js'
+import { EventBus } from '../src/pipeline/events.js'
+import { Mutex } from '../src/util/mutex.js'
 
 const NO_TOOLS: ToolAvailability = {
   pdftotext: false,
@@ -207,5 +211,75 @@ describe('M1 acceptance: 10 mixed files at concurrency 2 (deterministic)', () =>
     expect(store.getOrThrow(first.job.id).status).toBe('done')
     expect(store.getOrThrow(second.job.id).status).toBe('duplicate')
     expect(pageSeq).toBe(1) // the duplicate never ran the agent
+  })
+})
+
+describe('reconcile: pages no run could stage, under real concurrency', () => {
+  it('commits Bash-written pages that every per-run sweep had to sit out', async () => {
+    // The real loss, reproduced end to end. The agent writes TWO pages and reports only one
+    // as a Write tool call - the second stands for a page created with Bash (a heredoc, a
+    // python script, an `mv`), which the commit pathspec cannot see.
+    //
+    // At concurrency 2 no run is ever the sole vault writer, so the per-run F4 sweep sits
+    // out every single time. Before the reconcile pass those second pages stayed on disk,
+    // outside git, silently - which is how two dozen of them accumulated over a month.
+    let pageSeq = 0
+    const runIngest: IngestRunner = async (opts) => {
+      const n = pageSeq++
+      await new Promise((r) => setTimeout(r, 15))
+      const reported = path.join(vaultRoot, 'wiki', 'concepts', `Reported-${n}.md`)
+      fs.writeFileSync(reported, `# Reported ${n}\n`)
+      opts.onMessage({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'Write', input: { file_path: reported } }] },
+      } as never)
+      // Written, never reported: the F4 blind spot.
+      fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', `Unreported-${n}.md`), `# Unreported ${n}\n`)
+      return {
+        ok: true,
+        result: `wrote ${n}`,
+        usage: { tokensIn: 100, tokensOut: 10, costUsd: 0.01 },
+        durationMs: 5,
+        numTurns: 3,
+        sessionId: `s${n}`,
+        timedOut: false,
+      }
+    }
+
+    const registry = new RunRegistry()
+    const events = new EventBus()
+    const commitMutex = new Mutex()
+    const queue = new IngestQueue({
+      store,
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      concurrency: 2,
+      runRegistry: registry,
+      commitMutex,
+      events,
+      detectToolsFn: async () => NO_TOOLS,
+      refreshHotCache: async () => 'noop',
+      runIngest,
+    })
+    new VaultReconciler({ vaultRoot, commitMutex, runRegistry: registry, events }).attach()
+    queue.start()
+
+    for (let i = 0; i < 4; i++) {
+      const src = path.join(srcDir, `f${i}.md`)
+      fs.writeFileSync(src, `# Source ${i}\n\nUnique body ${i} ${'x'.repeat(i)}.\n`)
+      await queue.enqueueFile({ sourcePath: src, source: 'drop' })
+    }
+    await queue.onIdle()
+    // The pass is scheduled off the last writer's release, so it lands just after idle.
+    await new Promise((r) => setTimeout(r, 400))
+
+    const tracked = git(vaultRoot, 'ls-files', 'wiki/concepts').trim().split('\n')
+    for (let n = 0; n < 4; n++) {
+      expect(tracked).toContain(`wiki/concepts/Reported-${n}.md`)
+      // This is the assertion that fails without the reconcile pass.
+      expect(tracked).toContain(`wiki/concepts/Unreported-${n}.md`)
+    }
+    expect(git(vaultRoot, 'status', '--porcelain').trim()).toBe('')
+    expect(() => git(vaultRoot, 'fsck', '--full')).not.toThrow()
   })
 })

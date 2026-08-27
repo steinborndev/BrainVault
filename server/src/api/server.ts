@@ -34,9 +34,11 @@ import { registerMaintenanceRoute } from './routes/maintenance.js'
 import { registerSettingsRoute } from './routes/settings.js'
 import { registerPagesRoute } from './routes/pages.js'
 import { registerGraphRoute } from './routes/graph.js'
+import { registerSourcesRoute } from './routes/sources.js'
 import { registerDomainsRoute } from './routes/domains.js'
 import { MemoryDismissalStore, type DismissalStore } from '../db/domain-dismissals.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
+import type { AgentRunStore } from '../db/agent-runs.js'
 
 export interface AppContext {
   readonly config: Config
@@ -64,6 +66,8 @@ export interface AppContext {
   readonly domainDismissals?: DismissalStore
   /** Per-kind maintenance settle state (SPEC.md §12.7 Stufe b); omitted → empty state list. */
   readonly maintenanceState?: MaintenanceStateStore
+  /** Persistent per-run history (schema v12); omitted → the history endpoint answers empty. */
+  readonly agentRuns?: AgentRunStore
   /** Fastify logger config; pass `false` to silence (tests). Defaults to structured logs. */
   readonly logger?: boolean | object
   /** Env-file path the credential endpoint writes. Defaults to DEFAULT_ENV_FILE; tests inject. */
@@ -109,9 +113,10 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   // per-file cache makes all three cheap).
   const graphBuilder = ctx.graph ?? new GraphBuilder(ctx.config.vaultRoot)
   const dismissals = ctx.domainDismissals ?? new MemoryDismissalStore()
-  registerMaintenanceRoute(app, ctx, graphBuilder, dismissals, ctx.maintenanceState)
+  registerMaintenanceRoute(app, ctx, graphBuilder, dismissals, ctx.maintenanceState, ctx.agentRuns)
   registerPagesRoute(app, ctx, graphBuilder)
   registerGraphRoute(app, ctx, graphBuilder)
+  registerSourcesRoute(app, ctx)
   registerDomainsRoute(app, ctx, graphBuilder, dismissals)
 
   await registerFrontend(app)
@@ -123,10 +128,11 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
  * Serves the built SPA from `web/dist` at `/`, with an index fallback so client-side routes
  * (deep links into a tab) resolve to `index.html`. If the frontend hasn't been built yet
  * (dev via the Vite proxy, or a server-only checkout) the directory is simply absent and we
- * skip it — the API still runs. API 404s stay JSON; only non-API paths fall back to the SPA.
+ * skip it — the API still runs. API 404s stay JSON, missing hashed bundles under `/assets/`
+ * are real 404s (see `notFoundKind`), and only the remaining non-API paths fall back to the
+ * SPA. `dir` is a parameter so the tests can serve a fixture instead of `web/dist`.
  */
-async function registerFrontend(app: FastifyInstance): Promise<void> {
-  const dir = frontendDir()
+export async function registerFrontend(app: FastifyInstance, dir = frontendDir()): Promise<void> {
   if (!fs.existsSync(path.join(dir, 'index.html'))) {
     app.log.warn(`frontend not built (${dir} absent) — serving API only; run \`npm run build\` in web/`)
     return
@@ -135,10 +141,34 @@ async function registerFrontend(app: FastifyInstance): Promise<void> {
   await app.register(fastifyStatic, { root: dir, wildcard: false })
 
   app.setNotFoundHandler((req, reply) => {
-    // Unknown API routes are genuine 404s; everything else serves the SPA shell.
-    if (req.url.startsWith('/api/')) {
-      return reply.code(404).send({ error: 'not found' })
+    switch (notFoundKind(req.url)) {
+      case 'api':
+        return reply.code(404).send({ error: 'not found' })
+      case 'asset':
+        return reply.code(404).type('text/plain').send('not found')
+      default:
+        return reply.sendFile('index.html')
     }
-    return reply.sendFile('index.html')
   })
+}
+
+/**
+ * What a request that matched no route should get back.
+ *
+ * The `asset` case is the one worth spelling out. Vite emits hashed bundles under
+ * `/assets/`, and a rebuild renames every one of them. A browser tab left open across a
+ * rebuild still asks for the old name, and answering THAT with the SPA shell (200,
+ * text/html) is how a stale tab turned into a blank page: the frontend loads its Graph
+ * screen as a dynamic import, the browser refused the HTML as a module, and React rethrew
+ * that at render time. A 404 says what actually happened, and the frontend's boundary
+ * (web/src/components/ErrorBoundary.tsx) turns it into one reload.
+ *
+ * Deliberately NOT a "looks like a file" test: vault pages route as `/page/Some Note.md`,
+ * and those deep links must keep resolving to the shell.
+ */
+export function notFoundKind(url: string): 'api' | 'asset' | 'shell' {
+  const pathname = url.split('?')[0] ?? ''
+  if (pathname.startsWith('/api/')) return 'api'
+  if (pathname.startsWith('/assets/')) return 'asset'
+  return 'shell'
 }

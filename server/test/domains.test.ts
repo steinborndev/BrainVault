@@ -13,7 +13,12 @@ import {
   DOMAIN_REGISTRY_PATH,
   UNASSIGNED,
 } from '../src/pipeline/domains.js'
-import { MaintenanceRunner, DomainRegistryMissingError } from '../src/pipeline/maintenance.js'
+import {
+  MaintenanceRunner,
+  DomainRegistryMissingError,
+  domainBackfillPrompt,
+  DOMAIN_TAGS_THAT_STAY,
+} from '../src/pipeline/maintenance.js'
 import { EventBus } from '../src/pipeline/events.js'
 import { Mutex } from '../src/util/mutex.js'
 import { IngestQueue, type IngestRunner } from '../src/pipeline/queue.js'
@@ -222,5 +227,43 @@ describe('domain backfill guard', () => {
     expect(run.kind).toBe('domain-backfill')
     expect(run.channel).toBe('maintenance:domain-backfill')
     expect(run.status).toBe('running')
+  })
+})
+
+/**
+ * The backfill prompt used to require the domain key to be mirrored into `tags:`, which
+ * closed a loop with the dashboard's tag hygiene: the backfill set the tag, the tag repair
+ * (correctly) read it as repeating the `domain:` field and removed it, and the next backfill
+ * set it again. Every new domain produced a due tag repair within minutes of being filled.
+ */
+describe('domain backfill prompt', () => {
+  const prompt = (): string => domainBackfillPrompt(['biomedicine', 'quantum-computing', 'meta'])
+
+  it('tells the agent to REMOVE a tag that repeats a domain key', () => {
+    const p = prompt()
+    expect(p).toMatch(/REMOVE any tag equal to a domain key/)
+    expect(p).toMatch(/the `domain:` field and NOWHERE else|domain belongs in the `domain:` field and NOWHERE else/)
+  })
+
+  it('never asks for the key to be mirrored into tags again', () => {
+    const p = prompt().toLowerCase()
+    expect(p).not.toMatch(/mirror/)
+    expect(p).not.toMatch(/present as a tag/)
+    expect(p).not.toMatch(/keep the `unassigned` tag/)
+  })
+
+  it('exempts the keys that double as a content tag, and only those', () => {
+    expect(DOMAIN_TAGS_THAT_STAY).toEqual(['meta'])
+    expect(prompt()).toMatch(/only exception is `meta`/)
+  })
+
+  it('still carries the parts that make the run safe', () => {
+    const p = prompt()
+    // Frontmatter-only: the semantic-tiling cache hashes bodies, and a backfill must not
+    // invalidate it - nor create, delete or rename anything.
+    expect(p).toMatch(/page bodies, titles, and wikilinks untouched/)
+    expect(p).toMatch(/Do not create, delete, rename or merge any page/)
+    expect(p).toMatch(/Do not invent new keys/)
+    expect(p).toContain(UNASSIGNED)
   })
 })

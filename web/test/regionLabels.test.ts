@@ -142,16 +142,66 @@ describe('placeRegionLabels', () => {
     expect(boxIntersectsPolygon(placed!.box, hulls.get(2)!)).toBe(false)
   })
 
-  it('escapes a hull that encloses it by walking outward to a clear position', () => {
-    // Small hull A embedded inside a large hull B: the ring search must step the label past
-    // B rather than leaving it buried (the #aav-inside-biomedical case).
+  it('stays with its own small hull instead of emigrating out of an enclosing one', () => {
+    // Small hull A embedded inside a large hull B. Walking out past B would put the label
+    // ~100 units from the 10-unit cluster it names - the reported "label sits nowhere near
+    // its cluster" bug. Overlapping B's tint is the better trade, and it is flagged.
     const hulls = new Map<number, Pt[]>([
       [1, sq(-5, -5, 5, 5)],
       [2, sq(-100, -100, 100, 100)],
     ])
     const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], hulls, LABEL_H, MARGIN)
+    expect(placed).toBeDefined()
+    expect(placed!.fallback).toBe(true) // it knows the spot is compromised
+    // Close to its own hull: within the travel cap, nowhere near B's edge.
+    expect(Math.hypot(placed!.x - 0, placed!.y - 0)).toBeLessThan(20)
+  })
+
+  it('never strays far from its own hull, however crowded the neighbourhood', () => {
+    // Three big hulls boxing a small one in on every side: the label has nowhere clean to
+    // go, and must still be placed within reach of the cluster it belongs to.
+    const hulls = new Map<number, Pt[]>([
+      [1, sq(-5, -5, 5, 5)],
+      [2, sq(-200, -60, 200, -10)],
+      [3, sq(-200, 10, 200, 60)],
+      [4, sq(-200, -200, -10, 200)],
+    ])
+    const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], hulls, LABEL_H, MARGIN)
+    expect(placed).toBeDefined()
+    expect(Math.hypot(placed!.x, placed!.y)).toBeLessThan(30)
+  })
+
+  it('never lets two placed labels overlap, however crowded the scene', () => {
+    // Five hulls packed together with labels far wider than they are: labels may end up on a
+    // tint, but never on each other - two labels on top of each other are unreadable, so that
+    // is the one hard constraint (a label with no free candidate is dropped instead).
+    const hulls = new Map<number, Pt[]>(
+      [0, 1, 2, 3, 4].map((i) => [i + 1, sq(i * 12, 0, i * 12 + 8, 8)] as [number, Pt[]]),
+    )
+    const out = placeRegionLabels(
+      [1, 2, 3, 4, 5].map((key) => ({ key, width: 30, weight: 10 - key })),
+      hulls,
+      LABEL_H,
+      MARGIN,
+    )
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        expect(overlap(out[i]!.box, out[j]!.box)).toBe(false)
+      }
+    }
+  })
+
+  it('prefers a clean direction over a blocked one at the same distance', () => {
+    // Straight up (the default preference) runs into a foreign hull; the ring search must
+    // pick one of the free directions instead of accepting the overlap or walking outward.
+    const hulls = new Map<number, Pt[]>([
+      [1, sq(-5, -5, 5, 5)],
+      [2, sq(-40, -20, 40, -7)],
+    ])
+    const [placed] = placeRegionLabels([{ key: 1, width: 6, weight: 3 }], hulls, LABEL_H, MARGIN)
     expect(placed!.fallback).toBe(false)
     expect(boxIntersectsPolygon(placed!.box, hulls.get(2)!)).toBe(false)
+    expect(boxIntersectsPolygon(placed!.box, hulls.get(1)!)).toBe(false)
   })
 
   it('anchors the label near the hull edge, not the bounding-box corner', () => {

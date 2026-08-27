@@ -1,14 +1,12 @@
 /**
- * Maintenance tab (SPEC.md §6.4): Lint (structured report) and a hot-cache refresh, plus the
- * domain registry/governance and the settings editor. Autoresearch lives in the Query/Chat
- * composer now (it deserved the prominent spot, not a maintenance corner). Runs are
- * async/job-style (TASKS-M5 §0): the POST returns a run id at once, we poll its result via
- * `GET /maintenance/runs/:id`, and the live log streams over the `maintenance:<kind>` SSE
- * channel (rendered via JobLog with seeding off).
+ * Health screen (SPEC.md §6.4 + §12.7, redesign 2026-08): the status head is the primary
+ * surface, the guided run walks the open items, the tool cards are the per-area escape
+ * hatch. Settings lives on its own screen now. Runs are async/job-style (TASKS-M5 §0):
+ * the POST returns a run id at once, we poll `GET /maintenance/runs/:id`, and the live log
+ * streams over the `maintenance:<kind>` SSE channel (JobLog with seeding off).
  *
- * Layout: two columns on desktop — the agent-run tools left, settings right — instead of one
- * long single-column scroll. Every tool card shares the same anatomy: title + ⓘ tooltip,
- * a "last run" meta line (persistent facts from the vault, not this session), action top-right.
+ * Every tool card shares the same anatomy: title + ⓘ tooltip, a "last run" meta line
+ * (persistent facts from the vault, not this session), action top-right.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -45,16 +43,22 @@ function selectedActions(report: TagReport, selected: ReadonlySet<string>): TagF
 import { JobLog } from '../components/JobLog.tsx'
 import { Markdown } from '../components/Markdown.tsx'
 import { PageLink, PageLinks } from '../components/PageLink.tsx'
-import { SettingsEditor } from '../components/SettingsEditor.tsx'
 import { Tip } from '../components/Tip.tsx'
 import { useMaintenanceRun, type MaintenanceRunState } from '../hooks/useMaintenanceRun.ts'
 import { useMaintenanceStatus, type MaintenanceStatusData } from '../hooks/useMaintenanceStatus.ts'
 import { buildRunPlan, type MaintStatusItem, type RunPlanStep, type RunStepId } from '../lib/maintenanceStatus.ts'
 import { Icon } from '../components/Icon.tsx'
-import { timeAgo } from '../lib/format.ts'
+import { timeAgo, usd } from '../lib/format.ts'
+import { runTitle } from '../lib/runLabels.ts'
+import { Cost, ESTIMATE_LABEL, isEstimate } from '../components/Cost.tsx'
 import { pageRoute, navigate } from '../lib/router.ts'
 
-export function Maintenance(): React.ReactElement {
+/**
+ * `showRunHistory` is off when the System screen hosts this: the last-settle rows live in
+ * that screen's control column, next to every other section, and would otherwise be on
+ * screen twice.
+ */
+export function Maintenance({ showRunHistory = true }: { showRunHistory?: boolean }): React.ReactElement {
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
   const vaultName = stats.data?.vaultName ?? 'vault'
 
@@ -64,24 +68,23 @@ export function Maintenance(): React.ReactElement {
   const backfill = useMaintenanceRun(() => api.domainBackfill())
   const domains = useQuery({ queryKey: ['domains'], queryFn: api.domains })
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
-  // How much of the vault is still unfiled — the number that says whether a backfill is due.
+  // How much of the vault is still unfiled - the number that says whether a backfill is due.
   const undomained = graph.data?.nodes.filter((n) => n.domain === null).length ?? 0
   const totalPages = stats.data?.pages.total ?? 0
   const lastReport = stats.data?.lintReport ?? null
 
-  // The status head is the tab's primary surface (SPEC §12.7). Below it there are four
-  // views: 'overview' (head only), one focused card (a status item was clicked — show
-  // exactly the tool that item is about), 'all' (the Expert-tools toggle / setup mode,
-  // which force-opens everything because the credential entry lives in Settings), or the
-  // guided run (Stufe c) replacing everything while it walks the plan.
+  // The status head is the screen's primary surface (SPEC §12.7). Below it there are four
+  // views: 'overview' (head + run history), one focused card (a status item was clicked -
+  // show exactly the tool that item is about), 'all' (every card), or the guided run
+  // (Stufe c) replacing everything while it walks the plan.
   const [view, setView] = useState<'overview' | 'all' | string>('overview')
   const [runPlan, setRunPlan] = useState<RunPlanStep[] | null>(null)
-  const statusData = useMaintenanceStatus()
+  const maintStatus = useMaintenanceStatus()
+  const statusData = maintStatus.data
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  // Setup mode only disables the run button here - the credential entry lives in Settings
+  // now (its own screen), so this tab no longer has to force-open anything to reach it.
   const setupMode = health.data !== undefined && !health.data.credentialConfigured
-  useEffect(() => {
-    if (setupMode) setView('all')
-  }, [setupMode])
   const showCard = (anchor: string): boolean => view === 'all' || view === anchor
 
   if (view === 'run' && runPlan !== null) {
@@ -99,8 +102,11 @@ export function Maintenance(): React.ReactElement {
 
   return (
     <>
+      <div className={view === 'overview' ? 'health-grid' : ''}>
       <StatusHead
         data={statusData}
+        failed={maintStatus.failed}
+        onRetry={maintStatus.retry}
         allShown={view === 'all'}
         setupMode={setupMode}
         onToggleTools={() => setView(view === 'all' ? 'overview' : 'all')}
@@ -113,26 +119,28 @@ export function Maintenance(): React.ReactElement {
           }
         }}
       />
+      {view === 'overview' && showRunHistory && <RunHistory data={statusData} />}
+      </div>
       {view !== 'overview' && view !== 'all' && (
         <div className="focus-bar">
-          <button className="linklike" onClick={() => setView('overview')}>
+          <button className="linkish" onClick={() => setView('overview')}>
             ← Back to what&apos;s due
           </button>
-          <button className="linklike" onClick={() => setView('all')}>
-            Show all tools
+          <button className="linkish" onClick={() => setView('all')}>
+            All tools
           </button>
         </div>
       )}
       {view !== 'overview' && (
-      <div className={view === 'all' ? 'maint' : 'maint single'}>
+      <div className="maint single">
       <div className="mcol">
         {/* Lint */}
         {showCard('card-lint') && (
-        <div className="card card-pad" id="card-lint">
-          <div className="section-head">
-            <h3 className="section-title">
-              Lint — wiki health
-              <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit). 'Fix safe findings' fixes only the mechanical categories from the newest report (frontmatter gaps, stub pages, missing wikilinks, stale index entries) — deletions, merges and contradictions stay yours." />
+        <div className="subcard sc-pad" id="card-lint">
+          <div className="sc-head">
+            <h3 className="sc-title">
+              Lint - wiki health
+              <Tip text="Finds orphans, dead links, stale claims and missing cross-links, then writes a report page into the vault (one commit). 'Fix safe findings' fixes only the mechanical categories from the newest report (frontmatter gaps, stub pages, missing wikilinks, stale index entries) - deletions, merges and contradictions stay yours." />
             </h3>
             <span className="right">
               <button
@@ -141,8 +149,8 @@ export function Maintenance(): React.ReactElement {
                 onClick={lintFix.start}
                 title={
                   lastReport === null
-                    ? 'Run a lint first — the report is what bounds the fix run'
-                    : 'Fix the mechanical findings of the newest report (one git commit — revertable)'
+                    ? 'Run a lint first - the report is what bounds the fix run'
+                    : 'Fix the mechanical findings of the newest report (one git commit - revertable)'
                 }
               >
                 {lintFix.running ? 'Fixing…' : 'Fix safe findings'}
@@ -170,6 +178,9 @@ export function Maintenance(): React.ReactElement {
               <>No lint report in the vault yet.</>
             )}
           </div>
+          {lastReport !== null && !lint.running && lint.result === undefined && (
+            <ReportPeek path={lastReport.path} />
+          )}
           {lint.running && <JobLog jobId="maintenance:lint" seed={false} />}
           {lint.error && <div className="toast err">{lint.error}</div>}
           {lintFix.running && <JobLog jobId="maintenance:lint-fix" seed={false} />}
@@ -188,14 +199,14 @@ export function Maintenance(): React.ReactElement {
 
         {/* Hot cache */}
         {showCard('card-hot-cache') && (
-        <div className="card card-pad" id="card-hot-cache">
-          <div className="section-head">
-            <h3 className="section-title">
+        <div className="subcard sc-pad" id="card-hot-cache">
+          <div className="sc-head">
+            <h3 className="sc-title">
               Hot cache
               <Tip
                 text={
                   <>
-                    Refreshes <code>wiki/hot.md</code> — the compact context every agent run reads first. A
+                    Refreshes <code>wiki/hot.md</code> - the compact context every agent run reads first. A
                     fresh cache makes ingests faster and cheaper.
                   </>
                 }
@@ -206,7 +217,7 @@ export function Maintenance(): React.ReactElement {
             </button>
           </div>
           <div className="tool-meta">
-            {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) — the file's mtime. */}
+            {/* "Anzeige des letzten Refresh-Zeitpunkts" (SPEC.md §6.4) - the file's mtime. */}
             {stats.data?.hotCacheUpdatedAt ? (
               <span title={new Date(stats.data.hotCacheUpdatedAt).toLocaleString('en-US')}>
                 Last refresh {timeAgo(stats.data.hotCacheUpdatedAt)}
@@ -218,19 +229,31 @@ export function Maintenance(): React.ReactElement {
           {hot.running && <JobLog jobId="maintenance:hot-cache" seed={false} />}
           {hot.error && <div className="toast err">{hot.error}</div>}
           {hot.result && <RunResult result={hot.result} vaultName={vaultName} label="Refreshed" />}
+          {/* The cache's content, moved off Home (2026-08-25): it is a maintenance artifact,
+              and it belongs next to the button that refreshes it rather than costing the
+              dashboard's landing screen a collapsible panel you had to scroll past. */}
+          {stats.data?.hotCache && (
+            <details className="hot-cache">
+              <summary>Show what the cache contains</summary>
+              <Markdown source={stats.data.hotCache} />
+            </details>
+          )}
         </div>
         )}
 
         {/* Retrieval index (SPEC §12.6 stage 1) */}
         {showCard('card-index') && <RetrievalIndexCard />}
 
+        {/* Pages outside the vault's git history (finding F4's blind spot). */}
+        {showCard('card-unversioned') && <UnversionedCard />}
+
         {/* Domain registry + backfill (SPEC §12.4 Stufe 2) */}
         {showCard('card-domains') && (
-        <div className="card card-pad" id="card-domains">
-          <div className="section-head">
-            <h3 className="section-title">
+        <div className="subcard sc-pad" id="card-domains">
+          <div className="sc-head">
+            <h3 className="sc-title">
               Domains
-              <Tip text="The meta-categories pages are filed under, maintained as a vault page. Every ingest gets this list as a closed set; when nothing fits, 'unassigned' is used. New domains are only ever created by you — never by an agent." />
+              <Tip text="The meta-categories pages are filed under, maintained as a vault page. Every ingest gets this list as a closed set; when nothing fits, 'unassigned' is used. New domains are only ever created by you - never by an agent." />
             </h3>
             <button
               className="btn"
@@ -244,7 +267,7 @@ export function Maintenance(): React.ReactElement {
           {domains.data?.installed === false ? (
             <p className="tab-hint">
               No domain registry in the vault. Create it with{' '}
-              <code>scripts/install-domain-registry.sh</code> — afterwards it's editable as{' '}
+              <code>scripts/install-domain-registry.sh</code> - afterwards it's editable as{' '}
               <PageLink path={domains.data.path} vaultName={vaultName} />.
             </p>
           ) : (
@@ -294,20 +317,6 @@ export function Maintenance(): React.ReactElement {
         {/* Tag hygiene (lint equivalent for tags + the bounded repair run) */}
         {showCard('card-tags') && <TagHygieneCard nodes={graph.data?.nodes} vaultName={vaultName} />}
       </div>
-
-      {view === 'all' && (
-      <div className="mcol">
-        <div className="card card-pad">
-          <div className="section-head">
-            <h3 className="section-title">
-              Settings
-              <Tip text="Values from the environment are the baseline; values set here override them persistently. Reset restores the environment value." />
-            </h3>
-          </div>
-          <SettingsEditor />
-        </div>
-      </div>
-      )}
       </div>
       )}
     </>
@@ -316,13 +325,15 @@ export function Maintenance(): React.ReactElement {
 
 /**
  * The "what's due" head (SPEC §12.7 Stufe b): the deterministic status model rendered as a
- * prioritized list — severity chip, WHAT, WHY NOW, COST — as the tab's PRIMARY surface.
+ * prioritized list - severity chip, WHAT, WHY NOW, COST - as the tab's PRIMARY surface.
  * Clicking an item focuses exactly the tool it is about (one concern per screen); the
  * Expert-tools toggle shows every card. Healthy areas collapse into one line so an
  * all-green tab reads as exactly that.
  */
 function StatusHead({
   data,
+  failed,
+  onRetry,
   allShown,
   setupMode,
   onToggleTools,
@@ -330,6 +341,8 @@ function StatusHead({
   onStartRun,
 }: {
   data: MaintenanceStatusData | null
+  failed: boolean
+  onRetry: () => void
   allShown: boolean
   setupMode: boolean
   onToggleTools: () => void
@@ -339,12 +352,22 @@ function StatusHead({
   const [showHealthy, setShowHealthy] = useState(false)
 
   if (data === null) {
+    // A failed input query must offer a way out - not spin as "Checking…" forever.
     return (
-      <div className="card card-pad maint-status">
-        <div className="section-head">
-          <h3 className="section-title">What&apos;s due</h3>
+      <div className="subcard sc-pad maint-status">
+        <div className="sc-head">
+          <h3 className="sc-title">What&apos;s due</h3>
         </div>
-        <div className="tool-meta">Checking vault status…</div>
+        {failed ? (
+          <div className="tool-meta">
+            Could not derive the vault status.{' '}
+            <button className="btn" onClick={onRetry}>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="tool-meta">Checking vault status…</div>
+        )}
       </div>
     )
   }
@@ -353,13 +376,16 @@ function StatusHead({
   const open = status.items.filter((i) => i.severity !== 'healthy')
   const healthy = status.items.filter((i) => i.severity === 'healthy')
   const allHealthy = open.length === 0
+  // The button renders only when the plan builder would actually produce steps - an item
+  // set of registry/index-only work used to leave an enabled button that did nothing.
+  const planSize = buildRunPlan(status).length
 
   return (
-    <div className="card card-pad maint-status">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad maint-status">
+      <div className="sc-head">
+        <h3 className="sc-title">
           What&apos;s due
-          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'Expert tools' shows every card." />
+          <Tip text="Deterministic check over data the dashboard already has (graph, candidates, tag report, report/cache/index age) - computing it costs nothing. 'Due' blocks other maintenance or degrades quality; 'soon' is worth doing soon; everything else is explicitly healthy. Click an item to focus exactly that tool; 'All tools' shows every card." />
         </h3>
         <span className="right ms-actions">
           <span className="ms-counts">
@@ -368,9 +394,9 @@ function StatusHead({
             <span className="sev ok">{status.healthy} healthy</span>
           </span>
           <button className="btn" onClick={onToggleTools}>
-            {allShown ? 'Hide expert tools' : 'Expert tools'}
+            {allShown ? 'Hide all tools' : 'All tools'}
           </button>
-          {!allHealthy && (
+          {planSize > 0 && (
             <button
               className="btn primary"
               disabled={setupMode}
@@ -381,7 +407,7 @@ function StatusHead({
                   : 'Work through the open items in order - automatic steps run on their own, the run stops only where your judgement is needed'
               }
             >
-              Start maintenance run
+              Start guided run
             </button>
           )}
         </span>
@@ -400,7 +426,7 @@ function StatusHead({
       )}
 
       {!allHealthy && healthy.length > 0 && (
-        <button className="linklike ms-healthy-toggle" onClick={() => setShowHealthy((v) => !v)}>
+        <button className="linkish ms-healthy-toggle" onClick={() => setShowHealthy((v) => !v)}>
           {showHealthy ? 'hide' : 'show'} {healthy.length} healthy area{healthy.length === 1 ? '' : 's'}
         </button>
       )}
@@ -454,12 +480,84 @@ function StatusItem({
 }
 
 /**
+ * The persisted lint report, collapsed under the lint card (redesign 2026-08): "Fix safe
+ * findings" is bounded by exactly this report, so its evidence must be visible where the
+ * consent happens - not one navigation away. Loaded lazily on first expand.
+ */
+function ReportPeek({ path }: { path: string }): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const page = useQuery({
+    queryKey: ['page-preview', path],
+    queryFn: () => api.page(path),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  return (
+    <details
+      className="report-peek"
+      open={open}
+      onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}
+    >
+      <summary>Show the report this fix run is bounded by</summary>
+      {page.isLoading && <div className="empty">Loading report…</div>}
+      {page.isError && <div className="toast err">Could not load the report: {(page.error as Error).message}</div>}
+      {page.data !== undefined && (
+        <div className="report-body md-fallback">
+          <Markdown source={page.data.markdown} />
+          {page.data.truncated && <p className="tab-hint">Truncated - open the full page in the vault viewer.</p>}
+        </div>
+      )}
+    </details>
+  )
+}
+
+/**
+ * Run history (redesign 2026-08): the restart-proof last settle per run kind, with outcome
+ * and page count - receipts for what maintenance actually did. One row per kind (the runner
+ * keeps no deeper history yet; a persistent run log is a server extension).
+ */
+function RunHistory({ data }: { data: MaintenanceStatusData | null }): React.ReactElement {
+  const runs = [...(data?.lastRuns.values() ?? [])].sort(
+    (a, b) => Date.parse(b.finishedAt) - Date.parse(a.finishedAt),
+  )
+  return (
+    <div className="subcard sc-pad run-history">
+      <div className="sc-head">
+        <h3 className="sc-title">
+          Last runs
+          <Tip text="The most recent settle per run kind, restart-proof (SPEC 12.7 Stufe b). Vault facts (report date, cache age) stay the primary source; this covers the areas no vault file captures." />
+        </h3>
+      </div>
+      {runs.length === 0 ? (
+        <div className="empty">No maintenance runs recorded yet.</div>
+      ) : (
+        <div className="run-rows">
+          {runs.map((r) => (
+            <div key={r.kind} className="run-row">
+              <span className={`sev ${r.ok ? 'ok' : 'due'}`}>{r.ok ? 'ok' : 'failed'}</span>
+              <span className="rr-main">
+                <span className="rr-title">{runTitle(r.kind, r.ok)}</span>
+                {r.error !== null && <span className="rr-err">{r.error}</span>}
+              </span>
+              <span className="rr-meta">
+                {r.pages > 0 ? `${r.pages} page${r.pages > 1 ? 's' : ''} · ` : ''}
+                {timeAgo(r.finishedAt)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
  * Tag hygiene: the deterministic, read-only lint equivalent for tags (level 2 of the tag
- * plan) — likely spelling variants, tags implied by another tag, tags that just echo a
- * domain, and single-use tags — plus the bounded repair (level 3): actionable findings get
+ * plan) - likely spelling variants, tags implied by another tag, tags that just echo a
+ * domain, and single-use tags - plus the bounded repair (level 3): actionable findings get
  * a checkbox, "Fix selected" starts an agent run over exactly those drop/merge actions
  * (hard rule 1: the agent writes, one revertable commit). Variants repair as a merge into
- * the more common spelling; domain echoes as a drop — except echoes of the `unassigned`
+ * the more common spelling; domain echoes as a drop - except echoes of the `unassigned`
  * bucket, which are missing DOMAINS, not redundancy, and get no checkbox.
  *
  * SPEC §12.7 Stufe a: the conflict-free recommendation is PREselected (uncheck to
@@ -483,7 +581,7 @@ function TagHygieneCard({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   // The recommendation is preselected (SPEC §12.7 Stufe a): the user unchecks instead of
   // building the plan. Re-preselect only when the set of recommendable actions actually
-  // changes (fresh findings after a fix run) — a mere refetch with identical findings must
+  // changes (fresh findings after a fix run) - a mere refetch with identical findings must
   // not undo the user's unchecking.
   const recommended = useMemo(() => (report === null ? null : recommendedKeys(report, MAX_TAG_ACTIONS)), [report])
   const preselectSig = useRef<string | null>(null)
@@ -517,7 +615,7 @@ function TagHygieneCard({
   if (report === null) return null
   const actions = selectedActions(report, selected)
   // Two selected repairs fighting over one tag (e.g. two merges consuming the same tag)
-  // would force the agent to guess an order — block the run until one is unchecked.
+  // would force the agent to guess an order - block the run until one is unchecked.
   const conflict = conflictingTag(actions)
   const toggle = (key: string): void => {
     setSelected((prev) => {
@@ -528,12 +626,12 @@ function TagHygieneCard({
     })
   }
   const findingCount = report.variants.length + report.implications.length + report.domainEchoes.length
-  const CAP = 8 // evidence, not an endless list — the counts carry the "how bad is it"
+  const CAP = 8 // evidence, not an endless list - the counts carry the "how bad is it"
   return (
-    <div className="card card-pad" id="card-tags">
-      <div className="section-head">
-        <h3 className="section-title">
-          Tags — hygiene
+    <div className="subcard sc-pad" id="card-tags">
+      <div className="sc-head">
+        <h3 className="sc-title">
+          Tags - hygiene
           <Tip text="Deterministic tag lint, computed from the live graph - the report itself writes nothing. Repairs with an unambiguous direction come preselected: uncheck what you disagree with, then 'Fix selected' runs an agent over exactly the checked actions - frontmatter tags only, one revertable git commit. Non-actionable findings (implied tags, single-use tags) are collapsed under Observations." />
         </h3>
         <button
@@ -544,8 +642,8 @@ function TagHygieneCard({
             actions.length === 0
               ? 'Check findings below to build the repair plan'
               : conflict !== null
-                ? `Conflicting selections: #${conflict} appears in more than one repair — uncheck one`
-                : `Apply ${Math.min(actions.length, MAX_TAG_ACTIONS)} tag repair${actions.length === 1 ? '' : 's'} (one git commit — revertable)`
+                ? `Conflicting selections: #${conflict} appears in more than one repair - uncheck one`
+                : `Apply ${Math.min(actions.length, MAX_TAG_ACTIONS)} tag repair${actions.length === 1 ? '' : 's'} (one git commit - revertable)`
           }
         >
           {fix.running ? 'Fixing…' : `Fix selected${actions.length > 0 ? ` (${Math.min(actions.length, MAX_TAG_ACTIONS)})` : ''}`}
@@ -616,7 +714,7 @@ function TagHygieneCard({
                 return (
                   <label key={`${e.tag}|${e.domain}`} className={`trow${missing ? '' : ' selectable'}`}>
                     <span className="pair">
-                      {/* A tag blanketing the unassigned bucket isn't redundancy — it's the
+                      {/* A tag blanketing the unassigned bucket isn't redundancy - it's the
                           domain those pages are waiting for. No drop offered. */}
                       {!missing && (
                         <input
@@ -717,17 +815,82 @@ function TagHygieneCard({
 
 /**
  * Retrieval-index card (SPEC §12.6 stage 1). The chunk/BM25 index the read-only query path uses
- * once provisioned — deterministic, no agent, no credential, so the rebuild button works in
+ * once provisioned - deterministic, no agent, no credential, so the rebuild button works in
  * setup mode too. Freshness is otherwise automatic (a debounced rebuild after each ingest); this
  * surfaces the state and a manual rebuild. A pre-v1.7 vault ships no scripts → the card explains
  * that instead of offering a build that would 409.
  */
+/**
+ * Pages that exist on disk but not in the vault's git history.
+ *
+ * Read-only by design, for now: committing them needs a decision about WHAT they are, and
+ * the service cannot make it. An agent run creates pages with Bash often enough that the
+ * commit pathspec misses them, and the sweep that would catch them is skipped whenever more
+ * than one run writes at once - so this card is the "visible" half that the trade-off in
+ * `newWikiPaths` already assumed existed. The commit action is deliberately a separate step.
+ */
+function UnversionedCard(): React.ReactElement {
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const u = stats.data?.unversioned
+  const total = (u?.untracked ?? 0) + (u?.modified ?? 0)
+
+  return (
+    <div className="subcard sc-pad" id="card-unversioned">
+      <div className="sc-head">
+        <h3 className="sc-title">
+          Pages outside git
+          <Tip
+            text={
+              <>
+                Every page the service writes is meant to land in one git commit - that is what makes a
+                run revertable. A page an agent creates with <code>Bash</code> is invisible to the commit
+                pathspec, and the fallback sweep only runs when a single run is writing, so with several
+                jobs in flight pages can stay outside history. They still render and link normally, which
+                is exactly why this needs saying out loud.
+              </>
+            }
+          />
+        </h3>
+      </div>
+      {u === undefined ? (
+        <div className="tool-meta">Checking the vault against git…</div>
+      ) : total === 0 ? (
+        <div className="tool-meta">
+          <Icon name="check" /> Every page under <code>wiki/</code> is committed.
+        </div>
+      ) : (
+        <>
+          <div className="tool-meta">
+            {u.untracked > 0 && <>{u.untracked} never committed</>}
+            {u.untracked > 0 && u.modified > 0 && <> · </>}
+            {u.modified > 0 && <>{u.modified} changed since its last commit</>}
+          </div>
+          <ul className="unversioned-list">
+            {u.examples.map((p) => (
+              <li key={p}>
+                <code>{p}</code>
+              </li>
+            ))}
+            {total > u.examples.length && <li className="dim">and {total - u.examples.length} more</li>}
+          </ul>
+          <p className="tab-hint">
+            Nothing is lost right now - the pages are on disk and the vault works. They have no history
+            though, so they cannot be reverted and a restore from git would drop them. Review them, then
+            commit them in the vault: <code>git add wiki &amp;&amp; git commit</code>. A one-click action
+            for this is not built yet, on purpose: the service cannot tell which run each page belongs to.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function RetrievalIndexCard(): React.ReactElement {
   const qc = useQueryClient()
   const status = useQuery({ queryKey: ['retrieve-index-status'], queryFn: api.retrieveIndexStatus })
   const build = useMaintenanceRun(() => api.retrieveIndex())
 
-  // A settled build changes chunk count / provisioned state — refetch the status when it lands.
+  // A settled build changes chunk count / provisioned state - refetch the status when it lands.
   useEffect(() => {
     if (build.result) void qc.invalidateQueries({ queryKey: ['retrieve-index-status'] })
   }, [build.result, qc])
@@ -736,16 +899,16 @@ function RetrievalIndexCard(): React.ReactElement {
   const missing = s !== undefined && !s.scriptsPresent
 
   return (
-    <div className="card card-pad" id="card-index">
-      <div className="section-head">
-        <h3 className="section-title">
+    <div className="subcard sc-pad" id="card-index">
+      <div className="sc-head">
+        <h3 className="sc-title">
           Retrieval index
           <Tip
             text={
               <>
                 Chunk-level hybrid retrieval (BM25 over contextualized chunks) for the Research/chat read
                 path. Once built, questions are answered from the passages <code>retrieve.py</code> ranks
-                instead of a page-title scan — better at facts buried mid-page. Rebuilds automatically after
+                instead of a page-title scan - better at facts buried mid-page. Rebuilds automatically after
                 ingests; this is the manual trigger. Derived data only (kept out of vault git).
               </>
             }
@@ -760,7 +923,7 @@ function RetrievalIndexCard(): React.ReactElement {
 
       {missing ? (
         <p className="tab-hint">
-          This vault ships no <code>wiki-retrieve</code> scripts — it predates claude-obsidian v1.7. Nothing to
+          This vault ships no <code>wiki-retrieve</code> scripts - it predates claude-obsidian v1.7. Nothing to
           index; the query path uses the classic hot-cache → index → pages read order.
         </p>
       ) : (
@@ -773,7 +936,7 @@ function RetrievalIndexCard(): React.ReactElement {
               {s.indexBuiltAt ? <> · built {timeAgo(s.indexBuiltAt)}</> : null}
             </span>
           ) : (
-            <span>Not built yet — the query path falls back to the classic read order until you build it.</span>
+            <span>Not built yet - the query path falls back to the classic read order until you build it.</span>
           )}
         </div>
       )}
@@ -787,13 +950,13 @@ function RetrievalIndexCard(): React.ReactElement {
 
 /**
  * The governance loop's UI (SPEC §12.4 Stufe 3). The candidate list itself is deterministic and
- * free, so it simply renders — no "start analysis" needed. The agent pass only JUDGES what the
+ * free, so it simply renders - no "start analysis" needed. The agent pass only JUDGES what the
  * finder already surfaced, and costs a real agent run; it is ON by default (SPEC §12.7 Stufe a)
  * because its verdicts are what turn a bare key into a complete proposal (key + description +
- * tags) — the toggle remains as the opt-out for cost-conscious refreshes.
+ * tags) - the toggle remains as the opt-out for cost-conscious refreshes.
  *
  * Creating a domain is deliberately a user action here; agents may never coin a key. A created
- * domain gets its pages only through a backfill — the explicit prompt after each create closes
+ * domain gets its pages only through a backfill - the explicit prompt after each create closes
  * what used to be a silent gap.
  */
 function DomainCandidates({
@@ -809,7 +972,7 @@ function DomainCandidates({
   backfillRunning: boolean
   /** Guided run (SPEC §12.7 Stufe c): start the read-only review by itself when candidates exist. */
   autoReview?: boolean
-  /** Guided run: the follow-up backfill is queued as a step — no inline prompt needed. */
+  /** Guided run: the follow-up backfill is queued as a step - no inline prompt needed. */
   suppressBackfillPrompt?: boolean
   /** Guided run: lets the wizard track what was created (drives the follow-up backfill). */
   onDomainCreated?: (key: string) => void
@@ -818,12 +981,12 @@ function DomainCandidates({
   const candidates = useQuery({ queryKey: ['domain-candidates'], queryFn: api.domainCandidates })
   const [withAgent, setWithAgent] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)
-  /** Key of the most recently created domain — drives the "run the backfill now" prompt. */
+  /** Key of the most recently created domain - drives the "run the backfill now" prompt. */
   const [created, setCreated] = useState<string | null>(null)
   const review = useMaintenanceRun(() => api.domainReview())
 
   // The wizard's domain step runs the review as a fixed part of the flow (one run, all
-  // candidates) — its verdicts are what make every proposal complete. Once per mount.
+  // candidates) - its verdicts are what make every proposal complete. Once per mount.
   const autoStarted = useRef(false)
   const candidateCount = candidates.data?.candidates.length ?? 0
   useEffect(() => {
@@ -857,8 +1020,8 @@ function DomainCandidates({
 
   return (
     <div className="domain-candidates">
-      <div className="section-head">
-        <h4 className="section-title">Candidates for new domains</h4>
+      <div className="sc-head">
+        <h4 className="sc-title">Candidates for new domains</h4>
         <div className="candidate-actions">
           <label
             className="toggle"
@@ -880,7 +1043,7 @@ function DomainCandidates({
           <>
             {' '}
             <strong>{data.undomainedCount}</strong> page{data.undomainedCount === 1 ? '' : 's'} carry no domain
-            field at all — that's what the backfill is for; until then this analysis is incomplete.
+            field at all - that's what the backfill is for; until then this analysis is incomplete.
           </>
         )}
       </p>
@@ -894,7 +1057,7 @@ function DomainCandidates({
       )}
 
       {/* A created domain owns no pages until a backfill re-files its `unassigned` backlog
-          (SPEC §12.4 Stufe 3 "Selbstheilung") — prompt for it instead of leaving the gap silent.
+          (SPEC §12.4 Stufe 3 "Selbstheilung") - prompt for it instead of leaving the gap silent.
           The guided run queues the backfill as its own step, so it suppresses this. */}
       {created !== null && !suppressBackfillPrompt && (
         <div className="toast ok toast-action">
@@ -997,7 +1160,7 @@ function CandidateCard({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // The review lands AFTER this card mounted (it is a run, the list is not) — without this
+  // The review lands AFTER this card mounted (it is a run, the list is not) - without this
   // sync the verdict's proposal would never reach the already-initialized fields. Only while
   // the form is closed: an open form is the user's text, never to be clobbered.
   useEffect(() => {
@@ -1030,7 +1193,7 @@ function CandidateCard({
   }
 
   return (
-    <div className="candidate card card-pad">
+    <div className="candidate subcard sc-pad">
       <div className="candidate-head">
         <strong>{candidate.key}</strong>
         <span className="candidate-meta">
@@ -1043,13 +1206,13 @@ function CandidateCard({
       {verdict?.reason && <p className="tab-hint">{verdict.reason}</p>}
       {verdict?.verdict === 'existing' && verdict.existing && (
         <p className="tab-hint">
-          Suggestion: file these pages under <code>{verdict.existing}</code> — edit the pages or run a
+          Suggestion: file these pages under <code>{verdict.existing}</code> - edit the pages or run a
           backfill to do so.
         </p>
       )}
 
       {/* The member pages, collapsed: a 30-page candidate must not cost 30 chip rows of
-          screen before the user even decides — the count in the head already says the size. */}
+          screen before the user even decides - the count in the head already says the size. */}
       <details className="cand-pages">
         <summary>Show {candidate.pageCount} page{candidate.pageCount === 1 ? '' : 's'}</summary>
         <PageLinks paths={candidate.pages.map((p) => p.path)} vaultName={vaultName} />
@@ -1111,7 +1274,7 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
     <div>
       <div className="grid kpis" style={{ marginBottom: 14 }}>
         {Object.entries(report.summary).map(([k, v]) => (
-          <div key={k} className="stat card">
+          <div key={k} className="stat subcard">
             <div className="value">{v}</div>
             <div className="sub">{k}</div>
           </div>
@@ -1119,7 +1282,7 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
       </div>
       {report.totalFindings === 0 ? (
         <div className="empty">
-          <Icon name="check" /> No findings — the wiki is clean.
+          <Icon name="check" /> No findings - the wiki is clean.
         </div>
       ) : (
         report.sections.map((s) => (
@@ -1148,11 +1311,19 @@ function LintView({ report, reportPath, vaultName }: { report: LintReport; repor
 }
 
 function RunResult({ result, vaultName, label }: { result: MaintenanceResult; vaultName: string; label: string }): React.ReactElement {
+  // The run's cost was collected all along (result.usage) but never rendered - receipts.
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const authMode = stats.data?.authMode ?? 'oauth'
   if (!result.ok) return <div className="toast err">{result.error ?? 'Failed'}</div>
   return (
     <div className="toast ok">
       {label}
-      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> — no changes.</>}
+      {result.usage.costUsd > 0 && (
+        <span>
+          {' '}· <Cost value={result.usage.costUsd} authMode={authMode} />
+        </span>
+      )}
+      {result.pages.length > 0 ? <PageLinks vaultName={vaultName} paths={result.pages} /> : <> - no changes.</>}
     </div>
   )
 }
@@ -1165,7 +1336,7 @@ type StepOutcome = { state: 'done' | 'skipped' | 'failed'; note: string }
  * The guided maintenance run: walks the plan `buildRunPlan` derived from the status model.
  * Automatic steps start themselves, stream their live log and advance on settle; decision
  * steps embed the SAME components the expert cards use (one implementation per decision
- * surface) and wait for the user. Sequencing is client-driven over the existing endpoints —
+ * surface) and wait for the user. Sequencing is client-driven over the existing endpoints -
  * the server's run mutex serializes the actual vault writes, and every step stays its own
  * revertable commit, so closing the tab mid-run loses only the wizard position, never work.
  */
@@ -1180,9 +1351,15 @@ function GuidedRun({
 }): React.ReactElement {
   const qc = useQueryClient()
   const graph = useQuery({ queryKey: ['graph'], queryFn: api.graph })
+  const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  const authMode = stats.data?.authMode ?? 'oauth'
+  // Receipts: what a step cost, appended to its outcome note (the estimate footnote sits
+  // under the summary once, so the per-step suffix stays a bare number).
+  const costSuffix = (cost: number): string =>
+    cost > 0 ? ` · ${usd(cost)}${isEstimate(authMode) ? '*' : ''}` : ''
   const [idx, setIdx] = useState(0)
   const [outcomes, setOutcomes] = useState<Record<string, StepOutcome>>({})
-  /** Domains created in the decision step — what makes the follow-up backfill run vs. skip. */
+  /** Domains created in the decision step - what makes the follow-up backfill run vs. skip. */
   const [created, setCreated] = useState<string[]>([])
 
   const backfill1 = useMaintenanceRun(() => api.domainBackfill())
@@ -1205,7 +1382,7 @@ function GuidedRun({
   }
 
   // Automatic steps start themselves on entry, exactly once. The follow-up backfill skips
-  // itself when the domain step created nothing — there is nothing to re-file then.
+  // itself when the domain step created nothing - there is nothing to re-file then.
   const startedRef = useRef(new Set<string>())
   useEffect(() => {
     if (step === undefined || step.kind !== 'auto') return
@@ -1226,7 +1403,8 @@ function GuidedRun({
     if (step === undefined || step.kind !== 'auto' || step.id === 'lint') return
     const r = autoRuns[step.id]
     if (r?.result?.ok === true) {
-      finish(step.id, 'done', r.result.pages.length > 0 ? `${r.result.pages.length} page(s) committed` : 'No changes needed.')
+      const base = r.result.pages.length > 0 ? `${r.result.pages.length} page(s) committed` : 'No changes needed.'
+      finish(step.id, 'done', base + costSuffix(r.result.usage.costUsd))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backfill1.result, backfill2.result, hot.result])
@@ -1244,7 +1422,8 @@ function GuidedRun({
   useEffect(() => {
     if (step?.id !== 'lint') return
     if (lintFix.result?.ok === true) {
-      finish('lint', 'done', `Report written · ${lintFix.result.pages.length} page(s) auto-fixed.`)
+      const usd = (lint.result?.usage.costUsd ?? 0) + lintFix.result.usage.costUsd
+      finish('lint', 'done', `Report written · ${lintFix.result.pages.length} page(s) auto-fixed.` + costSuffix(usd))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lintFix.result, step])
@@ -1274,9 +1453,9 @@ function GuidedRun({
 
   return (
     <div className="guided-run">
-      <div className="card card-pad maint-status">
-        <div className="section-head">
-          <h3 className="section-title">
+      <div className="subcard sc-pad maint-status">
+        <div className="sc-head">
+          <h3 className="sc-title">
             Maintenance run
             <Tip text="Works through the open items in dependency order. Automatic steps run on their own - the run stops only where your judgement is needed. Every step is one revertable git commit." />
           </h3>
@@ -1292,7 +1471,7 @@ function GuidedRun({
             const cls = o !== undefined ? o.state : i === idx ? 'active' : 'pending'
             return (
               <span key={s.id} className={`wiz-step ${cls}`}>
-                <span className="dot">{o === undefined ? i + 1 : o.state === 'done' ? '✓' : o.state === 'skipped' ? '–' : '!'}</span>
+                <span className="dot">{o === undefined ? i + 1 : o.state === 'done' ? '✓' : o.state === 'skipped' ? '-' : '!'}</span>
                 {s.title}
                 <span className={`sev ${s.kind === 'auto' ? 'mut' : 'rec'}`}>{s.kind === 'auto' ? 'auto' : 'you decide'}</span>
               </span>
@@ -1302,12 +1481,15 @@ function GuidedRun({
       </div>
 
       {finished || step === undefined ? (
-        <div className="card card-pad">
+        <div className="subcard sc-pad">
           <div className="toast ok">Maintenance run finished.</div>
-          <h3 className="section-title" style={{ marginBottom: 4 }}>
+          <h3 className="sc-title" style={{ marginBottom: 4 }}>
             What happened
           </h3>
-          <p className="tab-hint">Every step was its own git commit - revertable independently.</p>
+          <p className="tab-hint">
+            Every step was its own git commit - revertable independently.
+            {isEstimate(authMode) && <> Costs marked * are {ESTIMATE_LABEL}.</>}
+          </p>
           <div className="wiz-summary">
             {plan.map((s) => {
               const o = outcomes[s.id]
@@ -1330,9 +1512,9 @@ function GuidedRun({
           </div>
         </div>
       ) : step.kind === 'decision' ? (
-        <div className="card card-pad wiz-panel">
-          <div className="section-head">
-            <h3 className="section-title">{step.title}</h3>
+        <div className="subcard sc-pad wiz-panel">
+          <div className="sc-head">
+            <h3 className="sc-title">{step.title}</h3>
             <span className="sev rec">you decide</span>
           </div>
           <p className="tab-hint">{step.why}</p>
@@ -1379,9 +1561,9 @@ function GuidedRun({
           </div>
         </div>
       ) : (
-        <div className="card card-pad wiz-panel">
-          <div className="section-head">
-            <h3 className="section-title">{step.title}</h3>
+        <div className="subcard sc-pad wiz-panel">
+          <div className="sc-head">
+            <h3 className="sc-title">{step.title}</h3>
             <span className="sev mut">automatic</span>
           </div>
           <p className="tab-hint">{step.why}</p>

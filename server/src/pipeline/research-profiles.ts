@@ -35,7 +35,7 @@ export interface ResearchProfile {
   readonly badge?: string
   /** Source preferences — shown as pills in the UI and injected into the lens block. */
   readonly sources: readonly string[]
-  /** Rough WebFetch-count expectation for the cost hint (e.g. '30–45'). */
+  /** Rough WebFetch-count expectation for the cost hint (e.g. '30-45'). */
   readonly fetchEstimate: string
   /**
    * Deterministic suffix appended after the topic in the synthesis page title. Empty for
@@ -52,19 +52,19 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
   {
     key: 'broad',
     label: 'Broad sweep',
-    blurb: 'General authoritative coverage — the standard research loop.',
+    blurb: 'General authoritative coverage - the standard research loop.',
     badge: 'default',
     sources: ['peer-reviewed papers', 'official documentation', 'primary sources'],
-    fetchEstimate: '30–45',
+    fetchEstimate: '30-45',
     titleSuffix: '',
     emphasis: 'a balanced overview of the topic',
   },
   {
     key: 'sota',
     label: 'State of the art',
-    blurb: 'Latest developments, results and benchmarks — weighted to the last ~2 years.',
+    blurb: 'Latest developments, results and benchmarks - weighted to the last ~2 years.',
     sources: ['arXiv', 'official releases and changelogs', 'recent conference / peer-reviewed papers'],
-    fetchEstimate: '30–40',
+    fetchEstimate: '30-40',
     titleSuffix: ' — State of the Art',
     emphasis:
       'what has changed recently, the current best results, and the open frontiers; treat ' +
@@ -73,9 +73,9 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
   {
     key: 'patents',
     label: 'Recent patents',
-    blurb: 'The IP landscape — filings, assignees and claim scope.',
+    blurb: 'The IP landscape - filings, assignees and claim scope.',
     sources: ['Google Patents', 'USPTO', 'EPO Espacenet'],
-    fetchEstimate: '25–35',
+    fetchEstimate: '25-35',
     titleSuffix: ' — Patent Landscape',
     emphasis:
       'the intellectual-property landscape: notable filings and grants, their assignees, ' +
@@ -87,7 +87,7 @@ export const RESEARCH_PROFILES: readonly ResearchProfile[] = [
     label: 'Startups & funding',
     blurb: 'Companies, funding rounds and commercial traction around the topic.',
     sources: ['company sites', 'funding trackers', 'trade press'],
-    fetchEstimate: '25–35',
+    fetchEstimate: '25-35',
     titleSuffix: ' — Startup Landscape',
     emphasis:
       'the commercial landscape: which companies are active, their funding stage and backers, ' +

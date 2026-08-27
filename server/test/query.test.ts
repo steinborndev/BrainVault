@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { parseWikilinks, extractCitations, indexWikiPages } from '../src/pipeline/citations.js'
+import { parseWikilinks, parseWikilinkRefs, extractCitations, indexWikiPages } from '../src/pipeline/citations.js'
 import {
   decidePermission,
   profileAllowsWeb,
@@ -16,6 +16,49 @@ describe('citations', () => {
   it('parses wikilink targets, stripping aliases/headings and de-duping', () => {
     const text = 'See [[Compound Interest]], [[Compound Interest|it]], [[Risk#Types]], and [[Compound Interest]] again.'
     expect(parseWikilinks(text)).toEqual(['Compound Interest', 'Risk'])
+  })
+
+  it('ignores wikilinks inside fenced blocks and inline code', () => {
+    // `tf.constant([[1.]] * n)` is a Python literal, and a lint report QUOTES the dangling
+    // links it reports. Both used to come back as page names.
+    const text = [
+      'Real link to [[Alpha]].',
+      '',
+      '```python',
+      'y = tf.constant([[0.]] * n + [[1.]] * n)  # [[Beta]] in a comment',
+      '```',
+      '',
+      'Inline `tf.constant([[1.,2.],[3.,4.]])` next to a quoted `[[Gamma]]` finding.',
+      '',
+      '~~~',
+      'tilde fence holding [[Delta]]',
+      '~~~',
+      '',
+      'Closing with [[Epsilon]].',
+    ].join('\n')
+    expect(parseWikilinks(text)).toEqual(['Alpha', 'Epsilon'])
+  })
+
+  it('pairs fences by length and lets an unterminated one run to the end', () => {
+    // A four-backtick fence quoting a three-backtick one must not close early.
+    expect(parseWikilinks('````\n```\n[[Inside]]\n```\n````\n\n[[After]]')).toEqual(['After'])
+    // CommonMark and Obsidian both run an unterminated fence to end of document.
+    expect(parseWikilinks('[[Before]]\n\n```\n[[Never Closed]]')).toEqual(['Before'])
+  })
+
+  it('unescapes the table-escaped alias pipe', () => {
+    // Inside a markdown table the alias separator must be written `\|` or the cell breaks.
+    // Splitting on the bare pipe left the escape in the page name and it resolved to nothing.
+    const row = '| [[Compound Interest\\|CI]] | [[Alpha\\|A]] |'
+    expect(parseWikilinks(row)).toEqual(['Compound Interest', 'Alpha'])
+  })
+
+  it('flags embeds, and one plain link anywhere clears the flag', () => {
+    const refs = parseWikilinkRefs('![[shot.png]], then ![[Alpha]], but also [[Alpha]] plainly.')
+    expect(refs.find((r) => r.target === 'shot.png')?.embed).toBe(true)
+    expect(refs.find((r) => r.target === 'Alpha')?.embed).toBe(false)
+    // The string view keeps embeds: callers that only ask WHICH pages a text names want them.
+    expect(parseWikilinks('![[shot.png]]')).toEqual(['shot.png'])
   })
 
   it('resolves links to vault page paths, unresolved → null', () => {
@@ -116,6 +159,39 @@ describe('ChatStore', () => {
 
     expect(chat.deleteSession(s2.id)).toBe(true)
     expect(chat.getSession(s2.id)).toBeUndefined()
+  })
+
+  /**
+   * The Research ledger lists a run's cost and a conversation's cost in the same column
+   * (2026-08-27), so a conversation has to be able to state its own. Summed here rather
+   * than in the client: the list response is the only place that sees every message.
+   */
+  it('sums what a conversation cost, and reports null when nothing recorded usage', () => {
+    const paid = chat.createSession({ title: 'paid' })
+    chat.addMessage({ sessionId: paid.id, role: 'user', content: 'q' })
+    chat.addMessage({
+      sessionId: paid.id,
+      role: 'assistant',
+      content: 'a',
+      usage: { tokensIn: 1000, tokensOut: 200, costUsd: 0.02 },
+    })
+    chat.addMessage({
+      sessionId: paid.id,
+      role: 'assistant',
+      content: 'b',
+      usage: { tokensIn: 500, tokensOut: 100, costUsd: 0.01 },
+    })
+    const free = chat.createSession({ title: 'no usage recorded' })
+    chat.addMessage({ sessionId: free.id, role: 'user', content: 'q' })
+
+    const list = chat.listSessions()
+    const withCost = list.find((s) => s.id === paid.id)!
+    expect(withCost.cost_usd).toBeCloseTo(0.03, 10)
+    expect(withCost.tokens).toBe(1800)
+
+    // Not 0: a conversation whose answers predate per-message usage did not cost nothing,
+    // and a ledger that adds those up as free reports a total that is quietly wrong.
+    expect(list.find((s) => s.id === free.id)!.cost_usd).toBeNull()
   })
 
   it('persists per-message usage on assistant messages (v6), null elsewhere', () => {

@@ -18,13 +18,9 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { EventBus } from './events.js'
+import { ensureVaultExcludes, RETRIEVE_EXCLUDE_ENTRIES } from './vault-excludes.js'
 
-/** Entries appended to the vault's `.git/info/exclude` — repo-local, never a tracked file. */
-export const RETRIEVE_EXCLUDE_ENTRIES = [
-  '.vault-meta/chunks/',
-  '.vault-meta/bm25/',
-  '.vault-meta/embed-cache.json',
-] as const
+export { RETRIEVE_EXCLUDE_ENTRIES }
 
 /** Thrown when the vault clone ships no wiki-retrieve scripts → HTTP 409 at the route. */
 export class RetrieveScriptsMissingError extends Error {
@@ -49,24 +45,6 @@ export function isRetrieveProvisioned(vaultRoot: string): boolean {
     fs.existsSync(path.join(vaultRoot, '.vault-meta', 'chunks')) &&
     fs.existsSync(path.join(vaultRoot, '.vault-meta', 'bm25', 'index.json'))
   )
-}
-
-/**
- * Idempotently appends the index-artifact entries to the vault's `.git/info/exclude`.
- * `git add .vault-meta` (BOOKKEEPING_PATHS) skips ignored untracked files, so this is what
- * keeps every rebuild out of ingest commits. No-op when the vault is not a git repo.
- */
-export function ensureIndexExcluded(vaultRoot: string): void {
-  if (!fs.existsSync(path.join(vaultRoot, '.git'))) return
-  const infoDir = path.join(vaultRoot, '.git', 'info')
-  fs.mkdirSync(infoDir, { recursive: true })
-  const file = path.join(infoDir, 'exclude')
-  const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
-  const present = new Set(existing.split('\n').map((line) => line.trim()))
-  const missing = RETRIEVE_EXCLUDE_ENTRIES.filter((entry) => !present.has(entry))
-  if (missing.length === 0) return
-  const sep = existing === '' || existing.endsWith('\n') ? '' : '\n'
-  fs.appendFileSync(file, `${sep}${missing.join('\n')}\n`)
 }
 
 export interface RetrieveIndexStats {
@@ -170,7 +148,9 @@ export const buildRetrieveIndex: RetrieveIndexBuilder = async ({
     )
   }
   const started = Date.now()
-  ensureIndexExcluded(vaultRoot)
+  // Belt and braces: startup already does this, but a build must never be the thing that
+  // bleeds hundreds of megabytes into an ingest commit.
+  ensureVaultExcludes(vaultRoot, RETRIEVE_EXCLUDE_ENTRIES)
   fs.mkdirSync(path.join(vaultRoot, '.vault-meta', 'chunks'), { recursive: true })
   fs.mkdirSync(path.join(vaultRoot, '.vault-meta', 'bm25'), { recursive: true })
   log('info', 'retrieve-index: chunking changed pages (synthetic prefix tier — no egress)')

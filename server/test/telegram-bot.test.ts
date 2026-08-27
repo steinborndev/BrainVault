@@ -158,6 +158,7 @@ function makeJob(over: Partial<JobRow> = {}): JobRow {
     notify_channel: `telegram:${CHAT}`,
     commit_hash: null,
     reverted_at: null,
+    duplicate_of: null,
     ...over,
   }
 }

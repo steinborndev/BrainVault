@@ -5,7 +5,7 @@
  *
  * Deliberately tiny compared to {@link logStore}: only ONE answer streams at a time per session,
  * the text is thrown away the moment the real message arrives, and nothing here is ever
- * persisted. The streamed text is a preview of what the model is typing — the answer of record
+ * persisted. The streamed text is a preview of what the model is typing - the answer of record
  * is the `/query` response, which alone carries citations and usage.
  */
 
@@ -25,7 +25,7 @@ class ChatStream {
     this.notify(sessionId)
   }
 
-  /** Called when the real answer arrives (or the ask fails) — the preview has served its purpose. */
+  /** Called when the real answer arrives (or the ask fails) - the preview has served its purpose. */
   clear(sessionId: string): void {
     if (!this.text.has(sessionId)) return
     this.text.delete(sessionId)
