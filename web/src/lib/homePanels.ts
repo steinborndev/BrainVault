@@ -3,24 +3,27 @@
  *
  * The graph used the whole width of the stock zone and needed about half of it - a fitted
  * force layout in a box twice its size is empty canvas, not information. The half it gives
- * back holds a panel that says something the picture cannot, and there are five candidates
+ * back holds a panel that says something the picture cannot, and there are three candidates
  * for that, all derived from payloads the screen already fetches:
  *
- *   growth      the page count over time              (stats.growth)
  *   domains     what the vault is about, by weight    (graph nodes)
  *   this week   which pages it actually learned       (the activity stream)
  *   gaps        what it links to but has not written  (graph gaps)
+ *
+ * Growth was a fourth. It is a single number per window, not a picture, so it reads better
+ * as two more lines among the countable facts in the hero than as a panel of its own -
+ * `newPagesIn` below is what those lines (and the hero's own delta) are computed with.
  *
  * Everything here is a pure derivation - no fetching, no clock of its own; `now` is passed
  * in - so the panel's content is testable without rendering it.
  */
 
-import type { GraphNode } from '../api/types.ts'
+import type { GraphNode, GrowthPoint } from '../api/types.ts'
 import type { ActivityEvent } from './activity.ts'
 import { isHubPage } from './homeArticle.ts'
 import { isUnfiled, knowledgePages } from './vaultShape.ts'
 
-export const PANEL_IDS = ['growth', 'domains', 'week', 'gaps'] as const
+export const PANEL_IDS = ['domains', 'week', 'gaps'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 export const isPanelId = (v: unknown): v is PanelId =>
@@ -102,6 +105,39 @@ export function recentPages(
     .filter(([, list]) => list.length > 0)
     .sort((a, b) => a[0] - b[0])
     .map(([ago, pages]) => ({ ago, pages }))
+}
+
+/** The local calendar day of a timestamp, as the `YYYY-MM-DD` the growth series uses. */
+function isoDay(ms: number): string {
+  const d = new Date(ms)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/**
+ * How many pages the wiki gained over the last `days`, from the cumulative growth series.
+ *
+ * A point's `total` is the page count at the END of that day, so the baseline is the newest
+ * point on or before `today - days` and the answer is today's total minus it. Reading the
+ * series by INDEX instead ("seven entries back") is only the same thing on a vault that
+ * changed every single day: the server emits a point per day the vault actually moved, so on
+ * a quiet week the eighth-from-last point can be a month old.
+ *
+ * Returns null when there is no history to measure against. When the series starts INSIDE
+ * the window (a young vault, or a 30-day question against a 30-day series) the first point
+ * is the baseline, which undercounts by whatever that first day itself added - the honest
+ * alternative would be a longer series than the API sends.
+ */
+export function newPagesIn(points: readonly GrowthPoint[], days: number, now: number): number | null {
+  if (points.length < 2) return null
+  const total = points[points.length - 1]!.total
+  const cutoff = isoDay(now - days * DAY_MS)
+  let base: number | null = null
+  for (const p of points) {
+    if (p.date > cutoff) break
+    base = p.total
+  }
+  return total - (base ?? points[0]!.total)
 }
 
 /** "Today", "Yesterday", then a plain count - the two named days are the ones worth naming. */

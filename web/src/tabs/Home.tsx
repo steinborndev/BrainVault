@@ -11,8 +11,9 @@
  * mix the two: `Pages` describes the stock, the other four describe the run of the machine.
  *
  *   LEFT    the control column, in the order the work happens: intake first (the reason to
- *           open the app), then the four ways to narrow the stream, then the queue as a
- *           status foot - it is not a filter, it is the answer to "why is nothing moving".
+ *           open the app), then the four ways to narrow the stream. The queue used to close
+ *           it as a status foot; the lead tiles already say what is in flight and why, so
+ *           what it added was a second answer to a question nobody asked twice.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -23,7 +24,7 @@ import { Dropzone } from '../components/Dropzone.tsx'
 import { VaultConstellation } from '../components/VaultConstellation.tsx'
 import { JobDetail } from '../components/JobDetail.tsx'
 import { HomePanel } from '../components/HomePanel.tsx'
-import { isPanelId, type PanelId } from '../lib/homePanels.ts'
+import { isPanelId, newPagesIn, type PanelId } from '../lib/homePanels.ts'
 import { Icon } from '../components/Icon.tsx'
 import { queryState, merge } from '../components/QueryState.tsx'
 import { Cost } from '../components/Cost.tsx'
@@ -33,7 +34,6 @@ import {
   CommitRow,
   HistoryJobRow,
   LiveJobRow,
-  QueueState,
   RunRow,
   SettleRow,
   channelColor,
@@ -117,9 +117,9 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   const [panel, setPanel] = useState<PanelId>(() => {
     try {
       const saved = localStorage.getItem(PANEL_KEY)
-      return isPanelId(saved) ? saved : 'growth'
+      return isPanelId(saved) ? saved : 'domains'
     } catch {
-      return 'growth'
+      return 'domains'
     }
   })
   const choosePanel = (id: PanelId): void => {
@@ -181,7 +181,8 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   const detailEvent =
     detailId === null ? null : (events.find((e) => e.id === detailId || e.job?.id === detailId) ?? null)
 
-  const shown = filterActivity(events, filter, new Date())
+  const now = new Date()
+  const shown = filterActivity(events, filter, now)
   const live = shown.filter((e) => e.live)
   const settled = shown.filter((e) => !e.live)
   const liveJobs = live.filter((e) => e.job !== undefined).map((e) => e.job!)
@@ -199,6 +200,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   }, [jobs])
 
   const channels = useMemo(() => channelCounts(events), [events])
+
+  /**
+   * What one pill would show. The count is the number of rows you get by clicking it -
+   * every OTHER axis of the filter still applies - so the panel answers "is there anything
+   * there" before the click rather than after it.
+   */
+  const facet = (patch: Partial<ActivityFilter>): number => filterActivity(events, { ...filter, ...patch }, now).length
 
   /** Counts for the state list: live states from the stream, settled ones all-time from the DB. */
   const stateCount = (id: ActivityState): number => {
@@ -271,12 +279,12 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
     () => (graphQ.data === undefined ? null : knowledgeSubgraph(graphQ.data)),
     [graphQ.data],
   )
-  // Growth is cumulative and sparse; the eighth-from-last point is a week back, and the
-  // first point is the honest fallback for a vault younger than that (System reads it the
-  // same way).
+  // What the vault gained, by calendar day rather than by index into a sparse series
+  // (lib/homePanels.ts). The hero's delta and the two growth facts under it read the SAME
+  // derivation - they used to be computed twice, in two places, from the same array.
   const growth = stats.data?.growth ?? []
-  const weekAgo = growth[growth.length - 8]?.total ?? growth[0]?.total ?? stats.data?.pages.total ?? 0
-  const grew = (stats.data?.pages.total ?? 0) - weekAgo
+  const grew7 = newPagesIn(growth, 7, now.getTime())
+  const grew30 = newPagesIn(growth, 30, now.getTime())
   // The legend doubles as the composition read, and it counts the DOTS - deriving it from
   // the page census instead would list kinds the picture does not draw.
   const kinds = useMemo(() => {
@@ -293,8 +301,11 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
     <div className="workspace">
       <aside className="gpanel" aria-label="Home controls">
         {/* Intake first: it is the reason to open the app at all, and the two other ways in
-            (watch folder, bot) state themselves right under it. Everything below narrows the
-            stream; the queue closes the column. */}
+            (watch folder, bot) state themselves right under it. Everything below it narrows
+            the stream, in the order you reach for: what kind, from when, in what state, over
+            which channel. The channel list is last because it is the one that grows with the
+            vault - it takes the leftover height and scrolls, and nothing sits under it that
+            a long list could push out of sight. */}
         <div className="gp-sec">
           <div className="gp-head">
             <span className="gp-eyebrow">Add to vault</span>
@@ -315,17 +326,11 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               </button>
             )}
           </div>
-          <div className="gp-search">
-            <Icon name="search" />
-            <input
-              type="search"
-              placeholder="Search this stream…"
-              aria-label="Search the activity stream"
-              value={filter.query}
-              onChange={(e) => setFilter({ ...filter, query: e.target.value })}
-            />
-          </div>
-          <div className="pillrow" role="radiogroup" aria-label="Event kind">
+          {/* One kind per row, with the count it would leave on the table - the same shape
+              Research files its lens filter in. As wrapping chips the five labels came out
+              as a ragged three-line block, and the column has the height to spare since the
+              search field (never used) and the queue foot came out. */}
+          <div className="pillrow stacked" role="radiogroup" aria-label="Event kind">
             {KINDS.map((k) => (
               <button
                 key={k.id}
@@ -335,9 +340,33 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                 title={k.hint}
                 onClick={() => setFilter({ ...filter, kind: k.id })}
               >
-                {k.label}
+                <span className="pl">{k.label}</span>
+                <span className="pn">{facet({ kind: k.id })}</span>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="gp-sec">
+          <div className="gp-head">
+            <span className="gp-eyebrow">When</span>
+          </div>
+          <div className="pillrow stacked two" role="radiogroup" aria-label="Time range">
+            {RANGES.map((r) => (
+              <button
+                key={r.id}
+                className="viewpill"
+                role="radio"
+                aria-checked={filter.days === r.days}
+                onClick={() => setFilter({ ...filter, days: r.days })}
+              >
+                <span className="pl">{r.label}</span>
+                <span className="pn">{facet({ days: r.days })}</span>
+              </button>
+            ))}
+          </div>
+          <div className="pillhint" title={`The range applies to settled rows only - anything still running or queued is listed whatever you pick here - and the newest ${WINDOW_MAX} settled rows are what the screen holds.`}>
+            Settled rows only · newest {WINDOW_MAX}
           </div>
         </div>
 
@@ -400,40 +429,7 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
           </div>
         </div>
 
-        <div className="gp-sec">
-          <div className="gp-head">
-            <span className="gp-eyebrow">When</span>
-          </div>
-          <div className="pillrow" role="radiogroup" aria-label="Time range">
-            {RANGES.map((r) => (
-              <button
-                key={r.id}
-                className="viewpill"
-                role="radio"
-                aria-checked={filter.days === r.days}
-                onClick={() => setFilter({ ...filter, days: r.days })}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
-          <div className="pillhint wrap">Settled rows only; the newest {WINDOW_MAX} are listed.</div>
-        </div>
 
-        {/* The status foot: the queue is the machine's own state, not a filter, and it is the
-            last thing you look at when nothing is moving. */}
-        <div className="gp-sec gp-foot">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Queue</span>
-          </div>
-          <QueueState
-            paused={stats.data?.queue.paused === true}
-            reason={stats.data?.queue.pauseReason ?? null}
-            concurrency={stats.data?.queue.concurrency}
-            active={stats.data?.queue.active ?? 0}
-            queued={stats.data?.queue.queued ?? 0}
-          />
-        </div>
       </aside>
 
       <div className="home-main">
@@ -443,11 +439,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
           <div className="vz-hero">
             <div className="vz-n">{stats.data?.pages.total ?? statPlaceholder}</div>
             <div className="vz-k">pages in the wiki</div>
-            {stats.data !== undefined && growth.length > 1 && (
-              <div className={`vz-delta${grew < 0 ? ' down' : ''}`}>
-                {grew >= 0 ? '▲' : '▼'} {Math.abs(grew)} in the last 7 days
-              </div>
-            )}
             <div className="vz-facts">
               <button className="vzf" onClick={() => navigate('/graph')}>
                 <b>{shape !== null ? shape.links.toLocaleString('en-US') : statPlaceholder}</b>
@@ -471,6 +462,25 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
               <button className="vzf" onClick={() => navigate('/library')}>
                 <b>{stats.data?.pages.total ?? statPlaceholder}</b>
                 <span>pages in the wiki</span>
+              </button>
+              {/* Growth used to be one of the second panel's views. It is a number per
+                  window, not a picture, so it belongs in the column of numbers - and the
+                  chart it came from is still a click away in System. */}
+              <button
+                className="vzf"
+                onClick={() => navigate('/system?section=vault')}
+                title="New wiki pages over the last 7 days, from the vault's own git history."
+              >
+                <b>{grew7 ?? statPlaceholder}</b>
+                <span>new pages (7d)</span>
+              </button>
+              <button
+                className="vzf"
+                onClick={() => navigate('/system?section=vault')}
+                title="New wiki pages over the last 30 days - as far back as the growth series reaches."
+              >
+                <b>{grew30 ?? statPlaceholder}</b>
+                <span>new pages (30d)</span>
               </button>
             </div>
           </div>
@@ -515,7 +525,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
           <HomePanel
             panel={panel}
             onPanel={choosePanel}
-            growth={growth}
             nodes={graphQ.data?.nodes ?? []}
             events={events}
             gaps={graphQ.data?.gaps ?? []}
@@ -662,7 +671,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                        commits carry a hash, and jobs are handled above, so this is exact. */
                     <CommitRow key={e.id} event={e} vaultName={vaultName} />
                   ) : (
-                    <SettleRow key={e.id} event={e} vaultName={vaultName} authMode={authMode} />
+                    <SettleRow
+                      key={e.id}
+                      event={e}
+                      vaultName={vaultName}
+                      authMode={authMode}
+                      onOpen={() => setDetailId(e.id)}
+                    />
                   ),
                 )}
                 {shown.length === 0 && (

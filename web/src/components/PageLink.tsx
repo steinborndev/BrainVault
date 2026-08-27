@@ -59,8 +59,13 @@ export function PageLink({ vaultName, path }: { vaultName: string; path: string 
 
   // The chip is a <span> holding an <a> plus sibling <button>s - interactive elements must
   // not nest inside the anchor (invalid HTML; breaks keyboard/screen-reader activation).
+  //
+  // The chip stops its own click here, so it can sit inside a row that opens something else
+  // (Home's activity table) without that row hijacking a link to a page. Scoped to the chip
+  // rather than to the band around it: the band is most of a row's height, and stopping the
+  // click there made "click the row" mean "hit the title line".
   return (
-    <span className="pagelink">
+    <span className="pagelink" onClick={(e) => e.stopPropagation()}>
       <a
         className="pagelink-main"
         href={pageRoute(path)}

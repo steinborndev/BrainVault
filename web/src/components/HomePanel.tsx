@@ -2,23 +2,23 @@
  * The second panel of Home's stock zone (2026-08-27).
  *
  * The graph used the whole width and needed about half of it. This is what fills the other
- * half: one of five views over payloads the screen already has (lib/homePanels.ts). The
+ * half: one of three views over payloads the screen already has (lib/homePanels.ts). The
  * switcher in the head is deliberate - which one earns the slot is a question the data
  * answers differently per vault, so it stays a choice rather than a decision made once here.
  *
  * The body is a FIXED height, and every view fills it the same way. A view that sized itself
  * to its content made the whole zone taller than a chart one and moved every row below it.
+ * It is also the same dark inset the graph sits in next door, so the zone reads as one band
+ * of two pictures rather than a boxed picture beside a bare list.
  */
 
-import { GrowthChart } from './GrowthChart.tsx'
 import { PageLink } from './PageLink.tsx'
 import { domainColor } from '../lib/domains.ts'
 import { PANEL_IDS, dayLabel, domainCounts, recentPages, type PanelId } from '../lib/homePanels.ts'
-import type { GraphNode, GrowthPoint } from '../api/types.ts'
+import type { GraphNode } from '../api/types.ts'
 import type { ActivityEvent } from '../lib/activity.ts'
 
 const TITLES: Record<PanelId, { tab: string; eyebrow: string }> = {
-  growth: { tab: 'Growth', eyebrow: 'Growth' },
   domains: { tab: 'Domains', eyebrow: 'Domains' },
   week: { tab: 'This week', eyebrow: 'What the vault learned' },
   gaps: { tab: 'Gaps', eyebrow: 'Worth a run' },
@@ -27,7 +27,6 @@ const TITLES: Record<PanelId, { tab: string; eyebrow: string }> = {
 export function HomePanel({
   panel,
   onPanel,
-  growth,
   nodes,
   events,
   gaps,
@@ -39,7 +38,6 @@ export function HomePanel({
 }: {
   panel: PanelId
   onPanel: (id: PanelId) => void
-  growth: GrowthPoint[]
   nodes: readonly GraphNode[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
@@ -64,10 +62,9 @@ export function HomePanel({
           ))}
         </div>
       </div>
-      <div className="vz-body">
+      <div className="vz-body inset">
         <Body
           panel={panel}
-          growth={growth}
           nodes={nodes}
           events={events}
           gaps={gaps}
@@ -78,7 +75,7 @@ export function HomePanel({
         />
       </div>
       <div className="vz-foot">
-        <Foot panel={panel} growth={growth} nodes={nodes} events={events} gaps={gaps} now={now} onOpenGaps={onOpenGaps} />
+        <Foot panel={panel} nodes={nodes} events={events} gaps={gaps} now={now} onOpenGaps={onOpenGaps} />
       </div>
     </div>
   )
@@ -86,7 +83,6 @@ export function HomePanel({
 
 function Body({
   panel,
-  growth,
   nodes,
   events,
   gaps,
@@ -96,7 +92,6 @@ function Body({
   onResearch,
 }: {
   panel: PanelId
-  growth: GrowthPoint[]
   nodes: readonly GraphNode[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
@@ -106,8 +101,6 @@ function Body({
   onOpenLibrary: () => void
   onResearch: (topic: string) => void
 }): React.ReactElement {
-  if (panel === 'growth') return <GrowthChart points={growth} variant="panel" />
-
   if (panel === 'domains') {
     const { domains } = domainCounts(nodes)
     if (domains.length === 0) return <div className="empty">No page carries a domain yet.</div>
@@ -173,7 +166,6 @@ function Body({
 /** The figures under the body - what the picture above adds up to. */
 function Foot({
   panel,
-  growth,
   nodes,
   events,
   gaps,
@@ -181,7 +173,6 @@ function Foot({
   onOpenGaps,
 }: {
   panel: PanelId
-  growth: GrowthPoint[]
   nodes: readonly GraphNode[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
@@ -189,26 +180,6 @@ function Foot({
   now: number
   onOpenGaps: () => void
 }): React.ReactElement {
-  if (panel === 'growth') {
-    const total = growth.length > 0 ? growth[growth.length - 1]!.total : 0
-    const week = growth.length > 7 ? total - growth[growth.length - 8]!.total : null
-    const span = growth.length > 1 ? total - growth[0]!.total : null
-    return (
-      <>
-        {week !== null && (
-          <span className="vzl">
-            <b>{week >= 0 ? '+' : ''}{week}</b> pages in 7 days
-          </span>
-        )}
-        {span !== null && (
-          <span className="vzl">
-            <b>{span >= 0 ? '+' : ''}{span}</b> over {growth.length} days
-          </span>
-        )}
-      </>
-    )
-  }
-
   if (panel === 'domains') {
     const { domains, unfiled } = domainCounts(nodes)
     return (

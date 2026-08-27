@@ -11,19 +11,7 @@ const W = 600
 const H = 150
 const PAD = 8
 
-export function GrowthChart({
-  points,
-  variant = 'card',
-}: {
-  points: GrowthPoint[]
-  /**
-   * `card` is the boxed figure System shows in a stack of them. `panel` is Home's second
-   * slot beside the graph: a bare sparkline in the same dark inset the graph sits in, filling
-   * the height it is given rather than a fixed 170px inside a 300px band, and with the dates
-   * as corner labels instead of a row underneath.
-   */
-  variant?: 'card' | 'panel'
-}): React.ReactElement {
+export function GrowthChart({ points }: { points: GrowthPoint[] }): React.ReactElement {
   const [hover, setHover] = useState<number | null>(null)
 
   if (points.length < 2) {
@@ -59,12 +47,11 @@ export function GrowthChart({
   }
   const hoverPct = hover !== null ? (x(hover) / W) * 100 : 0
 
-  const panel = variant === 'panel'
   return (
-    <div className={panel ? 'plotbox' : undefined}>
+    <div>
       <div className="gchart-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <svg
-          className={panel ? 'chart fill spark' : 'chart tall'}
+          className="chart tall"
           viewBox={`0 0 ${W} ${H}`}
           preserveAspectRatio="none"
           role="img"
@@ -74,9 +61,7 @@ export function GrowthChart({
           {[0.25, 0.5, 0.75].map((f) => (
             <line key={f} className="gridline" x1={PAD} x2={W - PAD} y1={y(min + span * f)} y2={y(min + span * f)} />
           ))}
-          {/* A sparkline has no fill: beside a graph that is already a dense picture, a
-              filled area is a second block of colour competing with it for the same eye. */}
-          {!panel && <path className="area" d={area} />}
+          <path className="area" d={area} />
           <path className="line" d={line} />
           <circle className="dot" cx={x(points.length - 1)} cy={y(last.total)} r={3} />
         </svg>
@@ -91,17 +76,10 @@ export function GrowthChart({
           </>
         )}
       </div>
-      {panel ? (
-        <>
-          <span className="gx gx-a">{first.date}</span>
-          <span className="gx gx-b">{last.date}</span>
-        </>
-      ) : (
-        <div className="job-meta" style={{ justifyContent: 'space-between' }}>
-          <span>{first.date}</span>
-          <span>{last.date}</span>
-        </div>
-      )}
+      <div className="job-meta" style={{ justifyContent: 'space-between' }}>
+        <span>{first.date}</span>
+        <span>{last.date}</span>
+      </div>
     </div>
   )
 }

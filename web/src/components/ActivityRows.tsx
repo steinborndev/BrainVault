@@ -50,11 +50,19 @@ export function channelLabel(source: string): string {
   return map[source] ?? source
 }
 
-/** Up to three page chips under a row's title; the rest is a count. */
+/**
+ * Up to three page chips under a row's title; the rest is a count.
+ *
+ * The band used to swallow every click that landed on it - it is a full-width flex row and
+ * on a three-chip ingest it is most of the row's height, so "click the row to open it" in
+ * practice meant "hit the title line". Only the chips themselves stop the click now (they
+ * are links of their own, in PageLink); the air around them opens the record like any
+ * other part of the row.
+ */
 function PageChips({ vaultName, paths }: { vaultName: string; paths: readonly string[] }): React.ReactElement | null {
   if (paths.length === 0) return null
   return (
-    <span className="rowpages" onClick={(e) => e.stopPropagation()}>
+    <span className="rowpages">
       {paths.slice(0, 3).map((p) => (
         <PageLink key={p} vaultName={vaultName} path={p} />
       ))}
@@ -208,27 +216,30 @@ export function HistoryJobRow({
 }
 
 /**
- * A settled agent run (research or maintenance). The runner keeps no persistent per-run
- * record beyond the last settle per kind, so this row carries what that record has: outcome,
- * page count, time. Research rows open the run list, the rest open System.
+ * A settled agent run (research or maintenance): outcome, pages, time, cost.
+ *
+ * It opens its own record in the stream's slot, the same as an ingest row. It used to
+ * navigate - research to the run list, everything else to System - which answered a
+ * question the row had not been asked: clicking a finished run in a list of finished runs
+ * means "show me this one", not "take me somewhere that lists it again".
  */
 export function SettleRow({
   event,
   vaultName,
   authMode,
+  onOpen,
 }: {
   event: ActivityEvent
   vaultName: string
   authMode: AuthMode
+  onOpen: () => void
 }): React.ReactElement {
-  const isResearch = event.kind === 'research'
-  const open = (): void => navigate(isResearch ? '/research' : '/system')
   // The kind names the run ("Lint report written"); a research topic is appended to it,
   // because "Research run" alone was all the per-kind settle record could ever say.
   const base = runTitle(event.runKind ?? event.kind, event.state !== 'failed')
   const name = event.title === '' ? base : `${base}: ${event.title}`
   return (
-    <tr {...openableRow(open, `Open the ${event.kind} area`)}>
+    <tr {...openableRow(onOpen, `Open the record: ${name}`)}>
       <td>
         <span className="hrow-name">
           <span className={`hrow-dot ${event.state === 'failed' ? 'failed' : 'done'}`} aria-hidden />

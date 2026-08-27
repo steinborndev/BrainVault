@@ -4,7 +4,7 @@
  * to local midnights and reads what the runs wrote rather than when files were touched.
  */
 import { describe, expect, it } from 'vitest'
-import { dayLabel, domainCounts, recentPages } from '../src/lib/homePanels.ts'
+import { dayLabel, domainCounts, newPagesIn, recentPages } from '../src/lib/homePanels.ts'
 import type { GraphNode } from '../src/api/types.ts'
 import type { ActivityEvent } from '../src/lib/activity.ts'
 import { UNFILED_DOMAIN } from '../src/lib/vaultShape.ts'
@@ -146,5 +146,43 @@ describe('dayLabel', () => {
     expect(dayLabel(0)).toBe('Today')
     expect(dayLabel(1)).toBe('Yesterday')
     expect(dayLabel(4)).toBe('4 days ago')
+  })
+})
+
+describe('newPagesIn', () => {
+  /** A cumulative series: `total` is the page count at the END of that day. */
+  const point = (ago: number, total: number): { date: string; total: number } => {
+    const d = new Date(NOW)
+    d.setDate(d.getDate() - ago)
+    const pad = (n: number): string => String(n).padStart(2, '0')
+    return { date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, total }
+  }
+
+  it('measures against the day the window starts on, not an index into the series', () => {
+    // Dense: one point per day. Seven days back is the point seven entries back.
+    const dense = [7, 6, 5, 4, 3, 2, 1, 0].map((ago, i) => point(ago, 100 + i * 10))
+    expect(newPagesIn(dense, 7, NOW)).toBe(70)
+  })
+
+  it('reads a sparse series by date - a quiet week is not seven entries', () => {
+    // The vault moved on three days only; the eighth-from-last point does not exist, and the
+    // last point before the cutoff is what the window started from.
+    const sparse = [point(20, 400), point(9, 500), point(5, 540), point(0, 600)]
+    expect(newPagesIn(sparse, 7, NOW)).toBe(100) // 600 - 500 (day 9 is outside the window)
+    expect(newPagesIn(sparse, 30, NOW)).toBe(200) // 600 - 400
+  })
+
+  it('falls back to the first point when the series starts inside the window', () => {
+    const young = [point(3, 20), point(0, 55)]
+    expect(newPagesIn(young, 30, NOW)).toBe(35)
+  })
+
+  it('has no answer without history to measure against', () => {
+    expect(newPagesIn([], 7, NOW)).toBeNull()
+    expect(newPagesIn([point(0, 12)], 7, NOW)).toBeNull()
+  })
+
+  it('reports a shrinking vault as a negative number', () => {
+    expect(newPagesIn([point(8, 90), point(2, 80), point(0, 75)], 7, NOW)).toBe(-15)
   })
 })

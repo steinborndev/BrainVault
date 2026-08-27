@@ -1205,42 +1205,6 @@ button {
 .chart.tall {
   height: 170px;
 }
-/* Home's panel variant: the plot fills the band it is given rather than sitting at a fixed
-   height inside it, in the same dark inset the graph beside it uses - two pictures on one
-   row read as a pair only if they share a ground. */
-.chart.fill {
-  height: 100%;
-}
-.plotbox {
-  position: relative;
-  height: 100%;
-  overflow: hidden;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-.plotbox .gchart-wrap {
-  height: 100%;
-}
-/* `preserveAspectRatio: none` stretches the stroke with the box; this keeps the line one
-   weight whatever the band's aspect turns out to be. */
-.chart.spark .line {
-  vector-effect: non-scaling-stroke;
-  stroke-width: 1.6;
-}
-.gx {
-  position: absolute;
-  bottom: 4px;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-faint);
-  pointer-events: none;
-}
-.gx-a { left: 7px; }
-.gx-b { right: 7px; }
-/* The scale is zero-based, so the low label always reads "0" - it says nothing the axis does
-   not, and in this variant it lands on top of the start date. */
-.plotbox .gy-min { display: none; }
 .gchart-wrap {
   position: relative;
 }
@@ -2394,6 +2358,13 @@ details.hot-cache[open] summary {
   font-family: var(--mono);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+/* Two per row, for a set of short labels. Home's time range is four words of one or two
+   syllables, and four rows of them cost the channel list below - the one section that grows
+   with the vault - a third of the height it has to read in. Same pill, same count on the
+   right, half the rows. */
+.pillrow.stacked.two {
+  grid-template-columns: 1fr 1fr;
 }
 .viewpill .pd {
   width: 7px;
@@ -4841,14 +4812,6 @@ tr:focus-within .rowacts {
   font-size: 12px;
   color: var(--text-dim);
 }
-.vz-delta {
-  margin-top: 6px;
-  font-size: 11.5px;
-  color: var(--ok);
-}
-.vz-delta.down {
-  color: var(--warn);
-}
 /* The countable facts. A force layout cannot be measured, so everything measurable is
    written next to it - and each line is a door to the screen that shows it in full. */
 .vz-facts {
@@ -4912,6 +4875,16 @@ tr:focus-within .rowacts {
   min-height: 0;
   overflow: hidden;
   margin-top: 8px;
+}
+/* The second panel's ground. The graph carries its own dark inset (`.constell`), so a bare
+   list beside it read as two designs on one row rather than one band of two pictures. The
+   box is the SAME height as the unboxed body - border and padding sit inside it - so
+   switching views moves nothing below the zone. */
+.vz-body.inset {
+  padding: 9px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 /* A fixed height, not a minimum: the gaps foot is a button and came out one pixel taller
    than the others, which moved the zone and everything under it on a panel switch. */
@@ -5661,7 +5634,11 @@ tr:focus-within .rowacts {
   align-items: flex-start;
   gap: 8px;
   flex: none;
-  height: 57px;
+  /* Exactly two rows of chips: 2 × 26px chip + 5px row gap + this band's own 12px of
+     padding. At 57px the second row was cut, so the common case - an ingest that wrote
+     four or five pages - always carried a scrollbar for the twelve pixels it was short.
+     A third row is where scrolling starts, which is where it belongs. */
+  height: 69px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   padding: 6px 14px;
