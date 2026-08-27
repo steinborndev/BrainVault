@@ -517,7 +517,6 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             onPanel={choosePanel}
             growth={growth}
             nodes={graphQ.data?.nodes ?? []}
-            jobs={jobs}
             events={events}
             gaps={graphQ.data?.gaps ?? []}
             vaultName={vaultName}

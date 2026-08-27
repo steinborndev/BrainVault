@@ -13,23 +13,14 @@
 import { GrowthChart } from './GrowthChart.tsx'
 import { PageLink } from './PageLink.tsx'
 import { domainColor } from '../lib/domains.ts'
-import {
-  PANEL_IDS,
-  THROUGHPUT_DAYS,
-  dayLabel,
-  domainCounts,
-  recentPages,
-  throughput,
-  type PanelId,
-} from '../lib/homePanels.ts'
-import type { GraphNode, GrowthPoint, Job } from '../api/types.ts'
+import { PANEL_IDS, dayLabel, domainCounts, recentPages, type PanelId } from '../lib/homePanels.ts'
+import type { GraphNode, GrowthPoint } from '../api/types.ts'
 import type { ActivityEvent } from '../lib/activity.ts'
 
 const TITLES: Record<PanelId, { tab: string; eyebrow: string }> = {
   growth: { tab: 'Growth', eyebrow: 'Growth' },
   domains: { tab: 'Domains', eyebrow: 'Domains' },
   week: { tab: 'This week', eyebrow: 'What the vault learned' },
-  throughput: { tab: 'Throughput', eyebrow: 'Throughput' },
   gaps: { tab: 'Gaps', eyebrow: 'Worth a run' },
 }
 
@@ -38,7 +29,6 @@ export function HomePanel({
   onPanel,
   growth,
   nodes,
-  jobs,
   events,
   gaps,
   vaultName,
@@ -51,7 +41,6 @@ export function HomePanel({
   onPanel: (id: PanelId) => void
   growth: GrowthPoint[]
   nodes: readonly GraphNode[]
-  jobs: readonly Job[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
   gaps: ReadonlyArray<{ title: string; refBy: number[] }>
@@ -80,7 +69,6 @@ export function HomePanel({
           panel={panel}
           growth={growth}
           nodes={nodes}
-          jobs={jobs}
           events={events}
           gaps={gaps}
           vaultName={vaultName}
@@ -90,7 +78,7 @@ export function HomePanel({
         />
       </div>
       <div className="vz-foot">
-        <Foot panel={panel} growth={growth} nodes={nodes} jobs={jobs} events={events} gaps={gaps} now={now} onOpenGaps={onOpenGaps} />
+        <Foot panel={panel} growth={growth} nodes={nodes} events={events} gaps={gaps} now={now} onOpenGaps={onOpenGaps} />
       </div>
     </div>
   )
@@ -100,7 +88,6 @@ function Body({
   panel,
   growth,
   nodes,
-  jobs,
   events,
   gaps,
   vaultName,
@@ -111,7 +98,6 @@ function Body({
   panel: PanelId
   growth: GrowthPoint[]
   nodes: readonly GraphNode[]
-  jobs: readonly Job[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
   gaps: ReadonlyArray<{ title: string; refBy: number[] }>
@@ -120,7 +106,7 @@ function Body({
   onOpenLibrary: () => void
   onResearch: (topic: string) => void
 }): React.ReactElement {
-  if (panel === 'growth') return <GrowthChart points={growth} />
+  if (panel === 'growth') return <GrowthChart points={growth} variant="panel" />
 
   if (panel === 'domains') {
     const { domains } = domainCounts(nodes)
@@ -167,31 +153,6 @@ function Body({
     )
   }
 
-  if (panel === 'throughput') {
-    const days = throughput(jobs, now)
-    const max = Math.max(1, ...days.map((d) => d.drop + d.watcher + d.bot))
-    return (
-      <div className="flowplot" role="img" aria-label={`Ingests per day over the last ${THROUGHPUT_DAYS} days`}>
-        {days.map((d) => {
-          const total = d.drop + d.watcher + d.bot
-          return (
-            <span
-              key={d.ago}
-              className="flowbar"
-              title={`${dayLabel(d.ago)}: ${total} ingest${total === 1 ? '' : 's'}`}
-            >
-              {/* Stacked bottom-up in the order the column reads: by hand, then the two
-                  automatic channels. A zero segment renders nothing at all. */}
-              <i className="bot" style={{ height: `${(d.bot / max) * 100}%` }} />
-              <i className="watcher" style={{ height: `${(d.watcher / max) * 100}%` }} />
-              <i className="drop" style={{ height: `${(d.drop / max) * 100}%` }} />
-            </span>
-          )
-        })}
-      </div>
-    )
-  }
-
   if (gaps.length === 0) return <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
   return (
     <div className="gaplist">
@@ -214,7 +175,6 @@ function Foot({
   panel,
   growth,
   nodes,
-  jobs,
   events,
   gaps,
   now,
@@ -223,7 +183,6 @@ function Foot({
   panel: PanelId
   growth: GrowthPoint[]
   nodes: readonly GraphNode[]
-  jobs: readonly Job[]
   /** The activity stream - what the runs actually wrote, and when. */
   events: readonly ActivityEvent[]
   gaps: ReadonlyArray<{ title: string; refBy: number[] }>
@@ -271,24 +230,6 @@ function Foot({
       <span className="vzl" title="Counted from the runs listed in the stream, which is capped - the vault's own 7-day growth is in the hero.">
         <b>{total}</b> pages the listed runs wrote
       </span>
-    )
-  }
-
-  if (panel === 'throughput') {
-    const days = throughput(jobs, now)
-    const sum = (k: 'drop' | 'watcher' | 'bot'): number => days.reduce((n, d) => n + d[k], 0)
-    return (
-      <>
-        <span className="vzl">
-          <span className="dot drop" aria-hidden /> by hand <b>{sum('drop')}</b>
-        </span>
-        <span className="vzl">
-          <span className="dot watcher" aria-hidden /> watcher <b>{sum('watcher')}</b>
-        </span>
-        <span className="vzl">
-          <span className="dot bot" aria-hidden /> bot <b>{sum('bot')}</b>
-        </span>
-      </>
     )
   }
 

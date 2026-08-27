@@ -1205,6 +1205,42 @@ button {
 .chart.tall {
   height: 170px;
 }
+/* Home's panel variant: the plot fills the band it is given rather than sitting at a fixed
+   height inside it, in the same dark inset the graph beside it uses - two pictures on one
+   row read as a pair only if they share a ground. */
+.chart.fill {
+  height: 100%;
+}
+.plotbox {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.plotbox .gchart-wrap {
+  height: 100%;
+}
+/* `preserveAspectRatio: none` stretches the stroke with the box; this keeps the line one
+   weight whatever the band's aspect turns out to be. */
+.chart.spark .line {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.6;
+}
+.gx {
+  position: absolute;
+  bottom: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.gx-a { left: 7px; }
+.gx-b { right: 7px; }
+/* The scale is zero-based, so the low label always reads "0" - it says nothing the axis does
+   not, and in this variant it lands on top of the start date. */
+.plotbox .gy-min { display: none; }
 .gchart-wrap {
   position: relative;
 }
@@ -4982,36 +5018,6 @@ tr:focus-within .rowacts {
   flex-wrap: wrap;
   gap: 4px;
 }
-
-/* Ingests per day, stacked by what put them there. Every day in the window keeps a column,
-   including the empty ones - a chart that skips its quiet days reports a busier pipeline
-   than the one that ran. */
-.flowplot {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  height: 100%;
-  padding-bottom: 2px;
-}
-.flowbar {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-}
-.flowbar i {
-  display: block;
-  width: 100%;
-  border-radius: 1.5px;
-}
-.flowbar i.drop { background: var(--accent); }
-.flowbar i.watcher { background: var(--ok); }
-.flowbar i.bot { background: var(--type-question); }
-.vzl .dot.drop { background: var(--accent); }
-.vzl .dot.watcher { background: var(--ok); }
-.vzl .dot.bot { background: var(--type-question); }
 
 /* The backlog, as offers rather than a third list of records. */
 .gaplist {

@@ -1,11 +1,11 @@
 /**
- * The second panel's derivations. All three are about ORDER and COMPLETENESS: the ranking is
- * deterministic, the day grouping is anchored to local midnights rather than to 24h windows,
- * and the throughput window keeps its quiet days.
+ * The second panel's derivations. Both are about ORDER and HONESTY: the ranking is
+ * deterministic and uses the vault's own idea of "unfiled", and the day grouping is anchored
+ * to local midnights and reads what the runs wrote rather than when files were touched.
  */
 import { describe, expect, it } from 'vitest'
-import { dayLabel, domainCounts, recentPages, throughput } from '../src/lib/homePanels.ts'
-import type { GraphNode, Job } from '../src/api/types.ts'
+import { dayLabel, domainCounts, recentPages } from '../src/lib/homePanels.ts'
+import type { GraphNode } from '../src/api/types.ts'
 import type { ActivityEvent } from '../src/lib/activity.ts'
 import { UNFILED_DOMAIN } from '../src/lib/vaultShape.ts'
 
@@ -25,29 +25,6 @@ const node = (over: Partial<GraphNode> = {}): GraphNode => ({
   domain: 'computing',
   out: 1,
   in: 1,
-  ...over,
-})
-
-const job = (over: Partial<Job> = {}): Job => ({
-  id: 'j',
-  user_id: 'local',
-  batch_id: null,
-  source: 'drop',
-  type: 'web',
-  original_name: null,
-  url: null,
-  sha256: null,
-  status: 'done',
-  raw_path: null,
-  created_pages: null,
-  error: null,
-  attempts: 1,
-  tokens_in: null,
-  tokens_out: null,
-  cost_usd: null,
-  created_at: new Date(daysAgo(0)).toISOString(),
-  started_at: null,
-  finished_at: new Date(daysAgo(0)).toISOString(),
   ...over,
 })
 
@@ -161,44 +138,6 @@ describe('recentPages', () => {
 
   it('never returns a future day', () => {
     expect(recentPages([ev({ whenIso: iso(-2), pages: ['wiki/concepts/A.md'] })], NOW)).toEqual([])
-  })
-})
-
-describe('throughput', () => {
-  it('keeps a bar for every day in the window, including the empty ones', () => {
-    const days = throughput([job()], NOW, 30)
-    expect(days).toHaveLength(30)
-    expect(days.map((d) => d.ago)[0]).toBe(29)
-    expect(days[days.length - 1]!.ago).toBe(0)
-  })
-
-  it('runs oldest to newest, so it plots left to right', () => {
-    const days = throughput([], NOW, 5)
-    expect(days.map((d) => d.ago)).toEqual([4, 3, 2, 1, 0])
-  })
-
-  it('splits by what put the job there, counting a pasted link as a drop', () => {
-    const days = throughput(
-      [
-        job({ source: 'drop' }), job({ source: 'url' }),
-        job({ source: 'watch' }),
-        job({ source: 'telegram' }),
-      ],
-      NOW,
-      3,
-    )
-    const today = days[days.length - 1]!
-    expect(today).toMatchObject({ drop: 2, watcher: 1, bot: 1 })
-  })
-
-  it('dates a job by when it finished, falling back to when it arrived', () => {
-    const days = throughput(
-      [job({ finished_at: null, created_at: new Date(daysAgo(2)).toISOString() })],
-      NOW,
-      5,
-    )
-    expect(days.find((d) => d.ago === 2)!.drop).toBe(1)
-    expect(days.find((d) => d.ago === 0)!.drop).toBe(0)
   })
 })
 
