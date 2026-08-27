@@ -348,14 +348,12 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
         {/* Narrows the web ledger. The backlog under the ledgers is never filtered: it is
             what the vault is missing, not what you did. */}
         <div className="gp-sec">
+          {/* No Clear button here. It appeared only once a filter was set, which made this
+              head 8px taller than the others and pushed the running totals below it down the
+              moment a filter was clicked - and it did nothing the "All lenses" row under it
+              does not already do. */}
           <div className="gp-head">
             <span className="gp-eyebrow">Filter</span>
-            <span className="spacer" />
-            {lensFilter !== null && (
-              <button className="btn ghost" onClick={() => setLensFilter(null)}>
-                <Icon name="x" /> Clear
-              </button>
-            )}
           </div>
           <div className="pillrow stacked" role="radiogroup" aria-label="Filter web research by lens">
             <button
