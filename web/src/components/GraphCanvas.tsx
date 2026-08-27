@@ -21,6 +21,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { GraphNode } from '../api/types.ts'
 import { domainGroups } from '../lib/graphForces.ts'
+import {
+  REVEAL_MS,
+  REVEAL_HOLD_MAX_MS,
+  revealAlpha,
+  revealLabelAlpha,
+  revealOrder,
+  revealPop,
+} from '../lib/graphReveal.ts'
 
 /**
  * Smallest connected component that earns a guaranteed label (see `labelReps`). Below this a
@@ -413,6 +421,26 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
     if (pos.length < nodes.length * 2) return
 
+    // The entrance (lib/graphReveal.ts). While the first layout is still cooling the canvas
+    // stays empty on purpose: the alternative is a quarter of the graph at 1:1, oversized
+    // and moving, followed by a hard cut to the fitted frame. The status chip says so.
+    if (holdRef.current) return
+
+    const revealStart = revealStartRef.current
+    let revealing = false
+    let revealT = 1
+    if (revealStart !== null) {
+      revealT = (performance.now() - revealStart) / REVEAL_MS
+      if (revealT >= 1) revealStartRef.current = null
+      else revealing = true
+    }
+    // Hubs land first and the tail fills in behind them; a link needs both its ends, so it
+    // follows whichever of the two is later. Off the reveal these are all 1 and cost nothing.
+    const revealRank = revealRankRef.current
+    const nodeIn = revealing ? (i: number): number => revealAlpha(revealT, revealRank[i] ?? 0) : (): number => 1
+    const edgeIn = revealing ? (a: number, b: number): number => Math.min(nodeIn(a), nodeIn(b)) : (): number => 1
+    const labelIn = revealing ? revealLabelAlpha(revealT) : 1
+
     // Spotlight source, in priority order: the transient hover, then the persistent explorer
     // selection, then the URL-level focus. Whichever is active dims everything outside its
     // neighborhood so the local structure reads out of a dense cluster.
@@ -581,6 +609,8 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const y2 = pos[b * 2 + 1]!
       if (Number.isNaN(x1) || Number.isNaN(x2)) continue
       if (!visible(x1, y1) && !visible(x2, y2)) continue
+      const edgeRev = edgeIn(a, b)
+      if (edgeRev <= 0.004) continue
       const lit = highlight !== null && highlight.has(a) && highlight.has(b)
       // Links into a gap are drawn dashed - they point at a page that isn't there yet.
       const toGhost = ghostIndices !== undefined && (ghostIndices.has(a) || ghostIndices.has(b))
@@ -604,7 +634,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
       ctx.setLineDash(toGhost ? [3 / t.k, 3 / t.k] : [])
       ctx.strokeStyle = stroke
-      ctx.globalAlpha = alpha
+      ctx.globalAlpha = alpha * edgeRev
       ctx.beginPath()
       ctx.moveTo(x1, y1)
       ctx.lineTo(x2, y2)
@@ -619,7 +649,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         const ah = 6 / t.k
         ctx.setLineDash([])
         ctx.fillStyle = colorFor(nodes[b]!)
-        ctx.globalAlpha = 0.9
+        ctx.globalAlpha = 0.9 * edgeRev
         ctx.beginPath()
         ctx.moveTo(tx + Math.cos(ang) * ah, ty + Math.sin(ang) * ah)
         ctx.lineTo(tx + Math.cos(ang + 2.5) * ah, ty + Math.sin(ang + 2.5) * ah)
@@ -638,10 +668,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const y = pos[i * 2 + 1]!
       if (Number.isNaN(x)) continue
       if (!visible(x, y)) continue
-      const r = radius(i)
+      const nodeRev = nodeIn(i)
+      if (nodeRev <= 0.004) continue
+      // A node lands slightly oversized and settles. The pop scales the DRAWN circle only -
+      // the hit target and the label anchor keep their radius, so nothing under the pointer
+      // moves while the entrance runs.
+      const r = radius(i) * (revealing ? revealPop(nodeRev) : 1)
       const dimmed = highlight !== null && !highlight.has(i)
       const isGhost = ghostIndices !== undefined && ghostIndices.has(i)
-      ctx.globalAlpha = dimmed ? dimNode : 1
+      ctx.globalAlpha = (dimmed ? dimNode : 1) * nodeRev
       if (isGhost) {
         // Hollow, dashed ring in a faint neutral: present enough to click and count, but
         // visibly not a real page. A tiny fill keeps it hit-testable at its center.
@@ -663,7 +698,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         ctx.fill()
       }
       if (i === focusIndex || i === selectedIndex || matches.has(i)) {
-        ctx.globalAlpha = 1
+        ctx.globalAlpha = nodeRev
         ctx.strokeStyle = i === selectedIndex ? cssVar('--accent', '#5b8def') : cssVar('--text', '#fff')
         ctx.lineWidth = (i === selectedIndex ? 2.2 : 1.6) / t.k
         ctx.beginPath()
@@ -677,7 +712,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         if (age < FLASH_MS) {
           flashActive = true
           const p = age / FLASH_MS
-          ctx.globalAlpha = (1 - p) * 0.9
+          ctx.globalAlpha = (1 - p) * 0.9 * nodeRev
           ctx.strokeStyle = colorFor(nodes[i]!)
           ctx.lineWidth = 2 / t.k
           ctx.beginPath()
@@ -735,8 +770,11 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     ctx.textBaseline = 'top'
     ctx.lineJoin = 'round'
     let drawn = 0
+    // Labels are last in. The collision solver has nothing stable to place against while
+    // nodes are still arriving, and forty titles appearing mid-reveal is its own flicker.
     let examined = 0
     for (const i of candidates) {
+      if (labelIn <= 0.004) break
       if (drawn >= MAX_LABELS || examined >= MAX_EXAMINED) break
       examined++
       const n = nodes[i]!
@@ -756,7 +794,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       }
       placed.push(box)
       drawn++
-      ctx.globalAlpha = highlight !== null && !highlight.has(i) ? dimLabel : 0.95
+      ctx.globalAlpha = (highlight !== null && !highlight.has(i) ? dimLabel : 0.95) * labelIn
       // A halo in the background color keeps text legible across edges and foreign nodes.
       ctx.lineWidth = 3 / t.k
       ctx.strokeStyle = halo
@@ -766,8 +804,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     }
     ctx.globalAlpha = 1
 
-    // Keep animating while any arrival flash is fading (rAF-coalesced, self-terminating).
-    if (flashActive) scheduleDrawRef.current?.()
+    // Keep animating while any arrival flash is fading, or the entrance is still building
+    // in (rAF-coalesced, self-terminating).
+    if (flashActive || revealing) scheduleDrawRef.current?.()
   }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius, authorityT])
 
   const scheduleDraw = useRafDraw(draw)
@@ -837,6 +876,52 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const lastMsgRef = persist.lastMsg
   const fitPendingRef = useRef(false)
 
+  /**
+   * The entrance (lib/graphReveal.ts). `hold` is true from the first posted layout until
+   * there is a settled frame - nothing is drawn while it is, because what a cooling layout
+   * looks like at the identity transform is a quarter of the graph, oversized and moving.
+   * `revealStart` is the timestamp the build-in began, or null when nothing is revealing.
+   */
+  const holdRef = useRef(false)
+  const revealStartRef = useRef<number | null>(null)
+  /** Reveal order for the CURRENT node order, hubs at 0. Rebuilt with every first layout. */
+  const revealRankRef = useRef<Float32Array>(new Float32Array(0))
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * Release the hold and start the build-in. Called when the first layout settles, and by
+   * the hold's own timeout - a canvas that draws nothing needs a way out even if the worker
+   * never reports a settled frame.
+   */
+  const beginEntrance = useCallback((): void => {
+    if (holdTimerRef.current !== null) {
+      clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    holdRef.current = false
+    // Guarded on the FIT being owed, not on the hold: the empty-graph path releases the hold
+    // on its own, and guarding on that would let a graph that emptied and refilled mid-layout
+    // skip its first framing entirely.
+    if (!fitPendingRef.current) return
+    fitPendingRef.current = false
+    fittedRef.current = true
+    fitToView()
+    // Reduced motion still gets the fix - the hold and the fit are the correctness half.
+    // What it does not get is the animation, so the fitted graph is simply there.
+    revealStartRef.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? null
+      : performance.now()
+    scheduleDrawRef.current?.()
+  }, [fitToView])
+  const beginEntranceRef = useRef(beginEntrance)
+  beginEntranceRef.current = beginEntrance
+  useEffect(
+    () => () => {
+      if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current)
+    },
+    [],
+  )
+
   const postLayout = useCallback((): void => {
     const msg = lastMsgRef.current
     const worker = workerRef.current
@@ -866,13 +951,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
         persist.settled.current = true
         setLayouting(false)
         // Frame the FIRST finished layout once, so a graph of any size lands filling the
-        // viewport instead of as a speck. Later layouts (live updates, filter toggles)
-        // leave the camera alone - nothing yanks the user away mid-look.
-        if (fitPendingRef.current) {
-          fitPendingRef.current = false
-          fittedRef.current = true
-          fitToView()
-        }
+        // viewport instead of as a speck, and build it in from there. Later layouts (live
+        // updates, filter toggles) leave the camera alone and never re-run the entrance -
+        // nothing yanks the user away, and nothing flashes, mid-look.
+        if (fitPendingRef.current) beginEntranceRef.current()
       }
       // Nodes just moved under a possibly stationary cursor - re-resolve the hover, or a
       // node that drifted away from the pointer keeps its neighborhood highlight stuck.
@@ -894,6 +976,14 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       layoutRef.current = { gen: layoutRef.current.gen + 1, paths: [] } // orphan in-flight frames
       lastMsgRef.current = null
       positionsRef.current = new Float32Array(0)
+      // Nothing to wait for and nothing to reveal - a hold left armed here would blank the
+      // canvas for the empty-state message that belongs on it.
+      holdRef.current = false
+      revealStartRef.current = null
+      if (holdTimerRef.current !== null) {
+        clearTimeout(holdTimerRef.current)
+        holdTimerRef.current = null
+      }
       setLayouting(false)
       scheduleDraw()
       return
@@ -970,7 +1060,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // (unhiding a whole bucket); gentle reheat for everything else - that is what keeps a
     // live update a "reorientation" instead of a re-deal.
     const cold = firstLayout || newPaths.length > nodes.length * COLD_RESTART_SHARE
-    if (firstLayout) fitPendingRef.current = true
+    if (firstLayout) {
+      fitPendingRef.current = true
+      // Hold the canvas until there is a frame worth showing, and fix the order it will be
+      // built in while the node order is right here (it changes between layouts).
+      holdRef.current = true
+      revealRankRef.current = revealOrder(nodes.map((n) => n.in + n.out))
+      if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current)
+      holdTimerRef.current = setTimeout(() => beginEntranceRef.current(), REVEAL_HOLD_MAX_MS)
+    }
     if (cold) setLayouting(true)
 
     // Align the drawn positions with the new node order IMMEDIATELY (indices shift when the
