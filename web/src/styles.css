@@ -4721,8 +4721,12 @@ kbd {
 .railfacts .vzf {
   font-size: 11.5px;
 }
+/* A fixed column, not a minimum: the widest figure is a cost, and with `min-width` it
+   pushed its own label right while every other label stayed put. */
 .railfacts .vzf b {
-  min-width: 44px;
+  flex: none;
+  width: 62px;
+  min-width: 0;
   font-size: 12px;
 }
 /* A figure with nowhere to go stays a figure - no hover, no tab stop. */
@@ -4736,13 +4740,13 @@ kbd {
   grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
   gap: 8px;
   align-content: start;
-  padding: 10px 14px 12px;
+  padding: 9px 14px 10px;
 }
 .offer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 5px;
+  padding: 7px 10px;
   text-align: left;
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
@@ -4753,11 +4757,15 @@ kbd {
 .offer:focus-visible {
   border-color: var(--research);
 }
+/* Two lines, always - the slot is fixed even when the title needs one line. Sized to its
+   own text, a two-line title made its card taller than its neighbours and pushed the second
+   row of the band out of view. */
 .of-t {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  height: 33px;
   font-size: 12.5px;
   line-height: 1.3;
   color: var(--text);
@@ -4789,12 +4797,17 @@ kbd {
    A run and a conversation are listed in the same shape, so their columns line up: the
    title takes whatever is left and the five fixed slots are the same width in both tables.
    Percentages gave each table its own boundaries, and crushed "Cost" and "When" into the
-   right eighth of a 1300px pane while the title column carried 150px of slack. ── */
+   right eighth of a 1300px pane while the title column carried 150px of slack. Sizing the
+   four to their own labels then left them unevenly spaced instead - one width for all four
+   is what makes the row scan. ── */
+.rtable {
+  --rledger-col: 130px;
+}
 .rtable th:nth-child(1) { width: auto; }
-.rtable th:nth-child(2) { width: 176px; }
-.rtable th:nth-child(3) { width: 84px; }
-.rtable th:nth-child(4) { width: 108px; }
-.rtable th:nth-child(5) { width: 152px; }
+.rtable th:nth-child(2),
+.rtable th:nth-child(3),
+.rtable th:nth-child(4),
+.rtable th:nth-child(5) { width: var(--rledger-col); }
 .rtable th:nth-child(6) { width: 76px; }
 .sess-table tr.active td {
   background: var(--accent-soft);
@@ -5141,7 +5154,8 @@ tr:focus-within .rowacts {
 .console {
   position: relative;
   flex: none;
-  margin: 12px;
+  /* No margin: the column spaces its cards with a gap, and a margin here made the console
+     narrower than everything under it and its own edges not line up with theirs. */
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-elev-2);
@@ -6133,8 +6147,17 @@ tr:focus-within .rowacts {
   flex: 1 1 0;
   min-height: 0;
 }
-/* Exactly two rows of offers; a third scrolls. */
+/* Exactly two rows of offers, both fully visible - a third scrolls. Sized to the two rows
+   rather than to a round number: a title that needs two lines used to push the second row
+   out of the band, so the row height is fixed (`.of-t`) and the band is fixed to two of
+   them. */
 .box.band {
   flex: none;
-  height: 180px;
+  height: 216px;
+}
+/* A denser section head on this screen: the column carries three of them plus a console,
+   and the shared padding spent 15px of it on air. Scoped, because the other screens are
+   not that tight. */
+.rmain .sub-head {
+  padding: 9px 14px 8px;
 }
