@@ -884,9 +884,35 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
    */
   const holdRef = useRef(false)
   const revealStartRef = useRef<number | null>(null)
-  /** Reveal order for the CURRENT node order, hubs at 0. Rebuilt with every first layout. */
+  /** Reveal order for the CURRENT node order, hubs at 0. Rebuilt with every armed entrance. */
   const revealRankRef = useRef<Float32Array>(new Float32Array(0))
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  /**
+   * Blank the canvas and queue the build-in for when the layout settles. Armed by the first
+   * layout, and by any view change that re-lays the graph out (a filter cleared, a domain
+   * hidden): those re-fit too, and a fit applied to a still-cooling layout is exactly the
+   * oversized, moving frame the entrance exists to skip - it was on screen for the second or
+   * so of cooling and then cut to the build-in, so the graph appeared twice.
+   *
+   * Not armed by live vault updates: they keep the camera and reheat gently, and blanking the
+   * whole graph because one page arrived would be a far worse flicker than the one this fixes.
+   */
+  const armEntrance = useCallback((): void => {
+    // An empty graph has nothing to hold back and nothing to reveal - and the canvas is
+    // where its "nothing matches" state is drawn.
+    if (nodes.length === 0) return
+    holdRef.current = true
+    // Fix the order while the node order is right here - it changes between layouts.
+    revealRankRef.current = revealOrder(nodes.map((n) => n.in + n.out))
+    if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current)
+    holdTimerRef.current = setTimeout(() => beginEntranceRef.current(), REVEAL_HOLD_MAX_MS)
+    scheduleDrawRef.current?.()
+  }, [nodes])
+  // Held in a ref so the effects can arm the entrance without taking `nodes` as a dependency
+  // (the layout effect already has it; the fit effect must stay keyed on the view alone).
+  const armEntranceRef = useRef(armEntrance)
+  armEntranceRef.current = armEntrance
 
   /**
    * Release the hold and start the build-in. Called when the first layout settles, and by
@@ -1062,12 +1088,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     const cold = firstLayout || newPaths.length > nodes.length * COLD_RESTART_SHARE
     if (firstLayout) {
       fitPendingRef.current = true
-      // Hold the canvas until there is a frame worth showing, and fix the order it will be
-      // built in while the node order is right here (it changes between layouts).
-      holdRef.current = true
-      revealRankRef.current = revealOrder(nodes.map((n) => n.in + n.out))
-      if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current)
-      holdTimerRef.current = setTimeout(() => beginEntranceRef.current(), REVEAL_HOLD_MAX_MS)
+      armEntranceRef.current()
     }
     if (cold) setLayouting(true)
 
@@ -1093,15 +1114,22 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 
   // A changed fitKey = the user changed the visible subgraph (filter/depth toggle) - re-fit
   // so the remaining graph fills the canvas. Runs AFTER the layout effect above, so
-  // `persist.settled` already reflects whether that change posted a re-layout: fit now on
-  // the seeded positions (survivors keep their place), and when a re-layout is cooling,
-  // fit once more when it settles. First mount keeps the first-layout fit path.
+  // `persist.settled` already reflects whether that change posted a re-layout: when one is
+  // cooling the canvas goes blank and the entrance frames and builds it in on settle, and
+  // when none is (a view change that only re-frames) the fit here is the whole job. First
+  // mount keeps the first-layout fit path.
   const prevFitKeyRef = useRef(fitKey)
   useEffect(() => {
     if (prevFitKeyRef.current === fitKey) return
     prevFitKeyRef.current = fitKey
     userMovedRef.current = false // an explicit view change wins over an old pan/zoom
-    if (!persist.settled.current) fitPendingRef.current = true
+    if (!persist.settled.current) {
+      // A re-layout is cooling: blank the canvas and let the entrance do the framing when it
+      // settles. The fit below still runs, on positions nothing is drawing - what the reader
+      // used to see instead was that half-cooled frame, fitted, until the build-in cut it.
+      fitPendingRef.current = true
+      armEntranceRef.current()
+    }
     fitToView()
   }, [fitKey, fitToView])
 
