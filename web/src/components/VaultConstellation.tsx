@@ -107,10 +107,10 @@ export function VaultConstellation({
     ctx.clearRect(0, 0, size.w, size.h)
 
     // Links first and faint. All 8k of them: a sampled picture would be a different vault,
-    // and at 6% alpha the density itself is the information.
+    // and at this alpha the density itself is the information.
     ctx.strokeStyle = cssVar('--border-strong', '#30405f')
-    ctx.globalAlpha = 0.35
-    ctx.lineWidth = 0.5
+    ctx.globalAlpha = 0.3
+    ctx.lineWidth = 0.4
     ctx.beginPath()
     for (const [a, b] of edges) {
       const ax = pos[a * 2]
@@ -132,6 +132,11 @@ export function VaultConstellation({
       colorCache.set(type, c)
       return c
     }
+    // Dot radii are deliberately small. Eight hundred pages in a 460px box is about a dot
+    // every fifteen pixels, so a hub at 4.6px and its neighbours at 3px merged into blobs
+    // and a cluster read as one shape rather than as the many pages it is. Halved, the same
+    // layout reads as a constellation - which is the only thing this picture claims to be.
+    // The degree term still separates a hub from a leaf, just at a finer grain.
     for (let i = 0; i < nodes.length; i++) {
       const n = nodes[i]
       if (n === undefined) continue
@@ -140,7 +145,7 @@ export function VaultConstellation({
       if (Number.isNaN(x) || Number.isNaN(y)) continue
       ctx.fillStyle = colorFor(n.type)
       ctx.beginPath()
-      ctx.arc(x, y, 1.4 + Math.min(3.2, Math.sqrt(n.in + n.out) * 0.42), 0, Math.PI * 2)
+      ctx.arc(x, y, 0.8 + Math.min(2.1, Math.sqrt(n.in + n.out) * 0.3), 0, Math.PI * 2)
       ctx.fill()
     }
   }
