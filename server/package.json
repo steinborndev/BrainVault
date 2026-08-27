@@ -2,7 +2,7 @@
   "name": "@vault-service/server",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "description": "Fastify backend: watcher, queue, preprocessing, agent runner",
   "type": "module",
   "scripts": {

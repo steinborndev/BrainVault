@@ -781,6 +781,14 @@ at all.)
 A personal project (v0.1) built milestone by milestone with Claude Code; the engineering journals
 in `docs/tasks/` are left in as-is - findings, dead ends, measurements and all. The specification
 (`SPEC.md`) is German; code, UI, and vault content are English. Issues and PRs are welcome, with
-the caveat that `SPEC.md` and the hard rules in `CLAUDE.md` define what this is and is not.
+the caveat that `SPEC.md` and the hard rules in `CLAUDE.md` define what this is and is not, and
+that contributions are accepted under the license below.
 
-[MIT](LICENSE) © Benjamin Steinborn
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) © Benjamin Steinborn. Any
+noncommercial purpose is permitted: personal use, study, hobby projects, and use by charities,
+schools, public research organizations and government institutions. Commercial use needs a
+separate license, so open an issue if you want one.
+
+The vault this service drives is a separate project, [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian)
+by AgriciDaniel, under the MIT license. No part of it lives in this repository: the service reads
+and drives a vault it never vendors, and its license is unaffected by the one above.
