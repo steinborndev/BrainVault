@@ -41,7 +41,7 @@ const SHOTS = [
     file: 'home.png',
     route: '/',
     settle: `document.querySelectorAll('.fact').length > 2 && document.querySelectorAll('table.dtable tbody tr').length > 3`,
-    hold: 2500,
+    hold: 5000,
   },
   {
     file: 'graph.png',
@@ -49,7 +49,8 @@ const SHOTS = [
     // Any canvas, not the first: the screen also mounts a zero-sized offscreen one, and
     // querySelector picks that up and never settles.
     settle: `[...document.querySelectorAll('canvas')].some((c) => c.getBoundingClientRect().height > 300)`,
-    hold: 9000,
+    // A vault-sized graph (800+ nodes, 4k edges) takes far longer to settle than a toy one.
+    hold: 24000,
   },
   {
     file: 'research.png',

@@ -17,8 +17,6 @@ and page viewer, a browsable library of every page, and the machine room behind 
 
 ![Home: the vault as a shape, the domain panel, and one activity stream](docs/img/home.png)
 
-![The wikilink graph, one colour per domain](docs/img/graph.png)
-
 <sub>Every screenshot on this page comes from a **synthetic** vault - textbook subject matter,
 generic document titles, no real notes, people or sources. Regenerate it and re-shoot the set
 with `scripts/demo-vault.mjs` + `scripts/shoot-screens.mjs` (see
@@ -267,6 +265,8 @@ arrived, what you go and find out, the two ways of browsing what is there, then 
   After a delete, a banner counts the backlinks that just went dangling and offers a one-click
   reference-cleanup run. Deep-linkable: `/graph` and `/page/<path>` survive a reload and
   browser back/forward.
+
+  ![The wikilink graph, one colour per domain, with the gaps overlay one click away](docs/img/graph.png)
 
 - **Library** - the browse path a graph cannot give you: one filterable, sortable table over
   every page, fed by the same graph query the canvas uses. Filter by page type, by domain, or by
@@ -623,7 +623,7 @@ The images in this README are shot from a **synthetic vault**, so nothing privat
 published and the whole set can be re-shot whenever the UI changes:
 
 ```bash
-# 1. Build a throwaway vault (~100 invented pages, backdated git history) and its database
+# 1. Build a throwaway vault (~850 invented pages over 17 domains, backdated git history)
 node scripts/demo-vault.mjs
 
 # 2. Serve it on a spare port. TELEGRAM_BOT_TOKEN= is REQUIRED: without it this process picks
@@ -639,10 +639,17 @@ node --experimental-websocket scripts/shoot-screens.mjs
 ```
 
 The generator invents everything it writes - textbook subject matter, document titles with no
-authors, no real people or organisations - and dates the pages relative to today, so the growth
-chart and the "N days ago" columns stay plausible without being frozen in the past. Stop the demo
-process by PID when you are done; a `pkill` on the binary name would take the real service with
-it.
+authors, no real people or organisations. Two things it deliberately does NOT do: make the vault
+small, or make it tidy. It is sized like a real one (~850 pages, 4k links, one domain far deeper
+than the rest, a long tail of one-afternoon detours) because the graph, the domain filters and
+the library only show what they are for at that scale; and it leaves stubs, unfiled pages and
+knowledge gaps in, because a wiki without them is not a wiki anyone has actually used. Pages are
+dated in reading order rather than build order - subjects interleave, the way they do when a
+person reads - so "recently changed" is a mix and the growth curve has a shape.
+
+Subject matter lives in `scripts/demo-vault-topics.mjs`; add a domain there and it flows into
+every screen. Stop the demo process by PID when you are done - a `pkill` on the binary name would
+take the real service with it.
 
 ## API
 
