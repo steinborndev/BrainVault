@@ -177,17 +177,12 @@ for (const page of exported) {
     if (name) reachable.add(name.toLowerCase())
   }
 }
-// Structural pages count as reachable only when the skeleton actually ships them,
-// otherwise links pointing at them would survive as knowledge-gap ghosts.
-const structuralAliases = new Map([
-  ['index.md', ['index', 'wiki index']],
-  ['hot.md', ['hot', 'hot cache']],
-  ['log.md', ['log', 'operation log']],
-  ['getting-started.md', ['getting-started']],
-  ['dashboard.md', ['dashboard']],
-])
+// Structural pages: index/hot/log are REGENERATED fresh (the skeleton's own copies carry
+// its project history, which has no place in an export); getting-started is generic and
+// copied when the skeleton ships it. Reachability mirrors exactly what will exist.
+for (const n of ['index', 'wiki index', 'hot', 'hot cache', 'log', 'operation log']) reachable.add(n)
 const presentStructural = []
-for (const [file, names] of structuralAliases) {
+for (const [file, names] of [['getting-started.md', ['getting-started']], ['dashboard.md', ['dashboard']]]) {
   try {
     await fs.access(path.join(skeleton, 'wiki', file))
     presentStructural.push(file)
@@ -243,6 +238,17 @@ for (const name of presentStructural) {
   const text = await fs.readFile(path.join(skeleton, 'wiki', name), 'utf8')
   await fs.writeFile(path.join(dest, 'wiki', name), rewriteLinks(text, attachments))
 }
+// index/hot/log regenerated from scratch: frontmatter in the vault's own shape, empty
+// operational state - the service and the vault's own tooling fill them over time.
+const structuralStamp = new Date().toISOString().slice(0, 10)
+const structuralPage = (title, tag, body) =>
+  ['---', 'type: meta', `title: "${title}"`, 'domain: meta', `created: ${structuralStamp}`, `updated: ${structuralStamp}`, 'tags:', '  - meta', `  - ${tag}`, 'status: evergreen', '---', '', `# ${title}`, '', body, ''].join('\n')
+await fs.writeFile(
+  path.join(dest, 'wiki', 'index.md'),
+  structuralPage('Wiki Index', 'index', ['Entry points:', '', '- [[concepts/_index]]', '- [[entities/_index]]', '- [[sources/_index]]', '- [[Domain Registry]]'].join('\n')),
+)
+await fs.writeFile(path.join(dest, 'wiki', 'hot.md'), structuralPage('Hot Cache', 'hot-cache', 'Rebuilt by the service; empty on a fresh export.'))
+await fs.writeFile(path.join(dest, 'wiki', 'log.md'), structuralPage('Operation Log', 'log', 'No operations logged on this vault yet.'))
 const review = []
 for (const page of exported) {
   let text = rewriteLinks(page.text, attachments)
@@ -307,19 +313,33 @@ for (const [dir, list] of byDir) {
 const registrySrc = path.join(source, 'wiki', 'meta', 'domains.md')
 try {
   const registry = await fs.readFile(registrySrc, 'utf8')
-  const filtered = registry
-    .split('\n')
-    .filter((line) => {
-      const item = line.match(/^\s*-\s+`?([a-z0-9-]+)`?\s*(?:[-—:].*)?$/)
-      if (!item) return true
+  // Drop both forms a domain appears in: list items naming the key, and whole
+  // `## <key>` sections (heading plus body up to the next heading).
+  const lines = registry.split('\n')
+  const filtered = []
+  let skippingSection = false
+  for (const line of lines) {
+    const heading = line.match(/^##\s+`?([a-z0-9-]+)`?\s*$/)
+    if (heading) {
+      const key = heading[1]
+      skippingSection =
+        key !== 'unassigned' && /^[a-z0-9-]{3,}$/.test(key) && !allowedDomains.has(key)
+      if (skippingSection) continue
+    }
+    if (skippingSection) {
+      if (/^#{1,2}\s/.test(line) && !line.match(/^##\s+`?[a-z0-9-]+`?\s*$/)) skippingSection = false
+      else continue
+    }
+    const item = line.match(/^\s*-\s+`?([a-z0-9-]+)`?\s*(?:[-—:].*)?$/)
+    if (item) {
       const key = item[1]
-      if (key === 'unassigned') return true
-      if (!/^[a-z0-9-]{3,}$/.test(key)) return true
-      return allowedDomains.has(key)
-    })
-    .join('\n')
+      if (key !== 'unassigned' && /^[a-z0-9-]{3,}$/.test(key) && !allowedDomains.has(key)) continue
+    }
+    filtered.push(line)
+  }
+  const filteredText = filtered.join('\n')
   await fs.mkdir(path.join(dest, 'wiki', 'meta'), { recursive: true })
-  await fs.writeFile(path.join(dest, 'wiki', 'meta', 'domains.md'), filtered)
+  await fs.writeFile(path.join(dest, 'wiki', 'meta', 'domains.md'), filteredText)
 } catch {
   console.warn('no domain registry page found in source; skipping')
 }
