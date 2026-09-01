@@ -20,6 +20,7 @@
  *     "excludeTypes": ["session"],            // page type values to drop
  *     "excludeTitlePatterns": ["..."],        // case-insensitive regexes vs title/aliases/filename
  *     "excludeBodyPatterns": ["..."],         // case-insensitive regexes vs the full page text - hard exclusion
+ *     "excludePaths": ["sources/x.md"],       // exact wiki-relative paths to drop (e.g. license review results)
  *     "reviewBodyPatterns": ["..."]           // exported pages matching these are flagged for review
  *   }
  *
@@ -66,6 +67,7 @@ const excludeEntityTypes = new Set(config.excludeEntityTypes ?? [])
 const excludeTypes = new Set(config.excludeTypes ?? [])
 const excludeTitlePatterns = (config.excludeTitlePatterns ?? []).map((p) => new RegExp(p, 'i'))
 const excludeBodyPatterns = (config.excludeBodyPatterns ?? []).map((p) => new RegExp(p, 'i'))
+const excludePaths = new Set(config.excludePaths ?? [])
 const reviewBodyPatterns = (config.reviewBodyPatterns ?? []).map((p) => new RegExp(p, 'i'))
 
 // ------------------------------------------------------------------- guards
@@ -150,7 +152,8 @@ for (const page of pages) {
   const names = [fields.title ?? '', ...aliases, path.basename(rel, '.md')]
   const titleHit = excludeTitlePatterns.find((re) => names.some((n) => re.test(n)))
   let reason = null
-  if (!allowedDomains.has(fields.domain ?? '')) reason = `domain: ${fields.domain ?? '(none)'}`
+  if (excludePaths.has(rel)) reason = 'path: listed in excludePaths'
+  else if (!allowedDomains.has(fields.domain ?? '')) reason = `domain: ${fields.domain ?? '(none)'}`
   else if (excludeTypes.has(fields.type ?? '')) reason = `type: ${fields.type}`
   else if (excludeEntityTypes.has(fields.entity_type ?? '')) reason = `entity_type: ${fields.entity_type}`
   else if (titleHit) reason = `title pattern: ${titleHit.source}`
