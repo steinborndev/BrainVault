@@ -88,6 +88,9 @@ export function Vault({ path }: { path: string }): React.ReactElement {
   const focus = params.get('focus')
   // `?gaps=1` arrives from Home's Gaps card: open the graph with the gaps overlay already on.
   const openGaps = params.get('gaps') === '1'
+  // `?labels=off`: screenshot mode - the canvas draws structure and colors but no text, so
+  // a capture of a real vault can be shared without leaking page titles.
+  const hideLabels = params.get('labels') === 'off'
 
   const state = queryState(graphQ, 'the graph')
   if (state !== null) return state
@@ -105,7 +108,7 @@ export function Vault({ path }: { path: string }): React.ReactElement {
   }
 
   if (page !== null) return <PageView graph={graphQ.data} path={page} />
-  return <GraphView graph={graphQ.data} focusPath={focus} openGaps={openGaps} />
+  return <GraphView graph={graphQ.data} focusPath={focus} openGaps={openGaps} hideLabels={hideLabels} />
 }
 
 // ---------------------------------------------------------------------------- graph view
@@ -345,10 +348,13 @@ function GraphView({
   graph,
   focusPath,
   openGaps,
+  hideLabels = false,
 }: {
   graph: VaultGraph
   focusPath: string | null
   openGaps: boolean
+  /** `?labels=off` - render the graph without any text (screenshot mode). */
+  hideLabels?: boolean
 }): React.ReactElement {
   // `input` is what the field shows; `query` is what the graph reacts to. Without the delay
   // every keystroke re-filtered the subgraph, re-ran Louvain and refit the camera - typing a
@@ -986,6 +992,7 @@ function GraphView({
           showHulls={showClusters}
           network={showNetwork}
           spotlight={spotlight}
+          showLabels={!hideLabels}
           // Every filter/depth/gaps change re-frames the graph; SSE live updates don't touch this key.
           // Fullscreen rides along: entering or leaving changes the canvas width by ~40%,
           // and re-fitting through the fitKey also clears `userMoved` - so a graph the user

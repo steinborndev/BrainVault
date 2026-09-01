@@ -96,6 +96,12 @@ export interface GraphCanvasProps {
    */
   spotlight?: boolean
   /**
+   * Draw the region and node label passes (default). `false` is the screenshot mode behind
+   * the graph URL's `?labels=off`: same structure, colors, and hulls, but no readable text
+   * on the canvas - so a capture of a real vault leaks no page titles.
+   */
+  showLabels?: boolean
+  /**
    * Changes whenever the CALLER changes the visible subgraph (domain/type filters, local
    * depth) - each change re-fits the view so the filtered graph fills the canvas again.
    * Live SSE updates leave this key alone, so mid-ingest arrivals still never move the camera.
@@ -217,7 +223,7 @@ const persist = {
   settled: { current: true },
 }
 
-export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, fitKey, barExtra, onSelect, onClusterClick, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
+export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, ghostIndices, matches, lens = 'type', clusters = null, clusterLabels, clusterDomains, showHulls = false, network = false, spotlight = false, showLabels = true, fitKey, barExtra, onSelect, onClusterClick, onOpen, onClear, overlay }: GraphCanvasProps): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const positionsRef = persist.positions
   const posByPathRef = persist.posByPath
@@ -559,10 +565,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       const fontWorld = labelH * 0.82
       ctx.font = `600 ${fontWorld}px system-ui, sans-serif`
       const labelInputs: RegionLabelInput[] = []
-      for (const [cid, pts] of members) {
-        const label = clusterLabels?.get(cid)
-        if (label === undefined || !paddedHulls.has(cid)) continue
-        labelInputs.push({ key: cid, width: ctx.measureText(label).width, weight: pts.length })
+      // `?labels=off`: an empty input list keeps the whole region-label pass inert.
+      if (showLabels) {
+        for (const [cid, pts] of members) {
+          const label = clusterLabels?.get(cid)
+          if (label === undefined || !paddedHulls.has(cid)) continue
+          labelInputs.push({ key: cid, width: ctx.measureText(label).width, weight: pts.length })
+        }
       }
       const placedLabels = placeRegionLabels(labelInputs, paddedHulls, labelH, labelH * 0.45)
       // Keep the glyphs legible without ever moving them: clamp the on-screen size, then
@@ -737,11 +746,15 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // their best labels, and zooming in frees space so culled labels reappear on their own.
     // The order is deterministic (priority, degree, then index), so nothing flickers.
     const candidates: number[] = []
-    for (let i = 0; i < nodes.length; i++) {
-      const x = pos[i * 2]!
-      if (Number.isNaN(x)) continue
-      if (!visible(x, pos[i * 2 + 1]!)) continue
-      candidates.push(i)
+    // `?labels=off`: no candidates, no node-label pass - not even for the hovered node, so
+    // the capture stays free of text no matter where the pointer rests.
+    if (showLabels) {
+      for (let i = 0; i < nodes.length; i++) {
+        const x = pos[i * 2]!
+        if (Number.isNaN(x)) continue
+        if (!visible(x, pos[i * 2 + 1]!)) continue
+        candidates.push(i)
+      }
     }
     const interactive = (i: number): boolean =>
       i === hovered || i === selectedIndex || i === focusIndex || matches.has(i)
@@ -807,7 +820,7 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     // Keep animating while any arrival flash is fading, or the entrance is still building
     // in (rAF-coalesced, self-terminating).
     if (flashActive || revealing) scheduleDrawRef.current?.()
-  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, network, neighbors, labelReps, radius, authorityT])
+  }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, showLabels, network, neighbors, labelReps, radius, authorityT])
 
   const scheduleDraw = useRafDraw(draw)
   const scheduleDrawRef = useRef<(() => void) | null>(null)
