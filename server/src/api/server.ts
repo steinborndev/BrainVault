@@ -102,6 +102,18 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
   })
 
   registerAuth(app, ctx.config.server)
+  // DEMO MODE (SPEC.md §12.8): ONE enforcement point for the read-only guarantee. Every
+  // non-read API request is refused before any route handler runs, so mutating endpoints
+  // added later are covered automatically. Static assets and all GETs stay untouched.
+  if (ctx.config.demoMode) {
+    app.addHook('onRequest', async (req, reply) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.url.startsWith('/api/')) {
+        return reply
+          .code(403)
+          .send({ error: 'demo_read_only', message: 'This hosted demo instance is read-only.' })
+      }
+    })
+  }
   registerHealthRoute(app, ctx)
   registerJobsRoute(app, ctx)
   registerEventsRoute(app, ctx)

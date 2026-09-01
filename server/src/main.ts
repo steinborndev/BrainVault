@@ -101,13 +101,17 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     events,
     autoCommit: () => settings.effective(config).gitAutoCommit,
   })
-  reconciler.attach()
+  // DEMO MODE (SPEC.md §12.8): the reconciler is a vault WRITER (it commits unattributed
+  // changes) - on a read-only instance it stays detached like every other writer.
+  if (!config.demoMode) reconciler.attach()
   // SETUP MODE (config.auth === null): serve the dashboard so the user can enter the
   // credential there, but start nothing that could spawn an agent — the queue never claims
   // and the inbox watcher stays off. A restart after the credential is written picks
   // everything up (queued rows included).
+  // DEMO MODE keeps the same passive posture, permanently and regardless of credentials.
   const setupMode = config.auth === null
-  if (!setupMode) queue.start()
+  const passive = setupMode || config.demoMode
+  if (!passive) queue.start()
 
   // Dropped-sender counters (SPEC.md §9): written by the bot, read by the settings route.
   const telegramDrops = new TelegramDropStore(db)
@@ -142,7 +146,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     },
   }
 
-  const watcher: Watcher = setupMode
+  const watcher: Watcher = passive
     ? { close: async () => {} }
     : startWatcher({
         queue,
@@ -156,11 +160,13 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Retrieval-index freshness (SPEC.md §12.6): finished ingests reset a quiet window; when it
   // elapses, ONE deterministic rebuild runs. Inert until the index is provisioned — checked at
   // fire time, so provisioning it (first manual rebuild) needs no restart.
-  const retrieveScheduler: RetrieveIndexScheduler = startRetrieveIndexScheduler({
-    events,
-    isProvisioned: () => isRetrieveProvisioned(config.vaultRoot),
-    start: () => void maintenance.startRetrieveIndex(),
-  })
+  const retrieveScheduler: RetrieveIndexScheduler = config.demoMode
+    ? { close: () => {} }
+    : startRetrieveIndexScheduler({
+        events,
+        isProvisioned: () => isRetrieveProvisioned(config.vaultRoot),
+        start: () => void maintenance.startRetrieveIndex(),
+      })
 
   const app = await buildServer({
     config: effectiveConfig,
@@ -186,7 +192,11 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
 
   // Log what the service actually runs with (overrides applied), not the bare baseline.
   app.log.info({ ...describeConfig(effectiveConfig), transportPin: pin }, 'vault-service started')
-  if (setupMode) {
+  if (config.demoMode) {
+    app.log.info(
+      'DEMO MODE: read-only instance — ingestion, research, maintenance, page edits and Telegram are disabled.',
+    )
+  } else if (setupMode) {
     app.log.warn(
       `SETUP MODE: no Anthropic credential configured — ingestion, watcher, query and maintenance ` +
         `are disabled. Open ${url} and add the credential under Maintenance → Settings.`,
@@ -196,7 +206,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
   // Telegram channel (SPEC.md §4.3), symmetric to the watcher but ALSO alive in setup mode:
   // /status still answers there (reporting setup mode) while ingests are refused — the bot
   // gates them itself. Started after listen so its log lines go through the app logger.
-  const telegram: TelegramBot | null = config.telegram
+  const telegram: TelegramBot | null = config.telegram && !config.demoMode
     ? startTelegramBot({
         telegram: config.telegram,
         queue,

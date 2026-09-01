@@ -94,6 +94,7 @@ beforeEach(async () => {
   const config: Config = {
     vaultRoot,
     obsidianVaultName: 'vault',
+    demoMode: false,
     auth: { mode: 'oauth', credential: 'x', envVar: 'CLAUDE_CODE_OAUTH_TOKEN' },
     telegram: null,
     server: {
