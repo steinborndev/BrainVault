@@ -174,10 +174,27 @@ for (const page of exported) {
     if (name) reachable.add(name.toLowerCase())
   }
 }
-// Structural pages that always exist in the skeleton or are regenerated below.
-for (const keep of ['index', 'dashboard', 'hot cache', 'wiki index', 'operation log', 'domain registry', 'getting-started']) {
-  reachable.add(keep)
+// Structural pages count as reachable only when the skeleton actually ships them,
+// otherwise links pointing at them would survive as knowledge-gap ghosts.
+const structuralAliases = new Map([
+  ['index.md', ['index', 'wiki index']],
+  ['hot.md', ['hot', 'hot cache']],
+  ['log.md', ['log', 'operation log']],
+  ['getting-started.md', ['getting-started']],
+  ['dashboard.md', ['dashboard']],
+])
+const presentStructural = []
+for (const [file, names] of structuralAliases) {
+  try {
+    await fs.access(path.join(skeleton, 'wiki', file))
+    presentStructural.push(file)
+    for (const n of names) reachable.add(n)
+  } catch {
+    /* not shipped by this skeleton version */
+  }
 }
+// The domain registry is copied (filtered) from the source further down.
+for (const n of ['domain registry', 'domains', 'meta/domains']) reachable.add(n)
 for (const dir of ['concepts', 'entities', 'sources', 'folds', 'comparisons', 'canvases']) {
   reachable.add(`${dir}/_index`)
   reachable.add('_index')
@@ -212,19 +229,17 @@ await fs.cp(skeleton, dest, {
     return !parts.includes('.git') && parts[0] !== 'wiki'
   },
 })
-const structuralFiles = ['index.md', 'hot.md', 'log.md', 'getting-started.md', 'dashboard.md']
 for (const dir of ['concepts', 'entities', 'sources', 'folds', 'comparisons', 'canvases', 'meta']) {
   await fs.mkdir(path.join(dest, 'wiki', dir), { recursive: true })
 }
-for (const name of structuralFiles) {
-  try {
-    await fs.copyFile(path.join(skeleton, 'wiki', name), path.join(dest, 'wiki', name))
-  } catch {
-    /* skeleton version does not ship this structural page */
-  }
-}
 
 const attachments = new Set()
+// Structural pages from the skeleton go through the same link flattening as content
+// pages - they reference skeleton documentation that is deliberately not exported.
+for (const name of presentStructural) {
+  const text = await fs.readFile(path.join(skeleton, 'wiki', name), 'utf8')
+  await fs.writeFile(path.join(dest, 'wiki', name), rewriteLinks(text, attachments))
+}
 const review = []
 for (const page of exported) {
   let text = rewriteLinks(page.text, attachments)
