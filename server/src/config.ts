@@ -91,6 +91,13 @@ export interface Config {
   readonly server: ServerConfig
   /** `null` = Telegram bot off (no TELEGRAM_BOT_TOKEN configured). */
   readonly telegram: TelegramConfig | null
+  /**
+   * DEMO MODE (`DEMO_MODE=1`, SPEC.md §12.8): serve the vault strictly read-only for a
+   * hosted public instance. One central request guard refuses every non-read API call,
+   * and nothing that could write or spawn an agent is started - no queue, no watcher,
+   * no Telegram, no maintenance scheduling. Runs without a credential by design.
+   */
+  readonly demoMode: boolean
 }
 
 /** True for a loopback bind — the only bind allowed without an HTTP auth token (hard rule 2). */
@@ -296,6 +303,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
   const watchPolling = parsed.data.WATCH_POLLING
     ? ['true', '1', 'yes'].includes(parsed.data.WATCH_POLLING)
     : undefined
+  const demoMode = ['true', '1', 'yes'].includes((merged['DEMO_MODE'] ?? '').trim().toLowerCase())
   const server: ServerConfig = {
     host: parsed.data.HOST ?? DEFAULT_HOST,
     port: parsed.data.PORT ?? DEFAULT_PORT,
@@ -319,6 +327,7 @@ export function loadConfig(options: LoadConfigOptions = {}): Config {
         : null,
     server,
     telegram: parseTelegram(parsed.data.TELEGRAM_BOT_TOKEN, parsed.data.TELEGRAM_ALLOWED_USER_IDS),
+    demoMode,
   }
 }
 
@@ -354,5 +363,6 @@ export function describeConfig(config: Config): Record<string, string> {
       ? `on <token redacted, ${config.telegram.botToken.length} chars>, ` +
         `${config.telegram.allowedUserIds.length} allowlisted user(s)`
       : 'off',
+    demoMode: config.demoMode ? 'on (read-only)' : 'off',
   }
 }

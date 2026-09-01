@@ -14,6 +14,7 @@ const makeConfig = (mode: 'oauth' | 'api-key'): Config =>
   ({
     vaultRoot: '/v',
     obsidianVaultName: 'v',
+    demoMode: false,
     auth: { mode, credential: 'c', envVar: mode === 'oauth' ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'ANTHROPIC_API_KEY' },
     server: {
       host: '127.0.0.1',

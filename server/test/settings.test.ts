@@ -16,6 +16,7 @@ let store: SettingsStore
 const config = {
   vaultRoot: '/home/user/vault',
   obsidianVaultName: 'vault',
+    demoMode: false,
   auth: { mode: 'oauth', credential: 'tok', envVar: 'CLAUDE_CODE_OAUTH_TOKEN' },
   server: {
     host: '127.0.0.1',
