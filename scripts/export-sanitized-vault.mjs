@@ -19,6 +19,7 @@
  *     "excludeEntityTypes": ["person"],       // entity_type values to drop
  *     "excludeTypes": ["session"],            // page type values to drop
  *     "excludeTitlePatterns": ["..."],        // case-insensitive regexes vs title/aliases/filename
+ *     "excludeBodyPatterns": ["..."],         // case-insensitive regexes vs the full page text - hard exclusion
  *     "reviewBodyPatterns": ["..."]           // exported pages matching these are flagged for review
  *   }
  *
@@ -64,6 +65,7 @@ const allowedDomains = new Set(config.domains ?? [])
 const excludeEntityTypes = new Set(config.excludeEntityTypes ?? [])
 const excludeTypes = new Set(config.excludeTypes ?? [])
 const excludeTitlePatterns = (config.excludeTitlePatterns ?? []).map((p) => new RegExp(p, 'i'))
+const excludeBodyPatterns = (config.excludeBodyPatterns ?? []).map((p) => new RegExp(p, 'i'))
 const reviewBodyPatterns = (config.reviewBodyPatterns ?? []).map((p) => new RegExp(p, 'i'))
 
 // ------------------------------------------------------------------- guards
@@ -152,6 +154,12 @@ for (const page of pages) {
   else if (excludeTypes.has(fields.type ?? '')) reason = `type: ${fields.type}`
   else if (excludeEntityTypes.has(fields.entity_type ?? '')) reason = `entity_type: ${fields.entity_type}`
   else if (titleHit) reason = `title pattern: ${titleHit.source}`
+  else {
+    // Body match runs last: it is the broadest rule, applied to the ORIGINAL text so a
+    // page linking to an excluded page (the link text carries the term) is caught too.
+    const bodyHit = excludeBodyPatterns.find((re) => re.test(page.text))
+    if (bodyHit) reason = `body pattern: ${bodyHit.source}`
+  }
   if (reason) excluded.push({ page, reason })
   else exported.push(page)
 }
@@ -194,10 +202,27 @@ function rewriteLinks(text, attachmentsOut) {
 // ------------------------------------------------------------ build the dest
 
 await fs.mkdir(dest, { recursive: true })
+// The skeleton ships its own documentation wiki (example entities included), which must
+// not ride into the export unfiltered: copy everything EXCEPT .git and wiki/, then take
+// only the structural wiki files from it. All content pages come from the filtered source.
 await fs.cp(skeleton, dest, {
   recursive: true,
-  filter: (src) => !path.relative(skeleton, src).split(path.sep).includes('.git'),
+  filter: (src) => {
+    const parts = path.relative(skeleton, src).split(path.sep)
+    return !parts.includes('.git') && parts[0] !== 'wiki'
+  },
 })
+const structuralFiles = ['index.md', 'hot.md', 'log.md', 'getting-started.md', 'dashboard.md']
+for (const dir of ['concepts', 'entities', 'sources', 'folds', 'comparisons', 'canvases', 'meta']) {
+  await fs.mkdir(path.join(dest, 'wiki', dir), { recursive: true })
+}
+for (const name of structuralFiles) {
+  try {
+    await fs.copyFile(path.join(skeleton, 'wiki', name), path.join(dest, 'wiki', name))
+  } catch {
+    /* skeleton version does not ship this structural page */
+  }
+}
 
 const attachments = new Set()
 const review = []
