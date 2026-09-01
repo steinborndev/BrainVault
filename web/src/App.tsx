@@ -8,6 +8,7 @@ import { StatusPopover } from './components/StatusPopover.tsx'
 import { HoverTip } from './components/Tip.tsx'
 import { CommandPalette } from './components/CommandPalette.tsx'
 import { GlobalDrop } from './components/GlobalDrop.tsx'
+import { DemoNotice } from './components/DemoNotice.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { Home } from './tabs/Home.tsx'
 import { Chat } from './tabs/Chat.tsx'
@@ -125,7 +126,10 @@ export function App(): React.ReactElement {
   // The third intake channel. It only earns a pill while it is actually connected - "no
   // bot" is a settings fact, not a header one.
   const telegram = useQuery({ queryKey: ['telegram-status'], queryFn: api.telegramStatus, staleTime: 300_000 })
-  const setupMode = health.data ? !health.data.credentialConfigured : false
+  const demoMode = health.data?.demoMode === true
+  // A demo instance intentionally runs without a credential - that is its normal state,
+  // not an onboarding gap, so demo wins over the setup banner.
+  const setupMode = !demoMode && (health.data ? !health.data.credentialConfigured : false)
   // Both header chips show their channel's state rather than hiding when it is off: a
   // Telegram chip that vanishes when no bot is configured cannot tell you that none is.
   const watcherActive = stats.data?.watcher.active === true
@@ -284,6 +288,12 @@ export function App(): React.ReactElement {
             </button>
           </div>
         )}
+        {demoMode && (
+          <div className="setup-banner" role="status">
+            <strong>Read-only demo:</strong>&nbsp;browse the vault freely - ingestion, research and
+            system actions are switched off in this hosted instance.
+          </div>
+        )}
 
         <div className="screens">
           {/* Every screen is the same workspace shape now: one control column, one content
@@ -298,7 +308,14 @@ export function App(): React.ReactElement {
           <section className="screen flush" hidden={screen !== 'research'} aria-label="Research">
             <div className="lane wide">
               <ErrorBoundary label="Research">
-                <Chat researchPrefill={screen === 'research' ? (query.get('prefill') ?? '') : ''} />
+                {demoMode ? (
+                  <DemoNotice
+                    title="Research is switched off here"
+                    text="Research drives live agent sessions over the vault and the web - answering questions with citations, saving sessions as pages."
+                  />
+                ) : (
+                  <Chat researchPrefill={screen === 'research' ? (query.get('prefill') ?? '') : ''} />
+                )}
               </ErrorBoundary>
             </div>
           </section>
@@ -335,7 +352,14 @@ export function App(): React.ReactElement {
           <section className="screen flush" hidden={screen !== 'system'} aria-label="System">
             <div className="lane wide">
               <ErrorBoundary label="System">
-                <System section={screen === 'system' ? (query.get('section') ?? '') : ''} />
+                {demoMode ? (
+                  <DemoNotice
+                    title="System is switched off here"
+                    text="System hosts operations: the ingest queue, maintenance runs, integrations, and settings."
+                  />
+                ) : (
+                  <System section={screen === 'system' ? (query.get('section') ?? '') : ''} />
+                )}
               </ErrorBoundary>
             </div>
           </section>
@@ -343,7 +367,7 @@ export function App(): React.ReactElement {
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <GlobalDrop />
+      {!demoMode && <GlobalDrop />}
     </div>
   )
 }

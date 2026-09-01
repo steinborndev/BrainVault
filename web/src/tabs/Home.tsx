@@ -141,6 +141,9 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
   }, [statusFilter])
 
   const stats = useQuery({ queryKey: ['stats'], queryFn: api.stats })
+  // Same cached query the app shell uses; on a read-only demo the intake surface is gone.
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, staleTime: 60_000 })
+  const demoMode = health.data?.demoMode === true
   const jobsQ = useQuery({ queryKey: ['jobs', limit], queryFn: () => api.jobs({ limit }) })
   // The persistent run log (schema v12): every settled agent run, not just the newest per
   // kind - so a research run keeps its topic and its cost in the stream.
@@ -306,12 +309,14 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
             which channel. The channel list is last because it is the one that grows with the
             vault - it takes the leftover height and scrolls, and nothing sits under it that
             a long list could push out of sight. */}
-        <div className="gp-sec">
-          <div className="gp-head">
-            <span className="gp-eyebrow">Add to vault</span>
+        {!demoMode && (
+          <div className="gp-sec">
+            <div className="gp-head">
+              <span className="gp-eyebrow">Add to vault</span>
+            </div>
+            <Dropzone />
           </div>
-          <Dropzone />
-        </div>
+        )}
 
         {/* The reset lives in the head of the panel's first FILTERING section - here that is
             this one, on Library the search, on Graph the view lens. It used to sit in

@@ -153,6 +153,8 @@ export interface Health {
   status: string
   /** False = setup mode: no Anthropic credential yet, agent-running features disabled. */
   credentialConfigured: boolean
+  /** True on a hosted read-only demo instance: all write surfaces are disabled. */
+  demoMode?: boolean
   queue: { inFlight: number; paused: boolean; pauseReason: PauseReason; concurrency: number }
   jobs: Record<string, number>
   /** Server-side caps the client pre-checks against (dropzone size warning). */
