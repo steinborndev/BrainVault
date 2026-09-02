@@ -67,10 +67,12 @@ export function registerSettingsRoute(app: FastifyInstance, ctx: AppContext): vo
   const { settings, config, queue } = ctx
   if (!settings) return
 
-  /** Key status only — never the credential itself (hard rule 3). */
+  /** Key status only — never the credential itself (hard rule 3). A hosted demo also keeps
+   *  its filesystem layout and bind address to itself (SPEC.md §12.8). */
   const readOnlyView = (): Record<string, string> => ({
-    vaultRoot: config.vaultRoot,
-    bind: `${config.server.host}:${config.server.port}`,
+    ...(config.demoMode
+      ? {}
+      : { vaultRoot: config.vaultRoot, bind: `${config.server.host}:${config.server.port}` }),
     httpAuthMode: config.server.authMode,
     // "API-Key-Status (Key selbst wird nie angezeigt)" — SPEC.md §6.4. In setup mode
     // (no credential yet) the UI uses this to show the onboarding form.
@@ -83,11 +85,15 @@ export function registerSettingsRoute(app: FastifyInstance, ctx: AppContext): vo
       : 'off',
   })
 
+  /** In demo mode the watch folder is inert and its path is nobody's business. */
+  const hidePaths = <T extends { watchFolder: string }>(s: T): T =>
+    config.demoMode ? { ...s, watchFolder: '(hidden in demo)' } : s
+
   const snapshot = (): object => {
     const overrides = settings.overrides()
     return {
-      effective: effectiveSettings(config, overrides),
-      baseline: baselineSettings(config),
+      effective: hidePaths(effectiveSettings(config, overrides)),
+      baseline: hidePaths(baselineSettings(config)),
       overrides,
       readOnly: readOnlyView(),
       /** Keys that only take effect after a service restart (bound at startup). */

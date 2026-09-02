@@ -95,6 +95,10 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
     // Fastify's logger is separate from job_logs; keep it terse and structured.
     logger: ctx.logger ?? { level: process.env['LOG_LEVEL'] ?? 'info' },
     bodyLimit: 1 * 1024 * 1024, // JSON bodies stay small; file uploads go through multipart.
+    // Behind a reverse proxy on the same machine the client address arrives in
+    // X-Forwarded-For; trusting that header from loopback only keeps per-client limits
+    // meaningful without letting a remote peer spoof its own address.
+    trustProxy: 'loopback',
   })
 
   await app.register(multipart, {

@@ -195,7 +195,7 @@ GET    /api/v1/stats                Übersichts-Kennzahlen
 POST   /api/v1/query                Frage an Query-Runner (Session-ID optional)
 POST   /api/v1/maintenance/lint     Lint-Run starten
 POST   /api/v1/maintenance/research Autoresearch starten
-GET    /api/v1/events               SSE: Job-Updates, Log-Streams, Statistik-Invalidation
+GET    /api/v1/events               SSE: Job-Updates, Log-Streams, Statistik-Invalidation (max. 8 gleichzeitige Streams pro Client-Adresse, darüber 429; die Client-Adresse kommt hinter einem Loopback-Reverse-Proxy aus X-Forwarded-For)
 GET/PUT /api/v1/settings            Konfiguration
 POST   /api/v1/settings/credential  Credential der Ersteinrichtung entgegennehmen (7.1);
                                     schreibt die Service-Env-Datei, liefert den Wert nie zurück
@@ -549,6 +549,6 @@ Ein Betriebsmodus für eine öffentlich gehostete, strikt lesende Instanz (`DEMO
 2. **Passive Startaufstellung** in `startService`, als Defense in depth unterhalb des Guards: Ingest-Queue, Inbox-Watcher, Telegram-Bot, Retrieval-Index-Scheduler und Vault-Reconciler (ein Vault-SCHREIBER) werden im Demo-Modus gar nicht erst gestartet. Der Vault-Watcher (read-only SSE-Signal) läuft weiter.
 3. **Kein Credential nötig oder erwartet:** Die Demo-Instanz läuft bewusst ohne Anthropic-Credential; der Setup-Modus-Hinweis entfällt (Demo gewinnt über Setup - das ist der Normalzustand der Instanz, keine Onboarding-Lücke).
 
-**Oberfläche:** `GET /api/v1/health` meldet `demoMode: true`. Das Dashboard zeigt statt des Setup-Banners einen Read-only-Hinweis; Research und System bleiben als Tabs sichtbar, rendern aber eine Erklärfläche (Feature existiert, ist in der gehosteten Demo abgeschaltet, Verweis auf lokalen Betrieb); Intake-Flächen (Dropzone, globales Drag-and-drop) entfallen.
+**Oberfläche:** `GET /api/v1/health` meldet `demoMode: true`. Das Dashboard zeigt statt des Setup-Banners einen Read-only-Hinweis; Research und System bleiben als Tabs sichtbar, rendern aber eine Erklärfläche (Feature existiert, ist in der gehosteten Demo abgeschaltet, Verweis auf lokalen Betrieb); Intake-Flächen (Dropzone, globales Drag-and-drop) entfallen. `GET /api/v1/settings` nennt im Demo-Modus weder Vault-Pfad noch Watch-Ordner noch Bind-Adresse - eine öffentliche Instanz hat keinen Grund, ihr Dateisystem-Layout preiszugeben.
 
 **Abgrenzung:** Der Demo-Modus ändert nichts an Hard Rule 2 (Bind-Policy) - eine öffentliche Demo steht hinter einem Reverse Proxy, der Dienst selbst bindet weiter `127.0.0.1`. Er ist orthogonal zum Setup-Modus und zu `HTTP_AUTH_MODE`.

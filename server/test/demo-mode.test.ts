@@ -141,6 +141,19 @@ describe('demo mode API guard', () => {
     expect(body.demoMode).toBe(true)
   })
 
+  it('keeps the filesystem layout out of the settings view', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/settings`)
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    const body = JSON.parse(text) as { readOnly: Record<string, string>; effective: { watchFolder: string } }
+    expect(body.readOnly).not.toHaveProperty('vaultRoot')
+    expect(body.readOnly).not.toHaveProperty('bind')
+    expect(body.effective.watchFolder).toBe('(hidden in demo)')
+    expect(text).not.toContain(vaultRoot)
+    // The status fields a visitor may legitimately see stay in place.
+    expect(body.readOnly.credentialConfigured).toBe('no')
+  })
+
   it('keeps read routes open', async () => {
     for (const route of ['/api/v1/stats', '/api/v1/graph', '/api/v1/jobs']) {
       const res = await fetch(`${baseUrl}${route}`)
