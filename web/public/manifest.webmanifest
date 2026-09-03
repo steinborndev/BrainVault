@@ -1,6 +1,6 @@
 {
-  "name": "BrainVault",
-  "short_name": "BrainVault",
+  "name": "LibrisVault",
+  "short_name": "LibrisVault",
   "description": "Ingestion service & dashboard for the claude-obsidian vault",
   "start_url": "/",
   "scope": "/",

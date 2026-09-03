@@ -1,7 +1,7 @@
 # Tasks: Dashboard redesign (sidebar shell, 8 areas)
 
-Source of truth for scope: the approved clickable mockup (artifact "BrainVault Redesign",
-2026-08-23) and the frontend deep-review findings (artifact "BrainVault Frontend Review").
+Source of truth for scope: the approved clickable mockup (artifact "LibrisVault Redesign",
+2026-08-23) and the frontend deep-review findings (artifact "LibrisVault Frontend Review").
 The review's invariants section lists what must NOT change (SSE data layer, status color
 pairs, research violet, armed two-step destructives, 12.7 three-layer model, run-plan
 preview, graph engine, PageLink triple action, cost estimate discipline, answer-of-record
@@ -160,7 +160,7 @@ disjointness guarantee itself.
 
 ## Phase 9: panel rework (2026-08-24)
 
-Source of truth: the clickable mockup "BrainVault Redesign" (artifact, revised 2026-08-24)
+Source of truth: the clickable mockup "LibrisVault Redesign" (artifact, revised 2026-08-24)
 and the operator's review of it. Scope is structure and priority, not a new visual system -
 the tokens, the semantic colour pairs and the SSE data layer are untouched.
 
@@ -247,7 +247,7 @@ build, 0 console errors across 10 screen loads (5 screens x 2 themes).
 
 ## Phase 6: rework pass (2026-08-25)
 
-Source of truth: the approved clickable mockup ("BrainVault UI Rework", 2026-08-24), six
+Source of truth: the approved clickable mockup ("LibrisVault UI Rework", 2026-08-24), six
 points raised against the shipped redesign.
 
 ### 1 - Agent runs are visible from everywhere, not just where they were started
@@ -525,7 +525,7 @@ run's `.raw/` payload stayed untracked, and the job lost its revert anchor.
 
 ## Phase 9: second pass - five screens, tabs in the header (2026-08-25)
 
-Scope from the approved clickable mockup ("BrainVault Tab Shell", the B variant of two
+Scope from the approved clickable mockup ("LibrisVault Tab Shell", the B variant of two
 drafts). Four complaints drove it, all of them structural rather than cosmetic:
 
 1. Home and the Inbox described the same events twice, in two different vocabularies.

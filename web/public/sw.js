@@ -1,9 +1,9 @@
 /**
- * Minimal service worker — just enough to make BrainVault installable as a PWA
+ * Minimal service worker — just enough to make LibrisVault installable as a PWA
  * (TASKS-M3 §2 "PWA-ready"). It caches the app shell for offline launch; API and SSE
  * requests are always network (they are localhost and inherently live), never cached.
  */
-const CACHE = 'brainvault-shell-v1'
+const CACHE = 'librisvault-shell-v1'
 const SHELL = ['/', '/index.html', '/favicon.svg', '/manifest.webmanifest']
 
 self.addEventListener('install', (event) => {

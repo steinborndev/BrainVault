@@ -23,7 +23,7 @@ let app: FastifyInstance
 beforeEach(async () => {
   dist = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-dist-'))
   fs.mkdirSync(path.join(dist, 'assets'))
-  fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>BrainVault</title>')
+  fs.writeFileSync(path.join(dist, 'index.html'), '<!doctype html><title>LibrisVault</title>')
   fs.writeFileSync(path.join(dist, 'assets', 'Vault-CURRENT.js'), 'export const x = 1\n')
   app = Fastify({ logger: false })
   await registerFrontend(app, dist)
@@ -56,13 +56,13 @@ describe('SPA deep links', () => {
   it('serves the shell for a client route', async () => {
     const res = await app.inject({ method: 'GET', url: '/graph' })
     expect(res.statusCode).toBe(200)
-    expect(res.body).toContain('BrainVault')
+    expect(res.body).toContain('LibrisVault')
   })
 
   it('serves the shell for a page route that ends in a file extension', async () => {
     const res = await app.inject({ method: 'GET', url: '/page/Some%20Note.md' })
     expect(res.statusCode).toBe(200)
-    expect(res.body).toContain('BrainVault')
+    expect(res.body).toContain('LibrisVault')
   })
 
   it('keeps unknown API routes a JSON 404', async () => {

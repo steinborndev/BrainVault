@@ -1,10 +1,10 @@
-# systemd USER unit for BrainVault (vault-service) - TASKS-M5 §1.
+# systemd USER unit for LibrisVault (vault-service) - TASKS-M5 §1.
 # This is a TEMPLATE: scripts/install-systemd.sh substitutes @PLACEHOLDERS@ with real
 # paths (the repo location and the resolved node binary) and installs the result to
 # ~/.config/systemd/user/vault-service.service. Do not install this file directly.
 [Unit]
-Description=BrainVault ingestion service (vault-service)
-Documentation=https://github.com/steinborndev/BrainVault
+Description=LibrisVault ingestion service (vault-service)
+Documentation=https://github.com/steinborndev/LibrisVault
 After=network.target
 
 [Service]

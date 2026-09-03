@@ -1,6 +1,6 @@
 # Security
 
-BrainVault runs headless AI agent sessions against documents you did not write. This page
+LibrisVault runs headless AI agent sessions against documents you did not write. This page
 describes what the security model does and — just as importantly — what it does not promise.
 The full, binding rules live in `CLAUDE.md` and `SPEC.md` §7–§9.
 

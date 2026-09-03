@@ -1,4 +1,4 @@
-# BrainVault (vault-service) - pure Linux userland image (SPEC.md §12.2, TASKS-M5 §5).
+# LibrisVault (vault-service) - pure Linux userland image (SPEC.md §12.2, TASKS-M5 §5).
 #
 # Not used under WSL day-to-day; it exists so the service can move to an always-on host
 # without a rewrite. Two things make this image non-trivial and are easy to get wrong:

@@ -11,8 +11,8 @@ export function DemoNotice({ title, text }: { title: string; text: string }): Re
       <p className="qs-line">{text}</p>
       <p className="qs-line">
         This feature is not available in the hosted demo -{' '}
-        <a href="https://github.com/steinborndev/BrainVault" target="_blank" rel="noreferrer">
-          run BrainVault locally
+        <a href="https://github.com/steinborndev/LibrisVault" target="_blank" rel="noreferrer">
+          run LibrisVault locally
         </a>{' '}
         to use it.
       </p>

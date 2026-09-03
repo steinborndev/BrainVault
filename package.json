@@ -6,7 +6,7 @@
   "author": "Benjamin Steinborn",
   "repository": {
     "type": "git",
-    "url": "https://github.com/steinborndev/BrainVault.git"
+    "url": "https://github.com/steinborndev/LibrisVault.git"
   },
   "type": "module",
   "description": "Local ingestion service + dashboard on top of a claude-obsidian vault",

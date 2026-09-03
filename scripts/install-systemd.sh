@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the BrainVault (vault-service) systemd USER unit so the service starts with WSL
+# Install the LibrisVault (vault-service) systemd USER unit so the service starts with WSL
 # and survives a restart (TASKS-M5 §1 DoD). Idempotent: re-run after changing VAULT_ROOT
 # or upgrading node. It resolves the repo path and the real node binary (nvm's node is not
 # on systemd's PATH) and bakes them into the unit.

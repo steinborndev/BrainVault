@@ -9,7 +9,7 @@ first ingest with a clean vault commit.**
 ## Method
 
 A second, throwaway WSL distro on the same machine (`wsl --install Ubuntu-24.04 --name
-brainvault-test --no-launch`, WSL 2.6.1): stock Ubuntu 24.04.4, fresh user with sudo, systemd
+librisvault-test --no-launch`, WSL 2.6.1): stock Ubuntu 24.04.4, fresh user with sudo, systemd
 enabled via `/etc/wsl.conf`, nothing shared with the real installation. The live service was
 stopped for the duration (WSL2 distros share one localhost, port 8420). Chosen over Docker (no
 systemd — step 7 untestable) and over a second Linux user (shares apt state — the toolchain step,

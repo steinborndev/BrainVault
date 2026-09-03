@@ -1,4 +1,4 @@
-# BrainVault Windows bootstrap: WSL2 + Ubuntu, then the one-shot Linux setup, then a
+# LibrisVault Windows bootstrap: WSL2 + Ubuntu, then the one-shot Linux setup, then a
 # desktop shortcut to the dashboard. Run from PowerShell:
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1
@@ -9,7 +9,7 @@
 
 $ErrorActionPreference = 'Stop'
 $Distro = 'Ubuntu'
-$RepoUrl = 'https://github.com/steinborndev/BrainVault.git'
+$RepoUrl = 'https://github.com/steinborndev/LibrisVault.git'
 $DashboardUrl = 'http://localhost:8420'
 
 function Step([string]$msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
@@ -39,14 +39,14 @@ machine, Windows may need a REBOOT now. After the reboot:
 Write-Host "WSL + $Distro are ready."
 
 # ---- Phase B: clone + setup inside WSL ---------------------------------------------
-Step 'Running the BrainVault setup inside Ubuntu (you will be asked for your Linux sudo password)'
+Step 'Running the LibrisVault setup inside Ubuntu (you will be asked for your Linux sudo password)'
 $bash = @"
 set -e
-if [ ! -d "`$HOME/BrainVault" ]; then
+if [ ! -d "`$HOME/LibrisVault" ]; then
   sudo apt-get update && sudo apt-get install -y git
-  git clone $RepoUrl "`$HOME/BrainVault"
+  git clone $RepoUrl "`$HOME/LibrisVault"
 fi
-cd "`$HOME/BrainVault"
+cd "`$HOME/LibrisVault"
 git pull --ff-only || true
 bash scripts/setup-all.sh
 "@
@@ -59,7 +59,7 @@ if ($LASTEXITCODE -ne 0) {
 # ---- Desktop shortcut ---------------------------------------------------------------
 Step 'Creating the desktop shortcut'
 $desktop = [Environment]::GetFolderPath('Desktop')
-$shortcut = Join-Path $desktop 'BrainVault.url'
+$shortcut = Join-Path $desktop 'LibrisVault.url'
 @"
 [InternetShortcut]
 URL=$DashboardUrl
@@ -69,7 +69,7 @@ Write-Host "Created $shortcut"
 Step 'Done'
 Write-Host @"
 
-BrainVault is running. Open the 'BrainVault' shortcut on your desktop
+LibrisVault is running. Open the 'LibrisVault' shortcut on your desktop
 (or $DashboardUrl in any browser).
 
 One step left in the browser: connect your Anthropic account - the dashboard

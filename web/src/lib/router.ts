@@ -10,7 +10,7 @@
 import { useSyncExternalStore } from 'react'
 
 /** Fired on our own navigate() so all subscribers re-read the location. */
-const NAV_EVENT = 'brainvault:navigate'
+const NAV_EVENT = 'librisvault:navigate'
 
 export function navigate(path: string, opts: { replace?: boolean } = {}): void {
   if (path === currentPath()) return

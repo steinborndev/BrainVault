@@ -528,7 +528,7 @@ writeFileSync(join(OUT, '.raw', '.manifest.json'), JSON.stringify({ sources: raw
 const git = (a, env = {}) => execFileSync('git', a, { cwd: OUT, env: { ...process.env, ...env }, stdio: 'pipe' })
 
 git(['init', '-q', '-b', 'vault-main'])
-git(['config', 'user.name', 'BrainVault Demo'])
+git(['config', 'user.name', 'LibrisVault Demo'])
 git(['config', 'user.email', 'demo@example.invalid'])
 
 /**

@@ -2,14 +2,14 @@
   <img src="docs/img/logo-mark.svg" width="88" height="88" alt="">
 </p>
 
-# BrainVault
+# LibrisVault
 
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
 
 Drop a PDF into a folder - a few minutes later it is a set of linked, cited wiki pages in your
 personal knowledge vault.
 
-BrainVault is a local ingestion service and web dashboard on top of a
+LibrisVault is a local ingestion service and web dashboard on top of a
 [claude-obsidian](https://github.com/AgriciDaniel/claude-obsidian) vault (v1.9.2, Generic mode).
 It watches a folder, accepts drag-and-drop uploads and (optionally) files sent to a Telegram bot
 from your phone, preprocesses the material (PDF, Office, web, images, text), and runs headless
@@ -39,7 +39,7 @@ plus, if you enable the Telegram bot, its outbound polling of `api.telegram.org`
 **One command** (Linux, or Windows + WSL2 with Ubuntu):
 
 ```bash
-git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
+git clone https://github.com/steinborndev/LibrisVault.git && cd LibrisVault
 bash scripts/setup-all.sh
 ```
 
@@ -51,14 +51,14 @@ System → Integrations.
 
 **Windows without WSL yet:** download the repo as a ZIP (GitHub: Code → Download ZIP - no
 git needed on Windows), unpack it, and run `scripts\install.ps1` in PowerShell - it installs
-WSL2 + Ubuntu, runs the setup above inside it, and puts a BrainVault shortcut on your desktop.
+WSL2 + Ubuntu, runs the setup above inside it, and puts a LibrisVault shortcut on your desktop.
 
 **Manually instead:**
 
 ```bash
 # 1. This repo - the service itself. It lives NEXT TO the vault, never inside it,
 #    and finds the vault via VAULT_ROOT (step 4).
-git clone https://github.com/steinborndev/BrainVault.git && cd BrainVault
+git clone https://github.com/steinborndev/LibrisVault.git && cd LibrisVault
 
 # 2. The vault this service writes into (a separate repo, OUTSIDE this one).
 #    Cloned from our fork, pinned to the tested version. Push is disabled:
@@ -85,7 +85,7 @@ Each step is explained below; for an always-on setup see
 
 ## Requirements
 
-What the **machine** needs - the BrainVault repo itself is not listed because acquiring it is
+What the **machine** needs - the LibrisVault repo itself is not listed because acquiring it is
 step 1 of the quick start, not a prerequisite. `setup-all.sh` installs everything in this table
 except the OS; the manual path below installs each row explicitly. `git` and `curl` are assumed
 (both ship with the stock Ubuntu WSL image).
@@ -533,14 +533,14 @@ The image exists so the service can move to an always-on Linux host later (SPEC.
 WSL the systemd unit above is the day-to-day path.
 
 ```bash
-docker build -t brainvault .
+docker build -t librisvault .
 docker run --rm \
-  -v ~/vault:/vault -v brainvault-data:/data -v ~/inbox:/inbox \
+  -v ~/vault:/vault -v librisvault-data:/data -v ~/inbox:/inbox \
   -e CLAUDE_CODE_OAUTH_TOKEN=... \
   --security-opt seccomp=unconfined \
   -p 127.0.0.1:8420:8420 \
   -e HOST=0.0.0.0 -e HTTP_AUTH_MODE=token -e HTTP_AUTH_TOKEN=<secret> \
-  brainvault
+  librisvault
 ```
 
 Verified on Docker Desktop 4.52 / Engine 29.0.1 (linux/amd64): the image builds, ships bubblewrap

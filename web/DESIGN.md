@@ -1,4 +1,4 @@
-# BrainVault dashboard - design conventions
+# LibrisVault dashboard - design conventions
 
 The goal: moving between areas must feel like moving inside ONE application. These
 conventions are what every screen follows; new UI goes through this list before it ships.

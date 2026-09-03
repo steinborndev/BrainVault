@@ -91,7 +91,7 @@ if curl -fsS http://127.0.0.1:8420/api/v1/health >/dev/null 2>&1; then
   cat <<'EOF'
 
 ──────────────────────────────────────────────────────────────────────
-  BrainVault is running.
+  LibrisVault is running.
 
   Open   http://localhost:8420   in your browser.
 

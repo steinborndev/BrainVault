@@ -10,7 +10,7 @@
 
 import { useSyncExternalStore } from 'react'
 
-const KEY = 'brainvault.staleLinks'
+const KEY = 'librisvault.staleLinks'
 
 export interface StaleLinksState {
   /** Total dangling links produced by deletions this session. */
