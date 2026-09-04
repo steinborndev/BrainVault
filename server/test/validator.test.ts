@@ -12,7 +12,10 @@ import {
   validatePages,
   validateAddressMap,
   validateCounters,
+  validateHotCache,
   createValidator,
+  HOT_CACHE_WORD_LIMIT,
+  HOT_CACHE_RELATED_LIMIT,
   type ValidationFinding,
 } from '../src/pipeline/validator.js'
 import { GraphBuilder } from '../src/pipeline/graph.js'
@@ -305,6 +308,36 @@ describe('address_map consistency (2c)', () => {
     expect(validateAddressMap(vaultRoot)).toEqual([])
     write('.raw/.manifest.json', JSON.stringify({ version: 1, sources: {} }))
     expect(validateAddressMap(vaultRoot)).toEqual([])
+  })
+})
+
+describe('hot cache size', () => {
+  const hot = (words: number, relatedEntries: number): string =>
+    '---\ntype: meta\ntitle: "Hot Cache"\nupdated: 2026-09-04\nrelated:\n' +
+    Array.from({ length: relatedEntries }, (_, i) => `  - "[[Page ${i}]]"\n`).join('') +
+    '---\n\n# Recent Context\n\n## Last Updated\n2026-09-04. ' +
+    Array.from({ length: words }, () => 'word').join(' ') +
+    '\n'
+
+  it('flags a hot cache that has grown into a journal', () => {
+    write('wiki/hot.md', hot(HOT_CACHE_WORD_LIMIT + 200, HOT_CACHE_RELATED_LIMIT + 10))
+    const findings = validateHotCache(vaultRoot)
+    expect(findings).toHaveLength(2)
+    expect(findings.every((f) => f.rule === 'hot-cache-size' && f.path === 'wiki/hot.md')).toBe(true)
+    expect(findings[0]!.message).toContain('not a journal')
+    expect(findings[1]!.message).toContain(`${HOT_CACHE_RELATED_LIMIT + 10} related pages`)
+  })
+
+  it('accepts a hot cache that honours the contract, and a vault without one', () => {
+    expect(validateHotCache(vaultRoot)).toEqual([])
+    write('wiki/hot.md', hot(300, 12))
+    expect(validateHotCache(vaultRoot)).toEqual([])
+  })
+
+  it('is part of the standard composition', () => {
+    write('wiki/hot.md', hot(HOT_CACHE_WORD_LIMIT + 1, 0))
+    const findings = createValidator(vaultRoot)([])
+    expect(findings.some((f) => f.rule === 'hot-cache-size')).toBe(true)
   })
 })
 
