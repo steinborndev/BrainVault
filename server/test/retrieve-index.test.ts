@@ -202,6 +202,43 @@ describe('buildRetrieveIndex', () => {
     expect(result.chunkCount).toBe(5)
   })
 
+  it('prunes chunk records of shrunken pages and directories of deleted pages before indexing (F-R14)', async () => {
+    const root = makeVault()
+    const chunks = path.join(root, '.vault-meta', 'chunks')
+    const record = (pagePath: string, hash: string) => JSON.stringify({ page_path: pagePath, page_body_hash: hash, raw_text: 'x' })
+    const writeChunk = (dir: string, n: number, pagePath: string, hash: string) => {
+      fs.mkdirSync(path.join(chunks, dir), { recursive: true })
+      fs.writeFileSync(path.join(chunks, dir, `chunk-${String(n).padStart(3, '0')}.json`), record(pagePath, hash))
+    }
+    fs.mkdirSync(path.join(root, 'wiki'), { recursive: true })
+    fs.writeFileSync(path.join(root, 'wiki', 'hot.md'), '---\ntype: meta\n---\nshort now\n')
+    // The chunker's own run left this state behind: chunk-000/001 carry the current body hash,
+    // chunk-002 still carries the hash of the long body the page had before it was trimmed.
+    const run: ProcessRunner = async (_bin, args) => {
+      if (args[0] === 'scripts/contextual-prefix.py') {
+        writeChunk('syn-hot', 0, 'wiki/hot.md', 'sha256:new')
+        writeChunk('syn-hot', 1, 'wiki/hot.md', 'sha256:new')
+        writeChunk('syn-hot', 2, 'wiki/hot.md', 'sha256:old')
+        writeChunk('c-000042', 0, 'wiki/concepts/Deleted.md', 'sha256:gone')
+        writeChunk('c-000042', 1, 'wiki/concepts/Deleted.md', 'sha256:gone')
+      }
+      return { stdout: '', stderr: '' }
+    }
+    const order: string[] = []
+    const seq: ProcessRunner = async (bin, args, opts) => {
+      order.push(args[0]!)
+      return run(bin, args, opts)
+    }
+    const result = await buildRetrieveIndex({ vaultRoot: root, run: seq })
+    expect(fs.existsSync(path.join(chunks, 'syn-hot', 'chunk-000.json'))).toBe(true)
+    expect(fs.existsSync(path.join(chunks, 'syn-hot', 'chunk-001.json'))).toBe(true)
+    expect(fs.existsSync(path.join(chunks, 'syn-hot', 'chunk-002.json'))).toBe(false)
+    expect(fs.existsSync(path.join(chunks, 'c-000042'))).toBe(false)
+    expect(result.chunkCount).toBe(2)
+    // Pruning sits between the two scripts: after the chunker wrote, before the index reads.
+    expect(order).toEqual(['scripts/contextual-prefix.py', 'scripts/bm25-index.py'])
+  })
+
   it('throws RetrieveScriptsMissingError on a pre-v1.7 vault', async () => {
     const root = makeVault({ scripts: false })
     const run: ProcessRunner = async () => ({ stdout: '', stderr: '' })
@@ -364,6 +401,58 @@ describe('retrieveCandidates (service-side, outside any sandbox)', () => {
     expect(res.candidates[1]?.rank).toBe(2)
   })
 
+  it('hands back topK DISTINCT pages: over-fetches chunks and cuts after the collapse (F-R14)', async () => {
+    const root = makeVault()
+    provision(root)
+    let asked = 0
+    const run: ProcessRunner = async (_bin, args) => {
+      asked = Number(args[args.indexOf('--top') + 1])
+      // Eight chunks, the first four from two pages: five raw chunks would collapse to only
+      // three pages, which is exactly what used to reach the agent.
+      return {
+        stdout: stdout([
+          { page_path: 'wiki/concepts/A.md' },
+          { page_path: 'wiki/concepts/A.md' },
+          { page_path: 'wiki/concepts/B.md' },
+          { page_path: 'wiki/concepts/B.md' },
+          { page_path: 'wiki/concepts/C.md' },
+          { page_path: 'wiki/concepts/D.md' },
+          { page_path: 'wiki/concepts/E.md' },
+          { page_path: 'wiki/concepts/F.md' },
+        ]),
+        stderr: '',
+      }
+    }
+    const res = await retrieveCandidates({ vaultRoot: root, question: 'q', topK: 5, run })
+    expect(asked).toBeGreaterThanOrEqual(20)
+    expect(res.candidates.map((c) => c.pagePath)).toEqual([
+      'wiki/concepts/A.md', 'wiki/concepts/B.md', 'wiki/concepts/C.md', 'wiki/concepts/D.md', 'wiki/concepts/E.md',
+    ])
+    expect(res.candidates.map((c) => c.rank)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('lets generated root pages take at most one slot, keeping the best-ranked one', async () => {
+    const root = makeVault()
+    provision(root)
+    const run: ProcessRunner = async () => ({
+      stdout: stdout([
+        { page_path: 'wiki/log.md' },
+        { page_path: 'wiki/concepts/A.md' },
+        { page_path: 'wiki/hot.md' },
+        { page_path: 'wiki/index.md' },
+        { page_path: 'wiki/concepts/B.md' },
+        { page_path: 'wiki/concepts/C.md' },
+        { page_path: 'wiki/overview.md' },
+        { page_path: 'wiki/concepts/D.md' },
+      ]),
+      stderr: '',
+    })
+    const res = await retrieveCandidates({ vaultRoot: root, question: 'what changed lately?', topK: 5, run })
+    expect(res.candidates.map((c) => c.pagePath)).toEqual([
+      'wiki/log.md', 'wiki/concepts/A.md', 'wiki/concepts/B.md', 'wiki/concepts/C.md', 'wiki/concepts/D.md',
+    ])
+  })
+
   it('passes the question as ONE argv element with the requested top-k', async () => {
     const root = makeVault()
     provision(root)
@@ -373,8 +462,10 @@ describe('retrieveCandidates (service-side, outside any sandbox)', () => {
       return { stdout: stdout([]), stderr: '' }
     }
     await retrieveCandidates({ vaultRoot: root, question: 'a "quoted"; rm -rf /', topK: 3, run })
-    // The question is one argv element (shell:false), so quoting/semicolons are inert.
-    expect(seen.slice(0, 4)).toEqual(['scripts/retrieve.py', 'a "quoted"; rm -rf /', '--top', '3'])
+    // The question is one argv element (shell:false), so quoting/semicolons are inert. The chunk
+    // count asked of retrieve.py is the over-fetch (floor 20), not topK: the cut to 3 pages
+    // happens after the collapse (F-R14).
+    expect(seen.slice(0, 6)).toEqual(['scripts/retrieve.py', 'a "quoted"; rm -rf /', '--top', '20', '--bm25-top', '20'])
   })
 
   it('defaults to NO rerank, and only asks for it when explicitly enabled', async () => {

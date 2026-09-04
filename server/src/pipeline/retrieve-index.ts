@@ -155,6 +155,10 @@ export const buildRetrieveIndex: RetrieveIndexBuilder = async ({
   fs.mkdirSync(path.join(vaultRoot, '.vault-meta', 'bm25'), { recursive: true })
   log('info', 'retrieve-index: chunking changed pages (synthetic prefix tier — no egress)')
   await run('python3', ['scripts/contextual-prefix.py', '--all'], { cwd: vaultRoot, timeoutMs: 15 * 60_000 })
+  const pruned = pruneStaleChunks(path.join(vaultRoot, '.vault-meta', 'chunks'), vaultRoot)
+  if (pruned.removedFiles > 0 || pruned.removedDirs > 0) {
+    log('info', `retrieve-index: pruned ${pruned.removedFiles} stale chunk file(s) and ${pruned.removedDirs} directory(ies) of deleted pages`)
+  }
   log('info', 'retrieve-index: rebuilding BM25 index')
   await run('python3', ['scripts/bm25-index.py', 'build'], { cwd: vaultRoot, timeoutMs: 5 * 60_000 })
   return {
@@ -162,6 +166,82 @@ export const buildRetrieveIndex: RetrieveIndexBuilder = async ({
     durationMs: Date.now() - started,
   }
 }
+
+/**
+ * Removes the chunk records the chunker leaves behind. `contextual-prefix.py --all` rewrites the
+ * chunks a page still has and never deletes: when a page shrinks, its surplus chunk files stay on
+ * disk and in every later index, and when a page is deleted its whole directory does. Measured on
+ * 2026-09-04 (TASKS-RETRIEVE F-R14): a hot cache trimmed from 53,000 to 400 words kept 111 stale
+ * chunk records holding 51,000 words of text that no longer existed, and retrieval kept serving
+ * them. The index is built from whatever files exist, so pruning has to happen here.
+ *
+ * chunk-000 of a page carries the hash of the body the chunker last saw, so it is the reference:
+ * siblings with another `page_body_hash` are stale. Anything unreadable is left alone, and only
+ * files under the chunks directory are ever removed.
+ */
+export function pruneStaleChunks(
+  chunksDir: string,
+  vaultRoot: string,
+): { removedFiles: number; removedDirs: number } {
+  let removedFiles = 0
+  let removedDirs = 0
+  let dirs: fs.Dirent[]
+  try {
+    dirs = fs.readdirSync(chunksDir, { withFileTypes: true })
+  } catch {
+    return { removedFiles, removedDirs }
+  }
+  for (const d of dirs) {
+    if (!d.isDirectory()) continue
+    const dir = path.join(chunksDir, d.name)
+    const first = readChunkRecord(path.join(dir, 'chunk-000.json'))
+    if (first === null) continue
+    if (!fs.existsSync(path.join(vaultRoot, first.pagePath))) {
+      fs.rmSync(dir, { recursive: true, force: true })
+      removedDirs++
+      continue
+    }
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^chunk-\d+\.json$/.test(name) || name === 'chunk-000.json') continue
+      const rec = readChunkRecord(path.join(dir, name))
+      if (rec !== null && rec.pageBodyHash !== first.pageBodyHash) {
+        fs.unlinkSync(path.join(dir, name))
+        removedFiles++
+      }
+    }
+  }
+  return { removedFiles, removedDirs }
+}
+
+/** The two fields of a chunk record the pruning needs; null for anything malformed or off-vault. */
+function readChunkRecord(file: string): { pagePath: string; pageBodyHash: string } | null {
+  try {
+    const r = JSON.parse(fs.readFileSync(file, 'utf8')) as { page_path?: unknown; page_body_hash?: unknown }
+    if (typeof r.page_path !== 'string' || typeof r.page_body_hash !== 'string') return null
+    if (!r.page_path.startsWith('wiki/') || r.page_path.includes('..')) return null
+    return { pagePath: r.page_path, pageBodyHash: r.page_body_hash }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Chunks requested from `retrieve.py` per page the caller asked for. Five chunks collapsed to
+ * 4.00 distinct pages on average over the labeled set (F-R14), so "top-5" handed the agent four
+ * pages; fetching more and cutting AFTER the collapse restores the contract. Monotone: a page in
+ * today's top five stays there, since its chunks still rank above the ones that fill the gap.
+ */
+const CHUNKS_PER_PAGE = 4
+const MIN_CHUNK_FETCH = 20
+
+/**
+ * Generated root pages (index, log, hot, overview) aggregate everything and therefore match
+ * everything; left uncapped they took 8 of 175 top-5 slots on the labeled set, log.md alone 4
+ * after the hot cache was trimmed. One slot keeps them available for a question about the vault
+ * itself without letting a journal crowd out the content pages.
+ */
+const ROOT_PAGE_SLOTS = 1
+const isRootPage = (pagePath: string): boolean => /^wiki\/[^/]+\.md$/.test(pagePath)
 
 /** One retrieved page, best first. Chunk hits are collapsed to their page. */
 export interface RetrievedCandidate {
@@ -225,8 +305,15 @@ export const retrieveCandidates: CandidateRetriever = async ({
   const q = question.trim().slice(0, MAX_QUESTION_CHARS)
   if (q === '') return EMPTY_RETRIEVAL
   try {
+    // Chunks are over-fetched and the cut to `topK` happens after the collapse to pages, so the
+    // agent gets topK DISTINCT pages rather than topK chunks that collapse to fewer. `--bm25-top`
+    // travels with `--top`: retrieve.py caps its output at the BM25 candidate count.
+    const fetch = Math.max(topK * CHUNKS_PER_PAGE, MIN_CHUNK_FETCH)
     // `shell: false` in the runner, so the question is one argv element — never a second command.
-    const args = ['scripts/retrieve.py', q, '--top', String(topK), ...(rerank ? [] : ['--no-rerank'])]
+    const args = [
+      'scripts/retrieve.py', q, '--top', String(fetch), '--bm25-top', String(fetch),
+      ...(rerank ? [] : ['--no-rerank']),
+    ]
     const { stdout } = await run('python3', args, { cwd: vaultRoot, timeoutMs })
     // STDOUT ONLY: retrieve.py prints progress ("bm25: N hits") to stderr, and merging the two
     // corrupts the JSON parse (finding F-R5).
@@ -236,13 +323,19 @@ export const retrieveCandidates: CandidateRetriever = async ({
     }
     const seen = new Set<string>()
     const candidates: RetrievedCandidate[] = []
+    let rootSlots = 0
     for (const c of parsed.candidates ?? []) {
       // Several chunks of one page can rank — the agent reads whole pages, so collapse them,
       // keeping each page at its best rank.
       const pagePath = typeof c.page_path === 'string' ? c.page_path : ''
       if (pagePath === '' || seen.has(pagePath)) continue
+      if (isRootPage(pagePath)) {
+        if (rootSlots >= ROOT_PAGE_SLOTS) continue
+        rootSlots++
+      }
       seen.add(pagePath)
       candidates.push({ pagePath, rank: candidates.length + 1 })
+      if (candidates.length >= topK) break
     }
     return { candidates, strategy: typeof parsed.strategy === 'string' ? parsed.strategy : null }
   } catch {
