@@ -102,6 +102,12 @@ export function findRelatedPages(vaultRoot: string, topic: string): RelatedPages
 /**
  * Renders the related-pages block appended to the research prompt. Empty string when nothing
  * overlaps, so a fresh topic keeps the original prompt verbatim.
+ *
+ * Every "prefer what exists" sentence here is scoped to concept/entity/source pages and says
+ * so. The unscoped earlier wording was read by a run as covering the synthesis page too: it
+ * extended the vault's existing pages, filed no `Research: …` page, and settled as a clean
+ * success with nothing for the run detail to show (2026-09-04). The synthesis mandate that
+ * `renderSynthesisMandate` appends after this block is the other half of that fix.
  */
 export function renderOverlapBlock(related: RelatedPages): string {
   if (related.pages.length === 0 && related.syntheses.length === 0) return ''
@@ -109,17 +115,20 @@ export function renderOverlapBlock(related: RelatedPages): string {
   if (related.pages.length > 0) {
     block +=
       '\n\nThe vault ALREADY holds pages related to this topic. Prefer EXTENDING and updating ' +
-      'these over creating new ones; only add a new concept or entity page when the material ' +
-      'genuinely has no home among them. Before writing any new page, check this list for one ' +
-      'that already covers it and update that page instead (keep its existing title and ' +
-      'frontmatter, refresh its `updated:` date):\n' +
+      'these over creating new ones; only add a new concept, entity or source page when the ' +
+      'material genuinely has no home among them. Before writing any new page of those kinds, ' +
+      'check this list for one that already covers it and update that page instead (keep its ' +
+      'existing title and frontmatter, refresh its `updated:` date). This preference does NOT ' +
+      'extend to the synthesis page - that one is this run\'s deliverable and is required:\n' +
       related.pages.map((p) => `- ${p}`).join('\n')
   }
   if (related.syntheses.length > 0) {
     block +=
-      '\n\nThese existing research syntheses overlap the topic. If your findings substantially ' +
+      '\n\nThese existing research syntheses overlap the topic. They are an alternative TARGET ' +
+      'for this run\'s synthesis, never a reason to skip it: if your findings substantially ' +
       'overlap one of them, UPDATE it (refresh its `updated:` date and fold your findings in) ' +
-      'rather than filing a second near-duplicate "Research: …" page:\n' +
+      'instead of filing a second near-duplicate "Research: …" page. Either way this run must ' +
+      'leave exactly one synthesis page carrying its findings:\n' +
       related.syntheses.map((p) => `- ${p}`).join('\n')
   }
   return block

@@ -497,6 +497,11 @@ export interface MaintenanceResult {
   pages: string[]
   usage: { tokensIn: number; tokensOut: number; costUsd: number }
   error?: string
+  /**
+   * A run that succeeded but did not produce what its kind owes - e.g. a research run that
+   * filed no synthesis page. The pages it wrote are real; the run is just not complete.
+   */
+  warning?: string
   /** The agent's final text (summary / fallback when no structured report). */
   answer?: string
   lint?: LintReport

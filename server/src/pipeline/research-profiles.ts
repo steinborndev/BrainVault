@@ -18,8 +18,10 @@
  *
  * These profiles are a stable product capability, not the user's evolving taxonomy (which is
  * what the vault-editable domain registry is for) — so, unlike domains, they live in code and
- * are unit-testable. `broad` is the default and renders NO block, so a default run stays
- * byte-for-byte the pre-profile prompt (no regression).
+ * are unit-testable. `broad` is the default and renders NO LENS block, so a default run keeps
+ * the pre-profile framing. It does still get the synthesis mandate below: that one is not a
+ * lens refinement but the definition of what a research run owes, and withholding it from the
+ * default lens is exactly what let a broad run finish with no synthesis page (2026-09-04).
  */
 
 /** The closed lens set. Extend deliberately; each key is validated against this union. */
@@ -114,28 +116,74 @@ export function getResearchProfile(key: string | undefined): ResearchProfile {
   return (key !== undefined && BY_KEY.get(key)) || BY_KEY.get(DEFAULT_PROFILE_KEY)!
 }
 
+/** The prefix every synthesis page title (and file name) carries. */
+export const RESEARCH_PREFIX = 'Research: '
+
 /** The deterministic synthesis-page title the service pins for this lens + topic. */
 export function researchTargetTitle(profile: ResearchProfile, topic: string): string {
-  return `Research: ${topic}${profile.titleSuffix}`
+  return `${RESEARCH_PREFIX}${topic}${profile.titleSuffix}`
+}
+
+/**
+ * True for a vault path that is a research synthesis page.
+ *
+ * Deliberately the same test the dashboard applies when it looks for the page a run was FOR
+ * (`web/src/lib/researchRuns.ts`), so the post-run warning fires exactly when the run detail
+ * would otherwise show its empty state - the two can never disagree about whether a run has a
+ * synthesis. `wiki/questions/` alone is not enough: that folder also holds ordinary question
+ * pages, which are not what a research run owes.
+ */
+export function isSynthesisPath(relPath: string): boolean {
+  const prefix = 'wiki/questions/'
+  if (!relPath.startsWith(prefix) || !relPath.endsWith('.md')) return false
+  return relPath.slice(prefix.length).startsWith(RESEARCH_PREFIX)
+}
+
+/**
+ * The synthesis mandate appended to EVERY research prompt, whatever the lens (2026-09-04).
+ *
+ * This sentence used to live inside `renderProfileBlock`, which returns nothing for `broad` -
+ * so the default lens, the one most runs use, was the only one never told to file a synthesis
+ * page. The vault skill asks for one too, but only as one bullet among its filing rules, and
+ * the overlap block appended right after it argues in the opposite direction ("prefer
+ * extending what exists over creating new pages"). A broad run on a topic the vault already
+ * covered followed the overlap block, filed twelve concept and source pages, updated three
+ * more, reported success - and wrote no synthesis at all, leaving the run detail with nothing
+ * to show and the Library with no research entry for it.
+ *
+ * So the mandate is unconditional, it names the exact title the SERVICE pinned (which is also
+ * the title the dashboard predicts, so the two can no longer drift apart), and it states the
+ * one legitimate alternative - folding into an existing synthesis - as an alternative TARGET
+ * rather than as permission to skip the deliverable.
+ */
+export function renderSynthesisMandate(profile: ResearchProfile, topic: string): string {
+  const title = researchTargetTitle(profile, topic)
+  return (
+    `\n\n<synthesis_page>\n` +
+    `This run is NOT finished until exactly one synthesis page under wiki/questions/ carries ` +
+    `its findings. File it with EXACTLY this title, do not choose another: "${title}".\n` +
+    `The one alternative is to fold the findings into an existing synthesis page this prompt ` +
+    `lists as overlapping (keep its title, refresh its \`updated:\` date). Doing NEITHER is a ` +
+    `failed run, however many concept, entity and source pages you wrote along the way.\n` +
+    `</synthesis_page>`
+  )
 }
 
 /**
  * The lens block appended to the research prompt. Empty for `broad`, so a default run keeps
  * the base prompt verbatim. For a real lens it states the intent, the source preferences, the
- * synthesis framing, the SERVICE-pinned synthesis title, and — explicitly — its subordination
- * to the hygiene/notability/domain rules the system prompt already carries.
+ * synthesis framing and — explicitly — its subordination to the hygiene/notability/domain
+ * rules the system prompt already carries. The synthesis TITLE is pinned separately, by
+ * `renderSynthesisMandate`, because every lens needs that and this block is lens-only.
  */
-export function renderProfileBlock(profile: ResearchProfile, topic: string): string {
+export function renderProfileBlock(profile: ResearchProfile): string {
   if (profile.key === DEFAULT_PROFILE_KEY) return ''
-  const title = researchTargetTitle(profile, topic)
   const guard = profile.guard ? `\n- ${profile.guard}` : ''
   return (
     `\n\n<research_lens name="${profile.label}">\n` +
     `Approach this topic through the "${profile.label}" lens: ${profile.blurb}\n` +
     `- Prefer these sources: ${profile.sources.join(', ')}.\n` +
     `- Emphasise in the synthesis: ${profile.emphasis}.${guard}\n` +
-    `File the master synthesis page under wiki/questions/ with EXACTLY this title, do not ` +
-    `choose another: "${title}".\n` +
     `This lens only refines what you search for and how you frame the synthesis. It does NOT ` +
     `override the page-hygiene, entity-notability, or domain rules given above; it adds no new ` +
     `page types and invents no new domains. Concepts, entities and sources are still filed into ` +

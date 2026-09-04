@@ -614,8 +614,11 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
             </button>
           </div>
         )}
+        {/* A run that came back ok but owes its synthesis page reads as a WARNING, not a
+            success: the pages it wrote are real and linked below, but nothing pulls them
+            together, so presenting it in the green band would overstate what happened. */}
         {mode === 'research' && research.result?.ok === true && (
-          <div className="toast ok runbanner">
+          <div className={`toast ${research.result.warning !== undefined ? 'warn' : 'ok'} runbanner`}>
             {lastTopic === '' ? 'Run finished' : `Run finished: ${lastTopic}`}
             {research.result.usage.costUsd > 0 && (
               <span>
@@ -624,6 +627,7 @@ export function Chat({ researchPrefill = '' }: { researchPrefill?: string }): Re
                 {isEstimate(authMode) && <span className="dim"> ({ESTIMATE_LABEL})</span>}
               </span>
             )}
+            {research.result.warning !== undefined && <> - {research.result.warning}</>}
             {research.result.pages.length > 0 ? (
               <PageLinks vaultName={vaultName} paths={research.result.pages} />
             ) : (
@@ -1069,9 +1073,25 @@ function RunDetailBody({
     >
       {entry.error !== null && <div className="toast err">{entry.error}</div>}
       {articlePath === null ? (
+        /* Two different things wear the same empty state, and conflating them sent the reader
+           looking for a dashboard bug when the run itself was incomplete. A run that filed
+           pages but no synthesis DID work, it just owes the page that pulls the work together;
+           a run that filed nothing is a different problem. Both offer the one repair there is. */
         <div className="empty">
-          This run has no synthesis page in the vault - nothing it committed is filed under a research
-          title, and no page answers to the name the lens would have given it.
+          {entry.pages.length > 0 ? (
+            <>
+              This run filed {entry.pages.length} {entry.pages.length === 1 ? 'page' : 'pages'} but no
+              synthesis page. They are listed above and are safely in the vault, but nothing pulls
+              them together, so there is no page to show here.
+            </>
+          ) : (
+            <>
+              This run committed no page at all, so there is nothing to show. Its log may say why.
+            </>
+          )}{' '}
+          <button className="btn sm" onClick={() => onRerun(entry.topic, entry.profileKey)}>
+            Run the topic again
+          </button>
         </div>
       ) : article.isPending ? (
         <div className="empty">Loading the page…</div>

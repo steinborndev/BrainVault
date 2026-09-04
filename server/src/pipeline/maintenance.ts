@@ -31,7 +31,7 @@ import { parseDomainReview, DOMAIN_REVIEW_FORMAT, type DomainReview } from './do
 import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
 import { findRelatedPages, renderOverlapBlock } from './related-pages.js'
-import { getResearchProfile, renderProfileBlock } from './research-profiles.js'
+import { getResearchProfile, isSynthesisPath, renderProfileBlock, renderSynthesisMandate } from './research-profiles.js'
 import type { Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
@@ -223,6 +223,13 @@ export interface MaintenanceResult {
   readonly error?: string
   /** The agent's final text — a summary/fallback the UI can render as markdown. */
   readonly answer?: string
+  /**
+   * A run that SUCCEEDED but did not produce what its kind owes. Distinct from `error`: the
+   * pages it did write are real and committed, so calling the run failed would misrepresent
+   * them - but the dashboard must not present it as a complete run either. Set for a research
+   * run that filed no synthesis page.
+   */
+  readonly warning?: string
   /** Present for a lint run: the parsed report (from the written file, or the answer text). */
   readonly lint?: LintReport
   /** Where the lint report was written (vault-relative), if a file was found. */
@@ -471,15 +478,20 @@ export class MaintenanceRunner {
    * pages; this makes the preferred "extend, don't duplicate" path the explicit default.
    *
    * Lens steering ("Achse A"): an optional `profileKey` selects a closed research lens (state of
-   * the art, patents, startups) that refines what is searched and how the synthesis is framed,
-   * and — crucially — pins the synthesis page title deterministically (per-lens suffix) so two
-   * lenses on one topic do not collide. The lens block is subordinate to the hygiene/notability/
-   * domain rules; `broad` (the default) renders no block, so a plain run is unchanged.
+   * the art, patents, startups) that refines what is searched and how the synthesis is framed.
+   * The lens block is subordinate to the hygiene/notability/domain rules; `broad` (the default)
+   * renders no lens block, so a plain run's framing is unchanged.
+   *
+   * The synthesis mandate is appended LAST and for every lens, including `broad`. It pins the
+   * page title deterministically (per-lens suffix, so two lenses on one topic cannot collide)
+   * and states that a run without a synthesis page is not done. It has to come after the
+   * overlap block: that block argues for extending what exists, and a broad run once read it
+   * as licence to file no synthesis at all (2026-09-04, see `renderSynthesisMandate`).
    */
   startResearch(topic: string, profileKey?: string): MaintenanceRun {
     const overlap = renderOverlapBlock(findRelatedPages(this.vaultRoot, topic))
     const profile = getResearchProfile(profileKey)
-    const lens = renderProfileBlock(profile, topic)
+    const lens = renderProfileBlock(profile)
     return this.start(
       'research',
       'Use the autoresearch skill to research this topic and file the findings into the wiki: ' +
@@ -491,7 +503,10 @@ export class MaintenanceRunner {
         'Finally report how many pages you created and the key findings. ' +
         'Stay focused on the stated topic rather than broadening the scope.' +
         lens +
-        overlap,
+        overlap +
+        // Last, deliberately: it is the one instruction that must survive the overlap block's
+        // "prefer what already exists", and it is the run's definition of done.
+        renderSynthesisMandate(profile, topic),
       'research',
       // The topic and lens ride on the run record so every OTHER screen can name what is
       // running - the dashboard used to know this only inside the composer that started it.
@@ -1014,6 +1029,26 @@ export class MaintenanceRunner {
             'the lint run finished without writing a report to wiki/meta/ - nothing to base safe ' +
             'fixes on, so the run counts as failed. Re-run the lint.',
           ...(res.result !== undefined ? { answer: res.result } : {}),
+        }
+      }
+      if (kind === 'research') {
+        /**
+         * The synthesis page IS the deliverable of a research run, the same way the report file
+         * is the lint run's - it is what the run detail renders and what the Library lists under
+         * Questions. A run can write a dozen good concept and source pages and still owe it.
+         *
+         * Unlike lint this does NOT settle as a failure. The lint report bounds a later fix run,
+         * so a missing one makes the whole area unsafe; here the committed pages stand on their
+         * own and are already in git. Calling that a failed run would misreport real work. So it
+         * settles ok with a warning the dashboard can show, and the log line names it either way.
+         */
+        if (!pages.some(isSynthesisPath)) {
+          const warning =
+            'this run filed no synthesis page under wiki/questions/ - its concept and source ' +
+            'pages are committed, but nothing pulls them together and the run has no page of ' +
+            'its own to show. Re-run the topic to file one.'
+          log('warn', `maintenance: research ${warning}`)
+          return { ...base, warning }
         }
       }
       if (kind === 'domain-review') {

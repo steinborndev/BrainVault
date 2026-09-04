@@ -5,6 +5,8 @@ import {
   getResearchProfile,
   isResearchProfileKey,
   renderProfileBlock,
+  renderSynthesisMandate,
+  isSynthesisPath,
   researchTargetTitle,
   researchProfileList,
 } from '../src/pipeline/research-profiles.js'
@@ -37,15 +39,15 @@ describe('research profiles (Achse A)', () => {
     expect(new Set(titles).size).toBe(titles.length)
   })
 
-  it('renders NO block for the default lens, so a plain run keeps the base prompt verbatim', () => {
-    expect(renderProfileBlock(getResearchProfile('broad'), 'anything')).toBe('')
+  it('renders NO lens block for the default lens, so a plain run keeps the base framing', () => {
+    expect(renderProfileBlock(getResearchProfile('broad'))).toBe('')
   })
 
-  it('renders a subordinate lens block that pins the title and forbids new page types/domains', () => {
-    const block = renderProfileBlock(getResearchProfile('sota'), 'brain-computer interfaces')
+  it('renders a subordinate lens block that forbids new page types/domains', () => {
+    const block = renderProfileBlock(getResearchProfile('sota'))
     expect(block).toContain('research_lens')
-    expect(block).toContain('State of the Art')
-    expect(block).toContain('Research: brain-computer interfaces — State of the Art')
+    // The lens LABEL; the pinned title now rides on the synthesis mandate instead.
+    expect(block).toContain('State of the art')
     expect(block).toContain('arXiv')
     // The subordination clause is load-bearing (analysis point 3).
     expect(block).toMatch(/does NOT\s+override the page-hygiene, entity-notability, or domain rules/)
@@ -54,8 +56,49 @@ describe('research profiles (Achse A)', () => {
   })
 
   it('carries the entity-notability guardrail on the startups lens', () => {
-    const block = renderProfileBlock(getResearchProfile('startups'), 'battery recycling')
+    const block = renderProfileBlock(getResearchProfile('startups'))
     expect(block).toMatch(/entity-notability rules above already allow it/)
+  })
+
+  /**
+   * The regression this set exists for (2026-09-04): the synthesis mandate used to live inside
+   * the lens block, which renders nothing for `broad` - so the DEFAULT lens was the only one
+   * never told to file a synthesis page, and a broad run duly filed none.
+   */
+  describe('synthesis mandate', () => {
+    it('is rendered for EVERY lens, the default one included', () => {
+      for (const p of RESEARCH_PROFILES) {
+        const mandate = renderSynthesisMandate(p, 'ionizable lipids')
+        expect(mandate).not.toBe('')
+        expect(mandate).toContain('wiki/questions/')
+        expect(mandate).toContain(researchTargetTitle(p, 'ionizable lipids'))
+      }
+    })
+
+    it('pins the exact title and forbids choosing another', () => {
+      const mandate = renderSynthesisMandate(getResearchProfile('broad'), 'ionizable lipids')
+      expect(mandate).toContain('"Research: ionizable lipids"')
+      expect(mandate).toMatch(/EXACTLY this title, do not choose another/)
+    })
+
+    it('offers folding into an existing synthesis as the ONLY alternative, not as an opt-out', () => {
+      const mandate = renderSynthesisMandate(getResearchProfile('sota'), 'quantum computing')
+      expect(mandate).toMatch(/one alternative is to fold the findings into an existing synthesis/i)
+      expect(mandate).toMatch(/Doing NEITHER is a failed run/)
+    })
+  })
+
+  describe('isSynthesisPath', () => {
+    it('accepts a research synthesis, whatever the lens suffix', () => {
+      expect(isSynthesisPath('wiki/questions/Research: ionizable lipids.md')).toBe(true)
+      expect(isSynthesisPath('wiki/questions/Research: quantum computing — State of the Art.md')).toBe(true)
+    })
+
+    it('rejects an ordinary question page and pages outside wiki/questions', () => {
+      expect(isSynthesisPath('wiki/questions/How does the wiki pattern work.md')).toBe(false)
+      expect(isSynthesisPath('wiki/concepts/Research: not here.md')).toBe(false)
+      expect(isSynthesisPath('wiki/questions/Research: no extension')).toBe(false)
+    })
   })
 
   it('lists lenses for the UI without leaking prompt internals', () => {

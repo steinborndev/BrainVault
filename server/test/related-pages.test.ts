@@ -94,4 +94,29 @@ describe('renderOverlapBlock', () => {
     expect(block).toContain('EXTENDING')
     expect(block).toMatch(/near-duplicate/i)
   })
+
+  /**
+   * The 2026-09-04 regression: this block's "prefer what already exists" was written without
+   * scope, a broad run applied it to the synthesis page as well, and the run finished with no
+   * synthesis at all. Both halves must now say that the synthesis is exempt and required.
+   */
+  it('scopes the extend-first preference to concept/entity/source pages, never the synthesis', () => {
+    const block = renderOverlapBlock({
+      syntheses: [],
+      pages: ['wiki/concepts/Ionizable Lipid.md'],
+    })
+    expect(block).toMatch(/new concept, entity or source page/)
+    expect(block).toMatch(/does NOT\s+extend to the synthesis page/)
+    expect(block).toMatch(/this run's deliverable and is required/)
+  })
+
+  it('presents an overlapping synthesis as an alternative target, not a reason to skip one', () => {
+    const block = renderOverlapBlock({
+      syntheses: ['wiki/questions/Research: Lipids.md'],
+      pages: [],
+    })
+    expect(block).toMatch(/alternative TARGET/)
+    expect(block).toMatch(/never a reason to skip it/)
+    expect(block).toMatch(/exactly one synthesis page carrying its findings/)
+  })
 })

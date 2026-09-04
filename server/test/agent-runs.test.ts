@@ -235,4 +235,78 @@ describe('MaintenanceRunner run history', () => {
     expect(recorded!.commitHash).toBeNull()
     expect(recorded!.pages).toEqual([])
   })
+
+  /**
+   * The 2026-09-04 regression. A broad-lens run filed twelve concept and source pages, no
+   * synthesis, and settled as a clean success - so the ledger listed it, the run detail had
+   * nothing to render, and the Library gained no research entry. The prompt now demands the
+   * page for every lens; this is the check for when the agent still does not write one.
+   */
+  it('warns when a research run filed no synthesis page, without calling the run failed', async () => {
+    const store = new MemoryAgentRunStore()
+    const runner = makeRunner(store, true, {
+      committed: true,
+      hash: 'def67890',
+      committedPages: ['wiki/concepts/Protein Corona.md', 'wiki/sources/Some Paper.md', 'wiki/index.md'],
+    })
+    const run = runner.startResearch('apolipoproteins and lipid nanoparticles', 'broad')
+    await waitSettled(runner, run.id)
+
+    const settled = runner.getRun(run.id)!
+    expect(settled.status).toBe('done')
+    expect(settled.result!.ok).toBe(true)
+    expect(settled.result!.warning).toMatch(/no synthesis page/)
+    // The pages it did write are real work and stay reported as such.
+    expect(settled.result!.pages).toContain('wiki/concepts/Protein Corona.md')
+    expect(store.list()[0]!.ok).toBe(true)
+  })
+
+  it('stays silent when the run did file a synthesis page', async () => {
+    const store = new MemoryAgentRunStore()
+    const runner = makeRunner(store, true, {
+      committed: true,
+      hash: 'abc12345',
+      committedPages: ['wiki/questions/Research: X.md', 'wiki/concepts/Y.md'],
+    })
+    const run = runner.startResearch('X', 'broad')
+    await waitSettled(runner, run.id)
+
+    expect(runner.getRun(run.id)!.result!.warning).toBeUndefined()
+  })
+
+  it('counts an UPDATED existing synthesis, not just a newly created one', async () => {
+    const store = new MemoryAgentRunStore()
+    const runner = makeRunner(store, true, {
+      committed: true,
+      hash: 'abc12345',
+      committedPages: ['wiki/questions/Research: Recent Insights into Lipid Nanoparticles.md'],
+    })
+    const run = runner.startResearch('lipid nanoparticles', 'broad')
+    await waitSettled(runner, run.id)
+
+    expect(runner.getRun(run.id)!.result!.warning).toBeUndefined()
+  })
+
+  it('asks a DEFAULT-lens run for a synthesis page, by its pinned title', async () => {
+    let prompt = ''
+    const runner = new MaintenanceRunner({
+      vaultRoot,
+      auth: { envVar: 'CLAUDE_CODE_OAUTH_TOKEN', credential: 'x' },
+      events: new EventBus(),
+      commitMutex: new Mutex(),
+      runAgent: async (opts) => {
+        prompt = opts.prompt
+        return okResult('done')
+      },
+      commit: async () => ({ committed: false, committedPages: [], note: 'nothing to commit' }),
+      runStore: new MemoryAgentRunStore(),
+    })
+    const run = runner.startResearch('ionizable lipids', 'broad')
+    await waitSettled(runner, run.id)
+
+    expect(prompt).toContain('<synthesis_page>')
+    expect(prompt).toContain('"Research: ionizable lipids"')
+    // It has to survive the overlap block's "prefer what already exists", so it comes last.
+    expect(prompt.indexOf('<synthesis_page>')).toBeGreaterThan(prompt.indexOf('Stay focused on the stated topic'))
+  })
 })
