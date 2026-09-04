@@ -398,3 +398,23 @@ Result (21 cases, top-k 5):
   wiki/concepts + wiki/entities + the source page, plus modified index.md/_index.md). Flagged to
   the operator; left untouched — sweeping unrelated pages into a commit is exactly what the
   pathspec-strict commit rules forbid.
+- **F-R14 (2026-09-04) — re-run at 947 pages, and the three defects it exposed.** BM25 only
+  (ollama absent, so the comparison arm did not run): top-5 33/35 (94%), top-1 23/35 (66%),
+  against 34/35 and 24/35 in July; the blind-random cohort stayed at 14/14. Within the
+  instrument's one-case resolution, so no verdict on the baseline — but the ONE new miss was an
+  `easy` case, and its cause is structural, not lexical: the expected page was the fifth DISTINCT
+  page yet beyond the fifth CHUNK, because the service asked retrieve.py for five chunks and
+  collapsed them to pages afterwards. Over the whole set five chunks collapsed to **4.00 pages on
+  average**, so "top-5" handed the agent four. Second: generated root pages took 8 of the 175
+  top-5 slots (hot.md 4, log.md 4), one of them a 53,000-word hot cache; after that cache was
+  trimmed to the skill's ~500-word contract (separate PR) log.md still held its 4. Third, found
+  while trimming: `contextual-prefix.py` rewrites the chunks a page still has and never deletes,
+  so the trimmed hot cache kept 111 stale chunk records (51,000 words that no longer existed)
+  and retrieval kept serving them; pruning took the index from 2,686 to 2,575 docs. Hit rates
+  did not move with the pruning — the crowding cost slot quality, not hits. Fixes, all in this
+  service's own code with the upstream scripts untouched: over-fetch chunks and cut to topK
+  after the collapse; cap root pages at one slot; prune stale chunk records in the build step
+  between the chunker and the indexer. The comparison arm is deferred on purpose: these fixes
+  change what a measurement would measure, so measuring first would have measured the wrong
+  pipeline. Re-run `npm run retrieval-eval` after they land, and grow the set past 35 before
+  reading any difference between arms.
