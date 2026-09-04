@@ -32,7 +32,7 @@ import type { DomainCandidate } from './domain-candidates.js'
 import { indexWikiPages } from './citations.js'
 import { findRelatedPages, renderOverlapBlock } from './related-pages.js'
 import { getResearchProfile, isSynthesisPath, renderProfileBlock, renderSynthesisMandate } from './research-profiles.js'
-import type { Validator } from './validator.js'
+import { HOT_CACHE_WORD_BUDGET, type Validator } from './validator.js'
 import type { EventBus } from './events.js'
 import { buildRetrieveIndex, hasRetrieveScripts, RetrieveScriptsMissingError, type RetrieveIndexBuilder } from './retrieve-index.js'
 import type { MaintenanceStateStore } from '../db/maintenance-state.js'
@@ -514,9 +514,23 @@ export class MaintenanceRunner {
     )
   }
 
-  /** Starts a hot-cache refresh in the background; returns its tracked run immediately. */
+  /**
+   * Starts a hot-cache refresh in the background; returns its tracked run immediately.
+   *
+   * The instruction says "rewrite", not "update", on purpose. The wiki skill defines hot.md as a
+   * ~500-word cache that is overwritten each time; told merely to update it, the agent appended
+   * a new pass under the previous ones for over a year, until the file held 89 passes and
+   * 53,000 words. validator.ts's hot-cache-size check is the backstop for this instruction.
+   */
   startHotCache(): MaintenanceRun {
-    return this.start('hot-cache', 'update hot cache', 'ingest')
+    return this.start(
+      'hot-cache',
+      'Rewrite wiki/hot.md from scratch. It is a cache, not a journal: keep it under ' +
+        `${HOT_CACHE_WORD_BUDGET} words and follow the wiki skill's hot-cache template (Last ` +
+        'Updated, Key Recent Facts, Recent Changes, Active Threads). Set related: to the pages ' +
+        'of the latest pass only. Do not carry older passes over; they live in git history.',
+      'ingest',
+    )
   }
 
   /**
@@ -539,8 +553,9 @@ export class MaintenanceRunner {
         'you touch if they are now off.\n' +
         '- In content pages, convert a dangling [[wikilink]] into plain text; only rewrite ' +
         'or drop a sentence when it stops making sense without the deleted page.\n' +
-        '- Leave wiki/log.md and wiki/hot.md history entries untouched — they are ' +
-        'append-only records and MAY keep referring to deleted pages.\n' +
+        '- Leave wiki/log.md history entries untouched: it is an append-only record and MAY ' +
+        'keep referring to deleted pages. Do not edit wiki/hot.md in this run either; it is a ' +
+        'cache that the hot-cache refresh rewrites from scratch, not a journal.\n' +
         "- If .raw/.manifest.json has an address_map entry for a deleted page's path, remove " +
         'exactly that entry. Do not touch other entries and never edit the address counter.\n' +
         '- Do not delete, rename, or create any page, and do not touch pages that carry no ' +

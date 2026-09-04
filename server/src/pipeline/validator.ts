@@ -35,6 +35,7 @@ export type ValidationRule =
   | 'address-map'
   | 'stale-counter'
   | 'single-source-entity'
+  | 'hot-cache-size'
 
 export interface ValidationFinding {
   readonly rule: ValidationRule
@@ -519,11 +520,60 @@ function countWikiPages(vaultRoot: string): { pages: number; sources: number } |
   return { pages, sources }
 }
 
-/** The standard composition the service wires in: per-page, address_map, and counter checks. */
+/** The hot cache is a cache, not a journal: the wiki skill sizes it at ~500 words, overwritten each run. */
+export const HOT_CACHE_WORD_BUDGET = 500
+/** Findings start here; the gap above the budget absorbs a long "Last Updated" line without nagging. */
+export const HOT_CACHE_WORD_LIMIT = 750
+/** `related:` on the hot cache names the pages of the latest pass, not every page ever touched. */
+export const HOT_CACHE_RELATED_LIMIT = 40
+
+/**
+ * The hot-cache-size check. wiki/hot.md is loaded into context at the start of every session and
+ * read by every query, and the wiki skill specifies it as a ~500-word summary of recent context
+ * that is overwritten on each update. Left to accumulate instead, one vault's copy reached 53,000
+ * words across 89 appended passes with a 647-entry `related:` list, which turned the recency
+ * buffer into 70,000 tokens of preamble and into a page that outranked real content in retrieval.
+ * Findings are advisory; the hot-cache refresh run is what rewrites the file.
+ */
+export function validateHotCache(vaultRoot: string): ValidationFinding[] {
+  const rel = 'wiki/hot.md'
+  let markdown: string
+  try {
+    markdown = fs.readFileSync(path.join(vaultRoot, rel), 'utf8')
+  } catch {
+    return []
+  }
+  const findings: ValidationFinding[] = []
+  const words = markdown.split(/\s+/).filter(Boolean).length
+  if (words > HOT_CACHE_WORD_LIMIT) {
+    findings.push({
+      rule: 'hot-cache-size',
+      path: rel,
+      message:
+        `hot cache is ${words} words; the skill contract is a ~${HOT_CACHE_WORD_BUDGET}-word summary ` +
+        'of recent context, overwritten each run, not a journal - rewrite it within the budget',
+    })
+  }
+  const relatedBlock = /^related:\s*$([\s\S]*?)(?=^\S)/m.exec(markdown)?.[1] ?? ''
+  const relatedEntries = relatedBlock.split('\n').filter((l) => /^\s*-\s/.test(l)).length
+  if (relatedEntries > HOT_CACHE_RELATED_LIMIT) {
+    findings.push({
+      rule: 'hot-cache-size',
+      path: rel,
+      message:
+        `hot cache lists ${relatedEntries} related pages; keep related: to the pages of the latest ` +
+        `pass (at most ${HOT_CACHE_RELATED_LIMIT})`,
+    })
+  }
+  return findings
+}
+
+/** The standard composition the service wires in: per-page, address_map, counter and hot-cache checks. */
 export function createValidator(vaultRoot: string, graph?: { build(): VaultGraph }): Validator {
   return (paths) => [
     ...validatePages(vaultRoot, paths, graph?.build()),
     ...validateAddressMap(vaultRoot),
     ...validateCounters(vaultRoot),
+    ...validateHotCache(vaultRoot),
   ]
 }

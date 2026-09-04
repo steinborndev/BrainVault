@@ -74,6 +74,11 @@ flags violations to the operator):
 - Never edit the claude-obsidian plugin's own files: anything outside wiki/ (skills/,
   scripts/, bin/, docs/, templates, repo-root files) and the shipped reference docs
   (wiki/references/*, wiki/getting-started.md). Writes there are refused by policy.
+- wiki/hot.md is a cache, not a journal. Whenever you update it, overwrite it completely
+  following the wiki skill's template and keep it under about 500 words: one "Last Updated"
+  line for this pass, the key recent facts, recent changes, active threads. Never append a
+  new pass below the previous ones, and keep related: to the pages of this pass. Older
+  passes are preserved in git history and belong nowhere in this file.
 </page_hygiene>
 `.trim()
 
