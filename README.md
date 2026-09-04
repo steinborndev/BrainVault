@@ -323,7 +323,7 @@ a real theme - and pre-fills the proposal. That pass is read-only: only you crea
 
 Every write - an ingest, a maintenance run, or a page edit - is followed by a deterministic,
 read-only check of the pages it touched: missing frontmatter, dead links, orphaned pages, stale
-counters. The findings are **advisory** - streamed to the run's log or shown as a banner after an
+counters, a hot cache that has outgrown its ~500-word contract. The findings are **advisory** - streamed to the run's log or shown as a banner after an
 edit - never an automatic rewrite, so the vault is only ever changed by something you or the agent
 did on purpose. The vault itself is never written from the browser except through those page
 edits; everything else that touches it is an agent run (see the security model).
@@ -342,9 +342,13 @@ and the service provisions and maintains its index:
   the vault's `.vault-meta/` - **derived data, kept out of vault git** and rebuildable at any
   time. The build is deterministic (no agent run, no credential needed) and stays fully
   on-machine: page bodies are chunked with a synthetic title-and-lead prefix, nothing is sent
-  anywhere.
+  anywhere. It also prunes what the chunker leaves behind - chunk records of pages that shrank
+  and directories of pages that were deleted - so the index never serves text the vault no
+  longer contains.
 - Once built, the **service** runs retrieval for each question before the agent starts and hands
-  it the ranked pages; an unbuilt (or pre-v1.7) vault silently keeps the classic read order.
+  it five distinct pages, best first (chunks are over-fetched and collapsed to pages before the
+  cut, and the generated root pages - index, log, hot cache, overview - take at most one of the
+  five); an unbuilt (or pre-v1.7) vault silently keeps the classic read order.
 - It **rebuilds itself** after ingests (a debounced maintenance run), so new pages become
   retrievable without any manual step; the card shows the chunk count and when it was last built.
 
@@ -353,8 +357,9 @@ BM25: the question and the candidate chunks are embedded by a local [ollama](htt
 (`nomic-embed-text`) and re-sorted by cosine similarity. It is **disabled by default**, and that
 is a measurement rather than an opinion - over a 35-question labeled set BM25 alone put the right
 page in the top 5 in 97% of cases against 94% with reranking, and top-1 fell from 69% to 54%.
-Since the model reads all five returned pages anyway, reordering inside that set bought nothing
-and cost a dependency. **ollama is therefore not a requirement of this service** - it appears in
+A re-run at roughly twice the vault size held that baseline within one case (F-R14 in
+`docs/tasks/TASKS-RETRIEVE.md`). Since the model reads all five returned pages anyway, reordering
+inside that set bought nothing and cost a dependency. **ollama is therefore not a requirement of this service** - it appears in
 no setup script and no dependency list; you only need it if you want to re-run the comparison
 (`npm run retrieval-eval --workspace server -- --data <your-set.jsonl>`) on a larger vault or with
 a stronger embedding model, and flip the one-line default back on if the numbers justify it.
