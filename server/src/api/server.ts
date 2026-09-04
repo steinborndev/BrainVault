@@ -107,11 +107,15 @@ export async function buildServer(ctx: AppContext): Promise<FastifyInstance> {
 
   registerAuth(app, ctx.config.server)
   // DEMO MODE (SPEC.md §12.8): ONE enforcement point for the read-only guarantee. Every
-  // non-read API request is refused before any route handler runs, so mutating endpoints
-  // added later are covered automatically. Static assets and all GETs stay untouched.
+  // request that is not a read is refused before any route handler runs, so mutating
+  // endpoints added later are covered automatically. The check looks at the verb alone
+  // on purpose: an earlier version also required the raw URL to start with `/api/`, and a
+  // percent-encoded path such as `/%61pi/v1/pages` slipped past it, because the router
+  // decodes the path before matching while the hook saw it undecoded. Nothing outside the
+  // API accepts writes, so the path condition bought nothing and cost the guarantee.
   if (ctx.config.demoMode) {
     app.addHook('onRequest', async (req, reply) => {
-      if (req.method !== 'GET' && req.method !== 'HEAD' && req.url.startsWith('/api/')) {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
         return reply
           .code(403)
           .send({ error: 'demo_read_only', message: 'This hosted demo instance is read-only.' })

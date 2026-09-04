@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { AddressInfo } from 'node:net'
+import net, { type AddressInfo } from 'node:net'
 import type { FastifyInstance } from 'fastify'
 import { openDb, MEMORY_DB, type Db } from '../src/db/index.js'
 import { JobStore } from '../src/db/jobs.js'
@@ -179,5 +179,55 @@ describe('demo mode API guard', () => {
     expect(res.status).toBe(403)
     const body = (await res.json()) as { error: string }
     expect(body.error).toBe('demo_read_only')
+  })
+
+  // The guard classifies by verb alone, so the spelling of the path must not matter. The
+  // router decodes percent-encoding before matching, a proxy may or may not collapse
+  // duplicate slashes, and a path outside the API prefix is a write all the same.
+  it.each([
+    ['PUT', '/%61pi/v1/pages'],
+    ['DELETE', '/%61pi/v1/jobs/does-not-exist'],
+    ['PUT', '//api/v1/pages'],
+    ['PUT', '/API/v1/pages'],
+    ['POST', '/api/v1/pages/../pages'],
+    ['POST', '/not-the-api'],
+    ['POST', '/'],
+  ])('refuses %s %s however the path is spelled', async (method, route) => {
+    const res = await fetch(`${baseUrl}${route}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(res.status, `${method} ${route}`).toBe(403)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toBe('demo_read_only')
+  })
+
+  it('refuses a write sent with an absolute-form request target', async () => {
+    // fetch always sends origin-form targets, so this one goes over a raw socket.
+    const { port } = app.server.address() as AddressInfo
+    const statusLine = await new Promise<string>((resolve, reject) => {
+      let raw = ''
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.write(
+          `DELETE http://127.0.0.1:${port}/api/v1/jobs/does-not-exist HTTP/1.1\r\n` +
+            `Host: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`,
+        )
+      })
+      socket.on('data', (chunk: Buffer) => {
+        raw += chunk.toString()
+      })
+      socket.on('end', () => resolve(raw.split('\r\n')[0] ?? ''))
+      socket.on('error', reject)
+    })
+    expect(statusLine).toBe('HTTP/1.1 403 Forbidden')
+  })
+
+  it('does not let a method override header turn a read into a write', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/stats`, {
+      headers: { 'x-http-method-override': 'DELETE' },
+    })
+    // The header is ignored rather than honoured: the request stays the GET it is.
+    expect(res.status).toBe(200)
   })
 })
