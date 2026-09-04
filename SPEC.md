@@ -545,7 +545,7 @@ Ein Betriebsmodus für eine öffentlich gehostete, strikt lesende Instanz (`DEMO
 
 **Garantien, in Schichten:**
 
-1. **Ein zentraler Request-Guard** in `buildServer`: Jede Nicht-Lese-Anfrage an die API (`!GET`/`!HEAD` unter `/api/`) wird vor jedem Routen-Handler mit `403 { error: "demo_read_only" }` abgewiesen. Neue mutierende Endpunkte sind damit automatisch abgedeckt - der Guard ist die Grenze, nicht die Einzelroute (dasselbe Prinzip wie die Sandbox in Hard Rule 4).
+1. **Ein zentraler Request-Guard** in `buildServer`: Jede Nicht-Lese-Anfrage (`!GET`/`!HEAD`, unabhängig vom Pfad) wird vor jedem Routen-Handler mit `403 { error: "demo_read_only" }` abgewiesen. Neue mutierende Endpunkte sind damit automatisch abgedeckt - der Guard ist die Grenze, nicht die Einzelroute (dasselbe Prinzip wie die Sandbox in Hard Rule 4). Der Guard prüft bewusst nur das Verb: eine frühere Fassung verlangte zusätzlich das Präfix `/api/` in der rohen URL, und ein prozentkodierter Pfad wie `/%61pi/v1/pages` kam daran vorbei, weil der Router den Pfad vor dem Matching dekodiert, der Hook ihn aber undekodiert sah. Außerhalb der API nimmt nichts Schreibzugriffe an, die Pfadbedingung brachte also nichts und kostete die Garantie.
 2. **Passive Startaufstellung** in `startService`, als Defense in depth unterhalb des Guards: Ingest-Queue, Inbox-Watcher, Telegram-Bot, Retrieval-Index-Scheduler und Vault-Reconciler (ein Vault-SCHREIBER) werden im Demo-Modus gar nicht erst gestartet. Der Vault-Watcher (read-only SSE-Signal) läuft weiter.
 3. **Kein Credential nötig oder erwartet:** Die Demo-Instanz läuft bewusst ohne Anthropic-Credential; der Setup-Modus-Hinweis entfällt (Demo gewinnt über Setup - das ist der Normalzustand der Instanz, keine Onboarding-Lücke).
 
