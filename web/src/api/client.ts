@@ -201,6 +201,14 @@ export const api = {
   hotCache: (): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/hot-cache`, { method: 'POST' }).then(json<MaintenanceRun>),
 
+  /** Resolve open graph gaps by unlinking them (one bounded run; titles must be live gaps). */
+  cleanupGaps: (titles: readonly string[]): Promise<MaintenanceRun> =>
+    fetch(`${BASE}/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'gap', pages: titles }),
+    }).then(json<MaintenanceRun>),
+
   /** Reference cleanup after deletions: a bounded agent run over the named pages' dangling refs. */
   cleanupReferences: (pages: readonly string[]): Promise<MaintenanceRun> =>
     fetch(`${BASE}/maintenance/cleanup`, {

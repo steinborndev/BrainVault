@@ -1126,6 +1126,49 @@ describe('POST /api/v1/maintenance (async job-style)', () => {
     expect(extra).toContain('<entity_notability>')
   })
 
+  it('cleanup in gap mode validates titles against the live gaps and prompts for unlinking', async () => {
+    fs.mkdirSync(path.join(vaultRoot, 'wiki', 'concepts'), { recursive: true })
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Gap Source.md'), 'see [[Gap Target]] and [[Real Page]]')
+    fs.writeFileSync(path.join(vaultRoot, 'wiki', 'concepts', 'Real Page.md'), 'x')
+
+    // A title that is not an open gap rejects the whole request, even beside a valid one.
+    const unknown = await fetch(`${baseUrl}/api/v1/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'gap', pages: ['Gap Target', 'Real Page'] }),
+    })
+    expect(unknown.status).toBe(400)
+    expect(((await unknown.json()) as { error: string }).error).toContain('Real Page')
+    const badMode = await fetch(`${baseUrl}/api/v1/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'purge', pages: ['Gap Target'] }),
+    })
+    expect(badMode.status).toBe(400)
+
+    let prompt = ''
+    maintAgent = async (opts) => {
+      prompt = opts.prompt
+      return okResult('unlinked')
+    }
+    const res = await fetch(`${baseUrl}/api/v1/maintenance/cleanup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode: 'gap', pages: ['Gap Target'] }),
+    })
+    expect(res.status).toBe(202)
+    const started = (await res.json()) as StartedRun & { label?: string }
+    expect(started.kind).toBe('cleanup')
+    expect(started.label).toBe('unlink Gap Target')
+    const run = await pollRun(started.id)
+    expect(run.status).toBe('done')
+    // The opposite premise of the deletion cleanup: nothing was deleted, nothing gets created.
+    expect(prompt).toContain('"Gap Target"')
+    expect(prompt).toContain('should NOT get one')
+    expect(prompt).toContain('Do NOT create a page')
+    expect(prompt).not.toContain('deliberately deleted')
+  })
+
   it('repair validates tasks against the live graph and bounds the run to them', async () => {
     // A path that names no page in the live graph rejects the WHOLE request — the user
     // selected specific things, silently dropping one would repair less than they asked.

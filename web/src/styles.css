@@ -5032,10 +5032,9 @@ tr:focus-within .rowacts {
   padding-right: 2px;
 }
 .gapcard {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 6px 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-elev-2);
@@ -5043,6 +5042,78 @@ tr:focus-within .rowacts {
 }
 .gapcard:hover {
   border-color: color-mix(in srgb, var(--research) 45%, transparent);
+}
+/* The card's two verbs (2026-09-05): the body researches, the corner picks it for unlinking.
+   The pick control only shows on hover, focus, or once picked - a row of twelve idle
+   controls would say "delete things" louder than the panel means to. */
+.gapcard .gap-go {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 26px 6px 9px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.gapcard .gap-pick {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  visibility: hidden;
+  cursor: pointer;
+}
+.gapcard .gap-pick svg {
+  width: 11px;
+  height: 11px;
+}
+.gapcard:hover .gap-pick,
+.gapcard:focus-within .gap-pick,
+.gapcard .gap-pick.on {
+  visibility: visible;
+}
+.gapcard .gap-pick:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+.gapcard.picked {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.gapcard .gap-pick.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.gapview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+}
+.gapview .gaplist {
+  flex: 1;
+  height: auto;
+}
+.gapbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
 }
 .gapcard .t {
   font-size: 12px;

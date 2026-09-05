@@ -507,6 +507,20 @@ Domänen aus Evidenz **vorschlägt** — entschieden wird weiterhin vom Nutzer.
   nun einer Domäne gehören; der Dismissal ist nur die zusätzliche Sicherung für die Zeit bis zum
   nächsten Backfill.
 
+**Lücken auflösen statt füllen (ergänzt 2026-09-05).** Die Gaps-Sicht des Home-Panels ("Worth a
+run") bot bisher nur einen Ausweg aus einer Lücke: Research. Viele Lücken verdienen aber nie eine
+Seite (Einzelerwähnungen, Bildunterschriften, Callout-Titel, die ein Ingest reflexhaft verlinkt
+hat). Jede Karte trägt deshalb ein Pick-Element; die Auswahl (max. 20) startet mit zweistufiger
+Bestätigung **einen** Maintenance-Run der Art `cleanup` im Modus `gap`
+(`POST /api/v1/maintenance/cleanup` mit `mode: 'gap'`): der Agent wandelt jeden Wikilink auf
+diese Titel in Fließtext um, entfernt reine Verweis-Einträge aus Index-/Overview-Seiten, legt
+keine Seite an und löscht keine, lässt `log.md`, `hot.md` und `.raw/.manifest.json` unangetastet;
+ein Commit, revertierbar über den Aktivitätsstrom. Serverseitig muss jeder Titel eine offene Lücke
+des **Live-Graphen** sein, ein unbekannter Titel weist die ganze Anfrage ab (dasselbe Prinzip wie
+beim Repair-Run). Bewusst kein deterministisches Regex-Unlinken aus Pipeline-Code (Hard Rule 1),
+und bewusst kein Gedächtnis für aufgelöste Titel: die Notability-Regeln im System-Prompt sollen
+Wiederkehrer verhindern; kommt eine Lücke trotzdem zurück, ist das ein Befund über den Ingest.
+
 ### 12.5 Reihenfolge
 
 Empfohlener Ausbaupfad nach v1-Stabilisierung: (1) Tailnet-Zugriff + Auth-Aktivierung (kleinster Schritt, sofortiger Mobile-Nutzen), (2) PWA-Share-Target, (3) Multi-User-Rollen, (4) Umzug auf Always-on-Host per Docker, (5) Git-Remote-Workflow für Zweitgerät-Edits. ~~(6) In-Dashboard Vault-Viewer~~ — **vorgezogen und am 2026-07-18 umgesetzt** (12.4); die Obsidian-App ist damit im Alltag optional.

@@ -567,6 +567,40 @@ export class MaintenanceRunner {
   }
 
   /**
+   * Resolves knowledge gaps the user decided NOT to fill (Home's "Worth a run" panel,
+   * 2026-09-05): a wikilink target no page exists for, which pages keep pointing at. The
+   * other way to make a gap go away is research; this one is for the gaps that never
+   * deserved a page - a single-mention person, an image caption, a callout title an ingest
+   * linked by reflex. Same run kind as the post-deletion cleanup, opposite premise: nothing
+   * was deleted, nothing must be created, the links become words. Titles are validated by
+   * the route against the LIVE graph's gaps, never free text.
+   */
+  startGapCleanup(gapTitles: readonly string[]): MaintenanceRun {
+    const titles = gapTitles.map((t) => `"${t}"`).join(', ')
+    const label = gapTitles.join(', ')
+    return this.start(
+      'cleanup',
+      `These wikilink targets have no page, and the user has decided they should NOT get one: ${titles}. ` +
+        'Other pages still link to them, which makes them show up as open gaps in the vault graph. ' +
+        'Resolve each of them by UNLINKING, so that nothing points at a page that will never exist:\n\n' +
+        '- Find every [[wikilink]] to these exact titles across wiki/ (also the [[Title|alias]] and ' +
+        '[[Title#heading]] forms). In content pages turn the link into plain text and keep the words; ' +
+        'only rewrite a sentence when it stops making sense as prose.\n' +
+        '- Remove list entries or bullets that exist only to point at these titles in wiki/index.md, ' +
+        'wiki/overview.md and any _index pages. Adjust page counters on the lines you touch if they ' +
+        'are now off.\n' +
+        '- Do NOT create a page for any of these titles, and do not delete, rename or create any other ' +
+        'page. Do not touch pages that carry no reference to them.\n' +
+        '- Leave wiki/log.md untouched (append-only record) and do not edit wiki/hot.md (a cache the ' +
+        'hot-cache refresh rewrites). Leave .raw/.manifest.json alone: no page existed, so it has no ' +
+        'entry to remove.\n\n' +
+        'Finish by reporting which files you changed and which references you left in place.',
+      'ingest',
+      { label: `unlink ${label}`.slice(0, 160), commitMessage: `maintenance: unlink gaps (${label.slice(0, 120)})` },
+    )
+  }
+
+  /**
    * Repairs user-selected graph-connectivity problems (the explorer panel's "Repair"
    * action): weave isolated pages into the graph, review links flagged as incidental
    * noise. Judgment-shaped by nature — which is exactly why it is bounded to the tasks the
