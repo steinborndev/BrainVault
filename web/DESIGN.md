@@ -40,9 +40,11 @@ it are in the frontend deep review; the task list is `docs/tasks/TASKS-REDESIGN.
   search triggers) take their height from `--control-h`, not from padding, and their row
   centers them. Padding-derived heights drift apart as soon as one control carries
   different content (a `<kbd>`, an icon, another font size).
-- **Canvas-like areas** (the graph) carry their controls ON the canvas: zoom top-left,
-  search top-right, legend bottom-right, trail bottom-left. Panels beside a canvas **dock**
-  (the canvas shrinks) - they never overlay a corner that holds a control.
+- **Canvas-like areas** (the graph) carry their controls ON the canvas: overview (minimap)
+  top-right, legend bottom-right, trail bottom-left; zoom and search live in the bar above
+  the canvas since 2026-08-26. The way-back button ("Go to nearest cluster") sits dead
+  center and exists only while no node is on screen. Panels beside a canvas **dock** (the
+  canvas shrinks) - they never overlay a corner that holds a control.
 
 ## Type and color
 
@@ -88,6 +90,11 @@ it are in the frontend deep review; the task list is `docs/tasks/TASKS-REDESIGN.
   the row opens.
 - **Every reference is a link.** A cross-reference described in prose ("see the Domains
   card") is a bug: wire it.
+- **Wheel zoom on a canvas** is "anchor and leash" (`lib/graphZoom.ts`, 2026-09-05):
+  zooming in aims at the cluster within reach until it fills the picture, the graph's box
+  and the picture always keep overlapping, wheel deltas are normalized and capped, and the
+  step is animated. Zooming out anchors on the cursor. Never a bare cursor-anchored zoom
+  with unbounded pan - that is how a picture ends up empty.
 
 ## Explanations and tooltips
 

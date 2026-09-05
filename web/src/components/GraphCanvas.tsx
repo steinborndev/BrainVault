@@ -18,6 +18,24 @@
  * update - auto-fit happens only on the very first layout.
  */
 
+import {
+  centerOn,
+  clampK,
+  fullyInView,
+  leash,
+  localAnchor,
+  magnetAnchor,
+  nearestMass,
+  normalizeWheel,
+  toWorld as worldOf,
+  visibleNodes,
+  wheelFactor,
+  worldBounds,
+  zoomAt as zoomTransform,
+  LEASH_PAD_WORLD,
+  type ClusterGeom,
+  type Viewport,
+} from '../lib/graphZoom.ts'
 import { useEffect, useLayoutEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { GraphNode } from '../api/types.ts'
 import { domainGroups } from '../lib/graphForces.ts'
@@ -241,6 +259,10 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   const hullHoverRef = useRef<number | null>(null)
   hullHoverRef.current = hullHover
   const [layouting, setLayouting] = useState(false)
+  /** No placed node is on screen: zoom and pan left the picture empty (graphZoom.ts). */
+  const [offMap, setOffMap] = useState(false)
+  const offMapRef = useRef(false)
+  const miniRef = useRef<HTMLCanvasElement>(null)
   // Hover-driven neighborhood spotlight, OFF by default: it dims the rest of the graph and
   // drops their labels, which makes precise clicking hard as it flickers under the pointer.
   // A click selection (selectedIndex) still spotlights; this toggle only gates the HOVER one.
@@ -822,7 +844,30 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if (flashActive || revealing) scheduleDrawRef.current?.()
   }, [nodes, edges, focusIndex, selectedIndex, ghostIndices, matches, lens, clusters, clusterSets, clusterLabels, clusterDomains, showHulls, showLabels, network, neighbors, labelReps, radius, authorityT])
 
-  const scheduleDraw = useRafDraw(draw)
+  /**
+   * After every frame: is anything on screen at all, and where is the rest of the graph?
+   * Both read the same refs the draw just used, so they can never disagree with the picture.
+   */
+  const overlayPass = useCallback((): void => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dpr = window.devicePixelRatio || 1
+    const vp: Viewport = { w: canvas.width / dpr, h: canvas.height / dpr }
+    const pos = positionsRef.current
+    const t = transformRef.current
+    const vis = visibleNodes(t, vp, pos)
+    const lost = vis.placed > 0 && vis.inView === 0
+    if (lost !== offMapRef.current) {
+      offMapRef.current = lost
+      setOffMap(lost)
+    }
+    const mini = miniRef.current
+    if (mini) drawMinimap(mini, t, vp, pos, dpr)
+  }, [positionsRef, transformRef])
+  const scheduleDraw = useRafDraw(() => {
+    draw()
+    overlayPass()
+  })
   const scheduleDrawRef = useRef<(() => void) | null>(null)
   scheduleDrawRef.current = scheduleDraw
   const fittedRef = persist.fitted
@@ -1227,42 +1272,65 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
    * Spanning communities (nothing to isolate) are skipped, mirroring isolatableCidOf.
    */
   const drawEpochRef = useRef(0)
-  const hullHitCacheRef = useRef<{ epoch: number; hulls: Map<number, Pt[]> }>({ epoch: -1, hulls: new Map() })
+  const clusterGeomRef = useRef<{ epoch: number; geoms: ClusterGeom[] }>({ epoch: -1, geoms: [] })
+  /**
+   * Every community's members, padded hull, center and extent - the one geometry the hull
+   * hit-test and the zoom magnet (graphZoom.ts) both read. Rebuilt when the world changed
+   * (the draw epoch), never per query.
+   */
+  const clusterGeoms = useCallback((): ClusterGeom[] => {
+    if (clusters === null) return []
+    const pos = positionsRef.current
+    if (pos.length < nodes.length * 2) return []
+    const cache = clusterGeomRef.current
+    if (cache.epoch === drawEpochRef.current) return cache.geoms
+    cache.epoch = drawEpochRef.current
+    const members = new Map<number, Pt[]>()
+    for (let i = 0; i < nodes.length; i++) {
+      const cid = clusters[i] ?? -1
+      if (cid < 0) continue
+      const x = pos[i * 2]!
+      if (Number.isNaN(x)) continue
+      ;(members.get(cid) ?? members.set(cid, []).get(cid)!).push([x, pos[i * 2 + 1]!])
+    }
+    const pad = 26 / transformRef.current.k
+    const geoms: ClusterGeom[] = []
+    for (const [cid, pts] of members) {
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      for (const [px, py] of pts) {
+        if (px < x0) x0 = px
+        if (px > x1) x1 = px
+        if (py < y0) y0 = py
+        if (py > y1) y1 = py
+      }
+      // Same trimmed body as the drawn hull, so the clickable surface matches the tint
+      // and doesn't reach into empty space along a cross-domain member's tongue.
+      const body = pts.length >= 3 ? hullBody(pts) : pts
+      const cx = body.reduce((s, p) => s + p[0], 0) / body.length
+      const cy = body.reduce((s, p) => s + p[1], 0) / body.length
+      const hull = pts.length >= 3 ? expandHull(convexHull(body), cx, cy, pad) : []
+      geoms.push({ id: cid, members: pts, hull, cx, cy, extent: Math.max(x1 - x0, y1 - y0) })
+    }
+    cache.geoms = geoms
+    return geoms
+  }, [clusters, nodes.length, positionsRef, transformRef])
+
   const hitCluster = useCallback(
     (sx: number, sy: number): number => {
       if (!spotlight || clusters === null || clusterSets === null) return -1
+      const geoms = clusterGeoms()
+      if (geoms.length === 0) return -1
       const pos = positionsRef.current
-      if (pos.length < nodes.length * 2) return -1
-      const cache = hullHitCacheRef.current
-      if (cache.epoch !== drawEpochRef.current) {
-        cache.epoch = drawEpochRef.current
-        cache.hulls = new Map()
-        const members = new Map<number, Pt[]>()
-        for (let i = 0; i < nodes.length; i++) {
-          const cid = clusters[i] ?? -1
-          if (cid < 0) continue
-          const x = pos[i * 2]!
-          if (Number.isNaN(x)) continue
-          ;(members.get(cid) ?? members.set(cid, []).get(cid)!).push([x, pos[i * 2 + 1]!])
-        }
-        const pad = 26 / transformRef.current.k
-        for (const [cid, pts] of members) {
-          if (pts.length < 3) continue
-          // Same trimmed body as the drawn hull, so the clickable surface matches the tint
-          // and doesn't reach into empty space along a cross-domain member's tongue.
-          const body = hullBody(pts)
-          const cx = body.reduce((s, p) => s + p[0], 0) / body.length
-          const cy = body.reduce((s, p) => s + p[1], 0) / body.length
-          cache.hulls.set(cid, expandHull(convexHull(body), cx, cy, pad))
-        }
-      }
       const { x, y } = toWorld(sx, sy)
       const realN = nodes.length - (ghostIndices?.size ?? 0)
       let best = -1
       let bestD = Infinity
-      for (const [cid, hull] of cache.hulls) {
-        if (!pointInPolygon(x, y, hull)) continue
-        const set = clusterSets.get(cid)
+      for (const g of geoms) {
+        if (g.hull.length < 3 || !pointInPolygon(x, y, g.hull)) continue
+        const set = clusterSets.get(g.id)
         if (set === undefined || set.size >= realN) continue
         for (const i of set) {
           const dx = pos[i * 2]! - x
@@ -1270,13 +1338,13 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
           const d = dx * dx + dy * dy
           if (d < bestD) {
             bestD = d
-            best = cid
+            best = g.id
           }
         }
       }
       return best
     },
-    [spotlight, clusters, clusterSets, nodes.length, ghostIndices, toWorld],
+    [spotlight, clusters, clusterSets, nodes.length, ghostIndices, toWorld, clusterGeoms],
   )
 
   // ---- hover refresh: the hover is only correct at the moment of a pointer event, but the
@@ -1348,21 +1416,20 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if ((hover !== null || hullHover !== null) && at !== null) positionTooltip(at.x, at.y)
   }, [hover, hullHover, positionTooltip])
 
-  /** Zoom to `next`, keeping the world point under screen coords (sx, sy) fixed. */
+  /**
+   * Zoom to `next`, keeping the world point under client coords (sx, sy) fixed, then leash
+   * the result (graphZoom.ts): the graph's box and the picture keep overlapping, so no zoom
+   * can end on an empty canvas.
+   */
   const zoomAt = useCallback((sx: number, sy: number, next: number): void => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const t = transformRef.current
     const rect = canvas.getBoundingClientRect()
-    const cx = sx - rect.left - rect.width / 2
-    const cy = sy - rect.top - rect.height / 2
-    t.x = cx - ((cx - t.x) / t.k) * next
-    t.y = cy - ((cy - t.y) / t.k) * next
-    t.k = next
+    const vp: Viewport = { w: rect.width, h: rect.height }
+    zoomTransform(transformRef.current, vp, sx - rect.left, sy - rect.top, next)
+    leash(transformRef.current, vp, worldBounds(positionsRef.current))
     userMovedRef.current = true
-  }, [transformRef, userMovedRef])
-
-  const clampK = (k: number): number => Math.min(8, Math.max(0.15, k))
+  }, [transformRef, userMovedRef, positionsRef])
 
   /** Button zoom: around the canvas center. */
   const zoomBy = (factor: number): void => {
@@ -1370,6 +1437,109 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
     zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, clampK(transformRef.current.k * factor))
+    scheduleDraw()
+  }
+
+  /**
+   * Where a zoom-in from client coords (sx, sy) aims: the magnet of graphZoom.ts - the
+   * community within reach while it is small on screen, the cursor once it fills the
+   * picture. Without communities, the nodes within reach stand in for a cluster.
+   */
+  const anchorFor = useCallback(
+    (sx: number, sy: number): { x: number; y: number } => {
+      const canvas = canvasRef.current
+      if (!canvas) return { x: sx, y: sy }
+      const rect = canvas.getBoundingClientRect()
+      const vp: Viewport = { w: rect.width, h: rect.height }
+      const cx = sx - rect.left
+      const cy = sy - rect.top
+      const geoms = clusterGeoms()
+      const a =
+        geoms.length > 0
+          ? magnetAnchor(transformRef.current, vp, cx, cy, geoms)
+          : localAnchor(transformRef.current, vp, cx, cy, positionsRef.current)
+      return { x: a.x + rect.left, y: a.y + rect.top }
+    },
+    [clusterGeoms, positionsRef, transformRef],
+  )
+
+  // Smooth zoom and the way-back pan: the wheel (or the button) writes a target, one rAF
+  // loop approaches it. A fixed anchor per gesture is what keeps the approach smooth: every
+  // frame re-applies zoomAt around the same point. Reduced motion skips the loop entirely.
+  const zoomAnimRef = useRef<{ k: number; ax: number; ay: number } | null>(null)
+  const panAnimRef = useRef<{ x: number; y: number } | null>(null)
+  const animRunningRef = useRef(false)
+  const runAnim = useCallback((): void => {
+    if (animRunningRef.current) return
+    animRunningRef.current = true
+    const step = (): void => {
+      let more = false
+      const z = zoomAnimRef.current
+      if (z !== null) {
+        const t = transformRef.current
+        let next = t.k + (z.k - t.k) * 0.32
+        if (Math.abs(z.k - next) < 0.003) {
+          next = z.k
+          zoomAnimRef.current = null
+        } else more = true
+        zoomAt(z.ax, z.ay, next)
+      }
+      const p = panAnimRef.current
+      if (p !== null) {
+        const t = transformRef.current
+        t.x += (p.x - t.x) * 0.22
+        t.y += (p.y - t.y) * 0.22
+        if (Math.hypot(p.x - t.x, p.y - t.y) < 0.5) {
+          t.x = p.x
+          t.y = p.y
+          panAnimRef.current = null
+        } else more = true
+      }
+      refreshHoverRef.current()
+      scheduleDraw()
+      if (more) requestAnimationFrame(step)
+      else animRunningRef.current = false
+    }
+    requestAnimationFrame(step)
+  }, [zoomAt, scheduleDraw, transformRef])
+
+  /** The way back when nothing is on screen: center the nearest community (or node), animated. */
+  const goToNearest = (): void => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const target = nearestMass(transformRef.current, { w: rect.width, h: rect.height }, clusterGeoms(), positionsRef.current)
+    if (target === null) return
+    const to = centerOn(transformRef.current, target.x, target.y)
+    userMovedRef.current = true
+    if (REDUCED_MOTION) {
+      transformRef.current.x = to.x
+      transformRef.current.y = to.y
+      refreshHover()
+      scheduleDraw()
+      return
+    }
+    panAnimRef.current = to
+    runAnim()
+  }
+
+  /** A click on the overview centers the picture there (graphZoom.ts minimap projection). */
+  const onMiniPointerDown = (e: React.PointerEvent<HTMLCanvasElement>): void => {
+    e.stopPropagation()
+    const canvas = canvasRef.current
+    const bounds = worldBounds(positionsRef.current)
+    if (!canvas || bounds === null) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const m = miniProjection(bounds)
+    const wx = (e.clientX - rect.left - m.ox) / m.s
+    const wy = (e.clientY - rect.top - m.oy) / m.s
+    const t = transformRef.current
+    Object.assign(t, centerOn(t, wx, wy))
+    const c = canvas.getBoundingClientRect()
+    leash(t, { w: c.width, h: c.height }, bounds)
+    userMovedRef.current = true
+    panAnimRef.current = null
+    refreshHover()
     scheduleDraw()
   }
 
@@ -1418,6 +1588,9 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
       if (Math.abs(dx) + Math.abs(dy) > 3) drag.current.moved = true
       transformRef.current.x += dx
       transformRef.current.y += dy
+      // The leash holds a drag the same way it holds a zoom: the graph never leaves the picture.
+      const rect = e.currentTarget.getBoundingClientRect()
+      leash(transformRef.current, { w: rect.width, h: rect.height }, worldBounds(positionsRef.current))
       userMovedRef.current = true
       drag.current.x = e.clientX
       drag.current.y = e.clientY
@@ -1497,12 +1670,28 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
   // must be re-hit-tested - otherwise a node grazed on the way out stays "hovered" and its
   // neighborhood highlight keeps the rest of the graph dimmed.
   const onWheelRef = useRef<(e: WheelEvent) => void>(() => {})
+  // The mechanic itself (2026-09-05, "anchor and leash", graphZoom.ts): the delta is
+  // normalized and capped, zooming IN aims at the community within reach rather than at the
+  // cursor, the result is leashed inside zoomAt, and the step is animated so the eye can
+  // follow. Zooming OUT keeps the cursor as its anchor - it is heading home anyway.
   onWheelRef.current = (e: WheelEvent): void => {
     e.preventDefault()
     lastPointerRef.current = { x: e.clientX, y: e.clientY }
-    zoomAt(e.clientX, e.clientY, clampK(transformRef.current.k * Math.exp(-e.deltaY * 0.0015)))
-    refreshHover()
-    scheduleDraw()
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dy = normalizeWheel(e.deltaY, e.deltaMode, canvas.getBoundingClientRect().height)
+    const factor = wheelFactor(dy)
+    const base = zoomAnimRef.current?.k ?? transformRef.current.k
+    const next = clampK(base * factor)
+    const a = factor > 1 ? anchorFor(e.clientX, e.clientY) : { x: e.clientX, y: e.clientY }
+    if (REDUCED_MOTION) {
+      zoomAt(a.x, a.y, next)
+      refreshHover()
+      scheduleDraw()
+      return
+    }
+    zoomAnimRef.current = { k: next, ax: a.x, ay: a.y }
+    runAnim()
   }
 
   useEffect(() => {
@@ -1600,6 +1789,25 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
           }}
         />
         {overlay}
+        {/* The overview (top-right, the corner the in-bar search freed): the whole graph with
+            the picture as a frame, hidden while everything is on screen anyway. */}
+        <canvas
+          ref={miniRef}
+          className="graph-minimap"
+          width={MINI_W}
+          height={MINI_H}
+          role="img"
+          aria-label="Overview of the whole graph - click to move the view there"
+          onPointerDown={onMiniPointerDown}
+          hidden
+        />
+        {/* The way back: exists only while no node is on screen, sits dead center where the
+            eye already is, and says the one thing that helps. */}
+        {offMap && (
+          <button className="btn graph-offmap" onClick={goToNearest}>
+            Go to nearest cluster
+          </button>
+        )}
         {layouting && <div className="graph-status">Laying out…</div>}
         {hover !== null && nodes[hover] && (
           <div className="graph-tooltip" ref={tooltipRef}>
@@ -1641,6 +1849,68 @@ export function GraphCanvas({ nodes, edges, focusIndex, selectedIndex = null, gh
 }
 
 type Pt = [number, number]
+
+/** Read once: the zoom and the way-back pan skip their animation frames under reduced motion. */
+const REDUCED_MOTION = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** The overview's CSS size; the element's box in styles.css must agree. */
+const MINI_W = 150
+const MINI_H = 96
+const MINI_INSET = 6
+
+/** World → overview pixels: the padded graph box fitted into the overview, centered. */
+function miniProjection(bounds: { x0: number; y0: number; x1: number; y1: number }): { s: number; ox: number; oy: number } {
+  const bw = bounds.x1 - bounds.x0 + 2 * LEASH_PAD_WORLD
+  const bh = bounds.y1 - bounds.y0 + 2 * LEASH_PAD_WORLD
+  const s = Math.min((MINI_W - 2 * MINI_INSET) / Math.max(1, bw), (MINI_H - 2 * MINI_INSET) / Math.max(1, bh))
+  return { s, ox: MINI_W / 2 - ((bounds.x0 + bounds.x1) / 2) * s, oy: MINI_H / 2 - ((bounds.y0 + bounds.y1) / 2) * s }
+}
+
+/**
+ * The overview: every placed node as a dot in one quiet ink (the overview is about shape,
+ * not lens), the picture's frame in the accent. Hidden whenever the whole graph is already
+ * on screen - then there is nothing it could add.
+ */
+function drawMinimap(mini: HTMLCanvasElement, t: { x: number; y: number; k: number }, vp: Viewport, pos: Float32Array, dpr: number): void {
+  const bounds = worldBounds(pos)
+  const hide = fullyInView(t, vp, bounds)
+  if (mini.hidden !== hide) mini.hidden = hide
+  if (hide || bounds === null) return
+  const pw = Math.round(MINI_W * dpr)
+  if (mini.width !== pw) {
+    mini.width = pw
+    mini.height = Math.round(MINI_H * dpr)
+  }
+  const ctx = mini.getContext('2d')
+  if (!ctx) return
+  const styles = getComputedStyle(mini)
+  const ink = styles.getPropertyValue('--text-faint').trim() || '#888'
+  const accent = styles.getPropertyValue('--accent').trim() || '#5b8def'
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, MINI_W, MINI_H)
+  const m = miniProjection(bounds)
+  ctx.fillStyle = ink
+  ctx.globalAlpha = 0.7
+  for (let i = 0; i + 1 < pos.length; i += 2) {
+    const x = pos[i]!
+    if (Number.isNaN(x)) continue
+    ctx.fillRect(m.ox + x * m.s - 0.6, m.oy + pos[i + 1]! * m.s - 0.6, 1.2, 1.2)
+  }
+  ctx.globalAlpha = 1
+  const a = worldOf(t, vp, 0, 0)
+  const b = worldOf(t, vp, vp.w, vp.h)
+  const vx = m.ox + a.x * m.s
+  const vy = m.oy + a.y * m.s
+  const vw = Math.max(2, (b.x - a.x) * m.s)
+  const vh = Math.max(2, (b.y - a.y) * m.s)
+  ctx.fillStyle = accent
+  ctx.globalAlpha = 0.14
+  ctx.fillRect(vx, vy, vw, vh)
+  ctx.globalAlpha = 1
+  ctx.strokeStyle = accent
+  ctx.lineWidth = 1
+  ctx.strokeRect(Math.round(vx) + 0.5, Math.round(vy) + 0.5, Math.round(vw), Math.round(vh))
+}
 
 /** Andrew's monotone-chain convex hull. Returns the hull points counter-clockwise. */
 function convexHull(points: Pt[]): Pt[] {
@@ -1754,7 +2024,7 @@ const boxesOverlap = (a: Box, b: Box): boolean =>
   a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]
 
 /** Ray-casting point-in-polygon test (polygon is a closed vertex ring). */
-export function pointInPolygon(x: number, y: number, poly: Pt[]): boolean {
+export function pointInPolygon(x: number, y: number, poly: readonly Pt[]): boolean {
   let inside = false
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
     const xi = poly[i]![0]
