@@ -63,11 +63,18 @@ function pagesBlock(pages: readonly string[]): string {
   return `\nPages:\n${titles.map((t) => `• ${escapeMd(t)}`).join('\n')}`
 }
 
-/** One finished job → one MarkdownV2 message. Only done/failed/deferred are notified. */
+/** One finished job → one MarkdownV2 message. done/failed/deferred, and a duplicate found late. */
 export function formatJobOutcome(job: JobRow): string {
   const name = escapeMd(jobName(job))
   if (job.status === 'done') {
+    if (job.outcome === 'no-changes') {
+      return truncateMessage(`✅ *${name}* finished without changes \\- the vault already covered it\\.`)
+    }
     return truncateMessage(`✅ *${name}* ingested${pagesBlock(parsePages(job))}`)
+  }
+  if (job.status === 'duplicate') {
+    const why = job.error === null ? 'the vault already holds this document' : job.error
+    return truncateMessage(`♻️ *${name}* skipped: ${escapeMd(why)}`)
   }
   if (job.status === 'failed') {
     const error = job.error === null ? 'unknown error' : job.error

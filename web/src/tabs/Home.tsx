@@ -46,6 +46,7 @@ import {
   buildActivity,
   channelCounts,
   filterActivity,
+  type ActivityEvent,
   type ActivityFilter,
   type ActivityKind,
   type ActivityState,
@@ -99,6 +100,13 @@ const WINDOW_STEP = 300
 const WINDOW_MAX = 500
 
 const DEFAULT_FILTER: ActivityFilter = { kind: 'all', state: null, channel: null, days: 30, query: '' }
+
+/**
+ * The persisted run behind a settled-run event, if it has one. Only rows of the run log
+ * (`logrun:<id>`) can be removed; a per-kind settle record or a reconstructed commit has no
+ * row of its own to delete.
+ */
+const runIdOf = (e: ActivityEvent): string | null => (e.id.startsWith('logrun:') ? e.id.slice('logrun:'.length) : null)
 
 /** Where the second panel's choice is remembered. */
 const PANEL_KEY = 'bv.home.panel'
@@ -655,12 +663,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                   <th className="num">Took</th>
                   <th className="num">Cost</th>
                   <th>When</th>
+                  <th className="acts" aria-label="Row actions" />
                 </tr>
               </thead>
               <tbody>
                 {live.length > 0 && (
                   <tr className="livehead">
-                    <td colSpan={6}>In flight - {live.length}</td>
+                    <td colSpan={7}>In flight - {live.length}</td>
                   </tr>
                 )}
                 {liveRuns.map((r) => (
@@ -695,12 +704,13 @@ export function Home({ statusFilter = '' }: { statusFilter?: string }): React.Re
                       vaultName={vaultName}
                       authMode={authMode}
                       onOpen={() => setDetailId(e.id)}
+                      {...(runIdOf(e) !== null ? { remove: () => api.deleteRun(runIdOf(e)!) } : {})}
                     />
                   ),
                 )}
                 {shown.length === 0 && (
                   <tr className="staterow">
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       {/* A failed query must not render as an empty vault. `streamState` is
                           null once the data is there, and only then does "nothing here" mean
                           what it says. */}

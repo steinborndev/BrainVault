@@ -420,3 +420,22 @@ export async function commitVault(
   const files = await git(vaultRoot, ['show', '--name-only', '-z', '--pretty=format:', 'HEAD'])
   return { committed: true, hash, committedPages: wikiPagesFrom(files) }
 }
+
+/**
+ * Removes a directory the service staged but never committed - the `.raw/<job-id>/` of a
+ * job that turned out to be a duplicate after preprocessing (SPEC.md §12.9). Refuses, and
+ * returns false, when git tracks anything under it: a committed original is vault history
+ * and is never removed by pipeline code (CLAUDE.md hard rule 1). Confined to `.raw/`.
+ */
+export async function discardUntrackedDir(vaultRoot: string, relDir: string): Promise<boolean> {
+  const abs = path.resolve(vaultRoot, relDir)
+  const rawRoot = path.resolve(vaultRoot, '.raw')
+  if (path.dirname(abs) !== rawRoot) {
+    throw new Error(`refusing to discard "${relDir}": only a direct child of .raw/ may be discarded`)
+  }
+  if (!fs.existsSync(abs)) return false
+  const tracked = await gitRead(vaultRoot, ['ls-files', '-z', '--', relDir])
+  if (tracked.length > 0) return false
+  fs.rmSync(abs, { recursive: true, force: true })
+  return true
+}

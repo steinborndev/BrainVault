@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
+import { ownsDrop } from '../lib/dropTarget.ts'
 import { navigate } from '../lib/router.ts'
 import { Icon } from './Icon.tsx'
 
@@ -47,7 +48,10 @@ export function GlobalDrop(): React.ReactElement | null {
       if (!hasFiles(e)) return
       e.preventDefault()
       depth.current = 0
-      const files = Array.from(e.dataTransfer?.files ?? [])
+      // A drop on the Inbox dropzone is that zone's upload, not ours: uploading it here too
+      // sent every file twice (the second came back as a duplicate of the first). The veil
+      // still clears - the state machine has to settle whoever takes the files.
+      const files = ownsDrop(e.target) ? [] : Array.from(e.dataTransfer?.files ?? [])
       if (files.length === 0) {
         setState({ kind: 'idle' })
         return

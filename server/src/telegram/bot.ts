@@ -335,10 +335,11 @@ export function startTelegramBot(options: StartTelegramBotOptions): TelegramBot 
 
   /* -------------------------- completion notifications --------------------------- */
 
-  // `duplicate` is terminal but never transitions (decided at creation), so it can't fire
-  // here — the router already answered it synchronously. `cancelled` is the user's own
-  // dashboard action and deliberately not echoed (SPEC.md §4.3 lists done/failed/deferred).
-  const TERMINAL_NOTIFY: ReadonlySet<string> = new Set(['done', 'failed', 'deferred'])
+  // A `duplicate` decided at creation never transitions - the router already answered it
+  // synchronously. One decided AFTER preprocessing (a DOI the vault already holds, SPEC.md
+  // §12.9) does transition, and the sender deserves to hear that nothing was ingested.
+  // `cancelled` is the user's own dashboard action and deliberately not echoed (SPEC.md §4.3).
+  const TERMINAL_NOTIFY: ReadonlySet<string> = new Set(['done', 'failed', 'deferred', 'duplicate'])
   const notifiedBatches = new Set<string>()
   const pendingNotifies = new Set<NodeJS.Timeout>()
 

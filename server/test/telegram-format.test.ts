@@ -36,6 +36,7 @@ function makeJob(over: Partial<JobRow> = {}): JobRow {
     commit_hash: null,
     reverted_at: null,
     duplicate_of: null,
+    outcome: null,
     ...over,
   }
 }

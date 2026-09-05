@@ -46,6 +46,11 @@ export interface Job {
   reverted_at?: string | null
   /** For a `duplicate` row: the id of the job whose content it repeats (schema v11). */
   duplicate_of?: string | null
+  /**
+   * How a `done` run ended when "done" alone would mislead (schema v14): `no-changes` means
+   * the agent finished cleanly but wrote no wiki page. Null for an ordinary run.
+   */
+  outcome?: 'no-changes' | null
 }
 
 export interface RevertResponse {
@@ -546,6 +551,8 @@ export interface EffectiveSettings {
   concurrency: number
   maxUploadBytes: number
   gitAutoCommit: boolean
+  /** Settle a document whose DOI a source page already declares as a duplicate, before any run. */
+  doiDedupe: boolean
   /** null = no budget. Unit depends on authMode: ingests/day (oauth) or USD/day (api-key). */
   dailyBudget: number | null
 }

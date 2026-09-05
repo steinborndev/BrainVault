@@ -61,14 +61,16 @@ export const FINISHED_STATES: readonly JobStatus[] = [
 ]
 
 /**
- * Legal status moves. `duplicate` is intentionally absent as a *target*: a duplicate is
- * decided at creation (dedupe), never reached by transition. `failed`/`deferred` route
- * back to `queued` — that is how a retry (SPEC.md §3.1) and a later manual re-trigger of
- * a deferred job re-enter the pipeline.
+ * Legal status moves. `duplicate` is reachable from exactly one place besides creation:
+ * `preprocessing`, once the normalized text exists and identifies the document as one the
+ * vault already holds (a DOI match, SPEC.md §12.9). A byte-identical drop is still decided
+ * at creation and never transitions; a running or finished job can never become one.
+ * `failed`/`deferred` route back to `queued` - that is how a retry (SPEC.md §3.1) and a
+ * later manual re-trigger of a deferred job re-enter the pipeline.
  */
 export const ALLOWED_TRANSITIONS: Readonly<Record<JobStatus, readonly JobStatus[]>> = {
   queued: ['preprocessing', 'cancelled', 'failed'],
-  preprocessing: ['ingesting', 'deferred', 'failed', 'cancelled'],
+  preprocessing: ['ingesting', 'deferred', 'failed', 'cancelled', 'duplicate'],
   ingesting: ['done', 'failed', 'cancelled'],
   failed: ['queued', 'cancelled'],
   deferred: ['queued', 'cancelled'],
@@ -104,7 +106,15 @@ export interface JobRow {
   duplicate_of: string | null
   /** Set once that commit has been reverted; the job's own status stays whatever it was. */
   reverted_at: string | null
+  /**
+   * How a `done` run ended when "done" alone would mislead (v14). `no-changes`: the agent
+   * finished cleanly but wrote no wiki page - typically because it found the source already
+   * ingested. NULL for every ordinary run.
+   */
+  outcome: JobOutcome | null
 }
+
+export type JobOutcome = 'no-changes'
 
 export interface CreateJobInput {
   readonly source: JobSource
@@ -118,6 +128,14 @@ export interface CreateJobInput {
   readonly rawPath?: string
   /** Where to report the job's terminal state, e.g. 'telegram:<chat_id>' (SPEC.md §4.3). */
   readonly notifyChannel?: string
+  /**
+   * A duplicate the CALLER recognised - the vault's own `.raw/` manifests already hold this
+   * hash (SPEC.md §12.9) - naming the job that owns the original. The row is created as a
+   * `duplicate` exactly as if the hash had matched in `jobs`.
+   */
+  readonly duplicateOf?: string
+  /** The one line that explains the duplicate to a reader; stored on the row. */
+  readonly duplicateNote?: string
 }
 
 export interface CreateJobResult {
@@ -135,6 +153,8 @@ export interface JobPatch {
   readonly tokensOut?: number
   readonly costUsd?: number
   readonly batchId?: string
+  /** For the `preprocessing → duplicate` move: the job whose content this one repeats. */
+  readonly duplicateOf?: string
 }
 
 export class JobStateError extends Error {
@@ -167,24 +187,33 @@ export class JobStore {
     const userId = input.userId ?? 'local'
 
     const run = this.db.transaction((): CreateJobResult => {
-      const original =
+      // The service's own row wins over the vault's memory of the same hash: while the row
+      // exists it is the better link (it opens in the dashboard). The vault answer takes
+      // over exactly when history has been cleared, which is the case it exists for.
+      const inDb =
         input.sha256 !== undefined
           ? (this.db
               .prepare('SELECT id FROM jobs WHERE sha256 = ?')
               .get(input.sha256) as { id: string } | undefined)
           : undefined
+      const original = inDb ?? (input.duplicateOf !== undefined ? { id: input.duplicateOf } : undefined)
 
       const isDuplicate = original !== undefined
       const status: JobStatus = isDuplicate ? 'duplicate' : 'queued'
+      const note = !isDuplicate
+        ? null
+        : inDb !== undefined
+          ? `same content as job ${original.id}, which is still in the history`
+          : (input.duplicateNote ?? `same content as job ${original.id}, whose original the vault still holds`)
 
       this.db
         .prepare(
           `INSERT INTO jobs
              (id, user_id, batch_id, source, type, original_name, url, sha256, status,
-              raw_path, attempts, created_at, finished_at, notify_channel, duplicate_of)
+              raw_path, attempts, created_at, finished_at, notify_channel, duplicate_of, error)
            VALUES
              (@id, @user_id, @batch_id, @source, @type, @original_name, @url, @sha256, @status,
-              @raw_path, 0, @created_at, @finished_at, @notify_channel, @duplicate_of)`,
+              @raw_path, 0, @created_at, @finished_at, @notify_channel, @duplicate_of, @error)`,
         )
         .run({
           id,
@@ -203,18 +232,21 @@ export class JobStore {
           finished_at: isDuplicate ? now : null,
           notify_channel: input.notifyChannel ?? null,
           // Persisted, not just returned: the history must be able to answer "of what?".
-          duplicate_of: isDuplicate ? original!.id : null,
+          duplicate_of: isDuplicate ? original.id : null,
+          // The explanation rides in `error`, which the dashboard already renders as the one
+          // line under a settled row - a duplicate's "why" is that line, not a failure.
+          error: note,
         })
 
       this.log(
         id,
         isDuplicate ? 'warn' : 'info',
         isDuplicate
-          ? `duplicate of job ${original!.id} (sha256 match) — skipped`
+          ? `duplicate of job ${original.id} (sha256 match${inDb === undefined ? ' in the vault .raw manifests' : ''}) - skipped`
           : `job created from ${input.source}${input.originalName ? ` (${input.originalName})` : ''}`,
       )
 
-      return { job: this.getOrThrow(id), ...(isDuplicate ? { duplicateOf: original!.id } : {}) }
+      return { job: this.getOrThrow(id), ...(isDuplicate ? { duplicateOf: original.id } : {}) }
     })
 
     return run()
@@ -371,6 +403,26 @@ export class JobStore {
     return res.changes
   }
 
+  /**
+   * Deletes ONE at-rest job from the history - the per-row form of {@link clearHistory},
+   * with the same guarantees: never an active job (that is a cancel, a different verb),
+   * `job_logs` cascade, the vault is untouched. Throws `JobStateError` for an active job so
+   * a caller cannot mistake "refused" for "gone". Returns false when no such job exists.
+   */
+  remove(id: string): boolean {
+    const job = this.get(id)
+    if (job === undefined) return false
+    if (!JobStore.CLEARABLE_STATUSES.includes(job.status)) {
+      throw new JobStateError(`job ${id} is ${job.status}; only a settled job can be removed from history`)
+    }
+    return this.db.prepare('DELETE FROM jobs WHERE id = ?').run(id).changes > 0
+  }
+
+  /** Records how a `done` run ended when the status alone would mislead (v14). */
+  setOutcome(id: string, outcome: JobOutcome | null): void {
+    this.db.prepare('UPDATE jobs SET outcome = ? WHERE id = ?').run(outcome, id)
+  }
+
   /** Job counts grouped by status — for the dashboard/health overview (SPEC.md §6.1). */
   counts(): Record<string, number> {
     const rows = this.db.prepare('SELECT status, COUNT(*) n FROM jobs GROUP BY status').all() as Array<{
@@ -524,6 +576,7 @@ export class JobStore {
              cost_usd = CASE WHEN @cost_usd IS NULL THEN cost_usd
                              ELSE COALESCE(cost_usd, 0) + @cost_usd END,
              batch_id = COALESCE(@batch_id, batch_id),
+             duplicate_of = COALESCE(@duplicate_of, duplicate_of),
              started_at = CASE WHEN started_at IS NULL AND @set_started = 1 THEN @now ELSE started_at END,
              finished_at = CASE WHEN @set_finished = 1 THEN @now ELSE NULL END
            WHERE id = @id`,
@@ -540,6 +593,7 @@ export class JobStore {
           tokens_out: patch.tokensOut ?? null,
           cost_usd: patch.costUsd ?? null,
           batch_id: patch.batchId ?? null,
+          duplicate_of: patch.duplicateOf ?? null,
           now,
           set_started: to !== 'queued' && current.started_at === null ? 1 : 0,
           set_finished: FINISHED_STATES.includes(to) ? 1 : 0,

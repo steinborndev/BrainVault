@@ -62,6 +62,20 @@ export interface ActivityEvent {
 
 const WORKING: JobStatus[] = ['preprocessing', 'ingesting']
 
+/**
+ * The one line under a settled row that explains it: a failure's error, a duplicate's
+ * "already in the vault as …", or the fact that a clean run wrote nothing. `error` carries
+ * the first two (the server stores a duplicate's explanation there, SPEC.md §12.9); the
+ * third is the `outcome` column, which has no text of its own.
+ */
+export function jobNote(j: Job): string | undefined {
+  if (j.error !== null && j.error !== '') return j.error
+  if (j.status === 'done' && j.outcome === 'no-changes') {
+    return 'No changes: the run finished without writing a wiki page (the agent found nothing to add).'
+  }
+  return undefined
+}
+
 /** The state a job row reports under. */
 export function jobState(status: JobStatus): ActivityState {
   if (WORKING.includes(status)) return 'running'
@@ -148,6 +162,7 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
   for (const j of input.jobs) {
     const state = jobState(j.status)
     const live = state === 'running' || state === 'queued'
+    const note = jobNote(j)
     if (j.commit_hash != null) jobCommits.add(j.commit_hash.slice(0, 8))
     out.push({
       id: `job:${j.id}`,
@@ -161,7 +176,7 @@ export function buildActivity(input: ActivityInput): ActivityEvent[] {
       commit: j.commit_hash ?? null,
       live,
       job: j,
-      ...(j.error !== null && j.error !== '' ? { note: j.error } : {}),
+      ...(note !== undefined ? { note } : {}),
     })
   }
 

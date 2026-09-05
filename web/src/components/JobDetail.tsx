@@ -17,8 +17,8 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client.ts'
-import type { AuthMode } from '../api/types.ts'
-import type { ActivityEvent } from '../lib/activity.ts'
+import type { AuthMode, JobStatus } from '../api/types.ts'
+import { jobNote, type ActivityEvent } from '../lib/activity.ts'
 import { Icon } from './Icon.tsx'
 import { Cost } from './Cost.tsx'
 import { Fact, Facts } from './Fact.tsx'
@@ -33,6 +33,9 @@ import { duration, timeAgo, tokens } from '../lib/format.ts'
 /** Exact wall-clock timestamp; relative time is the table's job. */
 const exact = (iso: string | null | undefined): string =>
   iso === null || iso === undefined ? '-' : new Date(iso).toLocaleString('en-US')
+
+/** Statuses whose row is a history entry, and so can be removed from it. */
+const AT_REST: JobStatus[] = ['done', 'failed', 'deferred', 'duplicate', 'cancelled']
 
 export function JobDetail({
   event,
@@ -100,6 +103,22 @@ export function JobDetail({
   })
 
   const canRetry = job !== undefined && (job.status === 'failed' || job.status === 'deferred')
+  const note = job !== undefined ? jobNote(job) : event.note
+  const noteTone = (job?.status ?? event.state) === 'failed' ? 'err' : 'note'
+  // Removable: a settled job, or a run the log persisted (`logrun:`). A commit is vault
+  // history and has no row; a live row is not a history entry yet.
+  const runId = event.id.startsWith('logrun:') ? event.id.slice('logrun:'.length) : null
+  const canDelete = job !== undefined ? AT_REST.includes(job.status) : runId !== null
+  const [armedDelete, setArmedDelete] = useState(false)
+  const del = useMutation({
+    mutationFn: () => (job !== undefined ? api.deleteJob(job.id) : api.deleteRun(runId as string)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['maintenance-history'] })
+      invalidate()
+      onBack()
+    },
+    onSettled: () => setArmedDelete(false),
+  })
   const canRevert = job !== undefined && !!job.commit_hash && job.reverted_at == null && job.status === 'done'
   const usage =
     job?.tokens_in != null || job?.tokens_out != null
@@ -120,7 +139,10 @@ export function JobDetail({
         </h3>
         <span className="lens-tag">{event.channel}</span>
         {job !== undefined ? (
-          <StatusBadge status={job.status} />
+          <>
+            <StatusBadge status={job.status} />
+            {job.outcome === 'no-changes' && <span className="badge nochanges">no changes</span>}
+          </>
         ) : (
           <span className={`badge ${event.state === 'failed' ? 'failed' : 'ok'}`}>{event.state}</span>
         )}
@@ -170,8 +192,8 @@ export function JobDetail({
       </div>
 
       <div className="detail-content">
-        {event.note !== undefined && <div className="toast err">{event.note}</div>}
-        {job?.error != null && <div className="toast err">{job.error}</div>}
+        {/* One line, one tone: a failure is red, a duplicate's or no-change run's explanation is not. */}
+        {note !== undefined && <div className={`toast ${noteTone}`}>{note}</div>}
         {revertNote !== null && <div className="toast ok">{revertNote}</div>}
         {revert.error != null && <div className="toast err">Revert failed: {(revert.error as Error).message}</div>}
 
@@ -202,6 +224,17 @@ export function JobDetail({
         </span>
         <span className="spacer" />
         {articlePath !== null && <PageLink vaultName={vaultName} path={articlePath} />}
+        {canDelete && (
+          <button
+            className={`btn sm ghost${armedDelete ? ' danger' : ''}`}
+            disabled={del.isPending}
+            onClick={() => (armedDelete ? del.mutate() : setArmedDelete(true))}
+            title="Removes this entry from the history. The vault, its pages and its commit stay as they are."
+          >
+            {del.isPending ? 'Removing…' : armedDelete ? 'Really remove?' : 'Remove from history'}
+          </button>
+        )}
+        {del.error != null && <span className="dim">Removing failed: {(del.error as Error).message}</span>}
         {canRevert && (
           <button
             className={`btn sm${armedRevert ? ' danger' : ''}`}

@@ -15,8 +15,9 @@ import { Cost } from './Cost.tsx'
 import { Icon } from './Icon.tsx'
 import { PageLink } from './PageLink.tsx'
 import { useRunProgressLine } from '../hooks/useRunProgressLine.ts'
+import { useState } from 'react'
 import { duration, parsePages, timeAgo } from '../lib/format.ts'
-import type { ActivityEvent } from '../lib/activity.ts'
+import { jobNote, type ActivityEvent } from '../lib/activity.ts'
 import { RUN_RUNNING_TITLES, runTitle } from '../lib/runLabels.ts'
 import { navigate, pageRoute } from '../lib/router.ts'
 import { openableRow } from '../lib/tableRow.ts'
@@ -71,6 +72,58 @@ function PageChips({ vaultName, paths }: { vaultName: string; paths: readonly st
   )
 }
 
+/**
+ * The per-row "take this out of the history" control (2026-09-05). Two clicks, the second
+ * within four seconds, because the row is gone for good afterwards - the same arming the
+ * "Clear history" button uses, scaled down. The vault is never touched by it.
+ *
+ * Lives in the seventh column, visible on hover and keyboard focus (`.rowacts`), and stops
+ * the click so the row does not open underneath it.
+ */
+export function RowDelete({
+  label,
+  remove,
+  onRemoved,
+}: {
+  label: string
+  remove: () => Promise<unknown>
+  onRemoved?: () => void
+}): React.ReactElement {
+  const qc = useQueryClient()
+  const [armed, setArmed] = useState(false)
+  const del = useMutation({
+    mutationFn: remove,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['jobs'] })
+      void qc.invalidateQueries({ queryKey: ['stats'] })
+      void qc.invalidateQueries({ queryKey: ['maintenance-history'] })
+      onRemoved?.()
+    },
+    onSettled: () => setArmed(false),
+  })
+  return (
+    <span className="rowacts">
+      <button
+        className={`btn ghost sm${armed ? ' danger' : ''}`}
+        disabled={del.isPending}
+        title={armed ? 'Click again to remove this entry from the history' : `Remove from history: ${label}`}
+        aria-label={armed ? 'Confirm removal' : `Remove from history: ${label}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          if (armed) del.mutate()
+          else {
+            setArmed(true)
+            window.setTimeout(() => setArmed(false), 4000)
+          }
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        {del.isPending ? '…' : armed ? 'Sure?' : <Icon name="x" />}
+      </button>
+    </span>
+  )
+}
+
 /** The pipeline as three ticks - enough to see movement, not enough to need a legend. */
 const PHASES: JobStatus[] = ['queued', 'preprocessing', 'ingesting']
 
@@ -99,6 +152,7 @@ export function RunRow({ run }: { run: MaintenanceRun }): React.ReactElement {
       </td>
       <td className="num">-</td>
       <td className="faintc">{timeAgo(run.startedAt)}</td>
+      <td className="acts" />
     </tr>
   )
 }
@@ -147,6 +201,7 @@ export function LiveJobRow({ job, onOpen }: { job: Job; onOpen: () => void }): R
         )}
       </td>
       <td className="faintc">{timeAgo(job.started_at ?? job.created_at)}</td>
+      <td className="acts" />
     </tr>
   )
 }
@@ -163,7 +218,7 @@ export function BatchHead({ jobs }: { jobs: Job[] }): React.ReactElement {
   const oldest = jobs[jobs.length - 1]!
   return (
     <tr className="batchhead">
-      <td colSpan={6}>
+      <td colSpan={7}>
         <strong>Batch</strong> · {jobs.length} files · {timeAgo(oldest.created_at)}
         <span className="spacer" />
         <button className="btn ghost danger sm" disabled={cancelAll.isPending} onClick={() => cancelAll.mutate()}>
@@ -189,6 +244,8 @@ export function HistoryJobRow({
   const name = job.original_name ?? job.url ?? job.id
   const pages = parsePages(job.created_pages)
   const showState = job.status !== 'done'
+  const noChanges = job.status === 'done' && job.outcome === 'no-changes'
+  const note = jobNote(job)
   return (
     <tr {...openableRow(onOpen, `Open job detail: ${name}`)}>
       <td>
@@ -199,9 +256,11 @@ export function HistoryJobRow({
           </span>
           <span className="badge type">{job.type}</span>
           {showState && <span className={`hrow-state ${job.status}`}>{job.status}</span>}
+          {noChanges && <span className="hrow-state nochanges">no changes</span>}
           {job.reverted_at != null && <span className="hrow-state reverted">reverted</span>}
         </span>
-        {job.status === 'failed' && job.error !== null && <span className="rowerr">{job.error}</span>}
+        {/* A failure's line is red; a duplicate's or a no-change run's is an explanation, not an alarm. */}
+        {note !== undefined && <span className={job.status === 'failed' ? 'rowerr' : 'rownote'}>{note}</span>}
         <PageChips vaultName={vaultName} paths={pages} />
       </td>
       <td className="dimc">{channelLabel(job.source)}</td>
@@ -211,6 +270,9 @@ export function HistoryJobRow({
       </td>
       <td className="num">{job.cost_usd !== null ? <Cost value={job.cost_usd} authMode={authMode} /> : '-'}</td>
       <td className="faintc">{timeAgo(job.finished_at ?? job.started_at ?? job.created_at)}</td>
+      <td className="acts">
+        <RowDelete label={name} remove={() => api.deleteJob(job.id)} />
+      </td>
     </tr>
   )
 }
@@ -228,11 +290,14 @@ export function SettleRow({
   vaultName,
   authMode,
   onOpen,
+  remove,
 }: {
   event: ActivityEvent
   vaultName: string
   authMode: AuthMode
   onOpen: () => void
+  /** Removes the run from the history; absent for records with no row to remove. */
+  remove?: () => Promise<unknown>
 }): React.ReactElement {
   // The kind names the run ("Lint report written"); a research topic is appended to it,
   // because "Research run" alone was all the per-kind settle record could ever say.
@@ -255,6 +320,7 @@ export function SettleRow({
       <td className="num">{duration(event.startedIso ?? null, event.whenIso)}</td>
       <td className="num">{event.costUsd !== null ? <Cost value={event.costUsd} authMode={authMode} /> : '-'}</td>
       <td className="faintc">{timeAgo(event.whenIso)}</td>
+      <td className="acts">{remove !== undefined && <RowDelete label={name} remove={remove} />}</td>
     </tr>
   )
 }
@@ -290,6 +356,7 @@ export function CommitRow({
       <td className="num">-</td>
       <td className="num">-</td>
       <td className="faintc">{timeAgo(event.whenIso)}</td>
+      <td className="acts" />
     </tr>
   )
 }
