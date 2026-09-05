@@ -219,6 +219,17 @@ export function classifyKind(
  */
 const ASSET_ROOTS = ['_attachments', 'assets'] as const
 
+/**
+ * Root pages whose links are a RECORD, not a claim that a page should exist, and which
+ * therefore never nominate a gap (2026-09-05). `wiki/log.md` is the append-only journal the
+ * ingest skill keeps: a "created [[X]]" line stays after X is deleted or unlinked by design,
+ * and the cleanup runs are told to leave it alone. `wiki/hot.md` is a cache the hot-cache
+ * refresh rewrites from scratch. Counting either made a gap unresolvable by the very run
+ * that resolves gaps: six of seven unlinked titles stayed in the list because the journal
+ * still named them. Their links still count as `unresolved` and still draw no edge.
+ */
+const RECORD_PAGES: ReadonlySet<string> = new Set(['wiki/log.md', 'wiki/hot.md'])
+
 export class GraphBuilder {
   private readonly cache = new Map<string, CacheEntry>()
   private lastSignature = ''
@@ -350,9 +361,15 @@ export class GraphBuilder {
           unresolved++
           // Path-qualified stragglers (`[[notes/Foo]]`, `.raw/…`) stay out of the gap list:
           // they are navigation or staging references, not missing CONTENT pages. Embeds,
-          // artifact sources and plugin docs count as unresolved but never nominate a gap
-          // (see GraphGap).
-          if (!target.includes('/') && !embed && kinds[from] !== 'artifact' && !pluginDocs.has(f.rel)) {
+          // artifact sources, plugin docs and the record pages (journal, hot cache) count as
+          // unresolved but never nominate a gap (see GraphGap, RECORD_PAGES).
+          if (
+            !target.includes('/') &&
+            !embed &&
+            kinds[from] !== 'artifact' &&
+            !pluginDocs.has(f.rel) &&
+            !RECORD_PAGES.has(f.rel)
+          ) {
             const gap = gapByKey.get(lower)
             if (gap === undefined) gapByKey.set(lower, { title: target, refBy: new Set([from]) })
             else gap.refBy.add(from)

@@ -520,6 +520,11 @@ des **Live-Graphen** sein, ein unbekannter Titel weist die ganze Anfrage ab (das
 beim Repair-Run). Bewusst kein deterministisches Regex-Unlinken aus Pipeline-Code (Hard Rule 1),
 und bewusst kein Gedächtnis für aufgelöste Titel: die Notability-Regeln im System-Prompt sollen
 Wiederkehrer verhindern; kommt eine Lücke trotzdem zurück, ist das ein Befund über den Ingest.
+Damit das aufgeht, nominieren `wiki/log.md` (append-only Journal des Ingest-Skills) und
+`wiki/hot.md` (Cache) **keine** Lücken: ein Link dort ist Protokoll bzw. Cache, keine Behauptung,
+dass eine Seite fehlt. Vorher blieben sechs von sieben entlinkten Titeln in der Liste, weil das
+Journal sie weiter nannte, und dasselbe galt für jede vom Nutzer gelöschte Seite. Die Links
+zählen weiterhin als `unresolved`, nur nicht als Lücke.
 
 ### 12.5 Reihenfolge
 
