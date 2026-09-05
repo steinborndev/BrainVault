@@ -12,6 +12,10 @@
  * of two pictures rather than a boxed picture beside a bare list.
  */
 
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { api } from '../api/client.ts'
+import { Icon } from './Icon.tsx'
 import { PageLink } from './PageLink.tsx'
 import { domainColor } from '../lib/domains.ts'
 import { PANEL_IDS, dayLabel, domainCounts, recentPages, type PanelId } from '../lib/homePanels.ts'
@@ -154,18 +158,138 @@ function Body({
   }
 
   if (gaps.length === 0) return <div className="empty">No open knowledge gaps - every link resolves to a page.</div>
+  return <Gaps gaps={gaps} onResearch={onResearch} />
+}
+
+/** The cleanup run accepts at most this many titles; the picker stops there too. */
+const MAX_UNLINK = 20
+
+/**
+ * The gap cards, with the second way out of a gap (2026-09-05). A gap closes either by
+ * research (the card itself) or by deciding it never deserved a page and unlinking it - a
+ * single-mention person, an image caption, a callout title an ingest linked by reflex. The
+ * pick control on each card collects those; one bounded agent run (`cleanupGaps`) then turns
+ * the links into words, as one revertable commit. Two steps to start it, because it spends
+ * a run and rewrites pages; the run is tracked here until it settles, and the graph
+ * refetches so the cards disappear.
+ */
+function Gaps({
+  gaps,
+  onResearch,
+}: {
+  gaps: ReadonlyArray<{ title: string; refBy: number[] }>
+  onResearch: (topic: string) => void
+}): React.ReactElement {
+  const qc = useQueryClient()
+  const [picked, setPicked] = useState<readonly string[]>([])
+  const [armed, setArmed] = useState(false)
+  const [runId, setRunId] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+
+  // Picks that stopped being gaps (a research run wrote the page) drop out on their own.
+  const open = new Set(gaps.map((g) => g.title))
+  const live = picked.filter((t) => open.has(t))
+
+  const start = useMutation({
+    mutationFn: () => api.cleanupGaps(live),
+    onSuccess: (run) => {
+      setRunId(run.id)
+      setNote(null)
+    },
+    onError: (e: Error) => setNote(`Could not start: ${e.message}`),
+    onSettled: () => setArmed(false),
+  })
+  const runQ = useQuery({
+    queryKey: ['maintenance-run', runId],
+    queryFn: () => api.maintenanceRun(runId as string),
+    enabled: runId !== null,
+    refetchInterval: (q) => (q.state.data && q.state.data.status !== 'running' ? false : 2000),
+  })
+  const run = runQ.data
+  const running = start.isPending || (runId !== null && (run === undefined || run.status === 'running'))
+
+  useEffect(() => {
+    if (run === undefined || run.status === 'running') return
+    if (run.status === 'done') {
+      setNote(`Unlinked ${live.length} gap${live.length === 1 ? '' : 's'} - revertable from the activity stream.`)
+      setPicked([])
+    } else {
+      setNote(`Unlinking failed: ${run.error ?? run.result?.error ?? 'unknown error'}`)
+    }
+    setRunId(null)
+    void qc.invalidateQueries({ queryKey: ['graph'] })
+    void qc.invalidateQueries({ queryKey: ['stats'] })
+    void qc.invalidateQueries({ queryKey: ['maintenance-history'] })
+    // `live` is read once, when the run settles; re-running on every pick would loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run?.status])
+
+  const toggle = (title: string): void => {
+    setArmed(false)
+    setPicked((p) => (p.includes(title) ? p.filter((t) => t !== title) : p.length >= MAX_UNLINK ? p : [...p, title]))
+  }
+
   return (
-    <div className="gaplist">
-      {gaps.map((g) => (
-        <button key={g.title} className="gapcard" onClick={() => onResearch(g.title)}>
-          <span className="t" title={g.title}>
-            {g.title}
-          </span>
-          <span className="m">
-            {g.refBy.length} page{g.refBy.length === 1 ? '' : 's'} link{g.refBy.length === 1 ? 's' : ''} here
-          </span>
-        </button>
-      ))}
+    <div className="gapview">
+      {(live.length > 0 || running || note !== null) && (
+        <div className="gapbar" role="status">
+          {running ? (
+            <span className="dim">Unlinking {live.length} gap{live.length === 1 ? '' : 's'}… one agent run, one commit.</span>
+          ) : live.length > 0 ? (
+            <>
+              <span>
+                {live.length} picked{live.length >= MAX_UNLINK ? ` (max ${MAX_UNLINK} per run)` : ''}
+              </span>
+              <span className="spacer" />
+              <button className="btn ghost sm" onClick={() => setPicked([])}>
+                Clear
+              </button>
+              <button
+                className={`btn sm${armed ? ' danger' : ''}`}
+                onClick={() => (armed ? start.mutate() : setArmed(true))}
+                title="Turns every link to these titles into plain text - one agent run, one revertable commit. No page is created or deleted."
+              >
+                {armed ? `Really unlink ${live.length}?` : 'Unlink these'}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="dim">{note}</span>
+              <span className="spacer" />
+              <button className="btn ghost sm" onClick={() => setNote(null)} aria-label="Dismiss">
+                <Icon name="x" />
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      <div className="gaplist">
+        {gaps.map((g) => {
+          const on = live.includes(g.title)
+          return (
+            <div key={g.title} className={`gapcard${on ? ' picked' : ''}`}>
+              <button className="gap-go" onClick={() => onResearch(g.title)} title={`Research "${g.title}"`}>
+                <span className="t" title={g.title}>
+                  {g.title}
+                </span>
+                <span className="m">
+                  {g.refBy.length} page{g.refBy.length === 1 ? '' : 's'} link{g.refBy.length === 1 ? 's' : ''} here
+                </span>
+              </button>
+              <button
+                className={`gap-pick${on ? ' on' : ''}`}
+                aria-pressed={on}
+                aria-label={on ? `Unpick ${g.title}` : `Pick ${g.title} for unlinking`}
+                title={on ? 'Picked for unlinking' : 'Pick: this should not become a page, unlink it instead'}
+                disabled={running}
+                onClick={() => toggle(g.title)}
+              >
+                <Icon name={on ? 'check' : 'x'} />
+              </button>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

@@ -91,13 +91,20 @@ export function registerMaintenanceRoute(
   })
 
   /**
-   * Reference cleanup after user deletions (the delete flow's follow-up offer): a bounded
-   * agent run over the dangling references the named deletions left behind. Titles are
+   * Reference cleanup, two premises behind one bounded agent run. Titles are
    * attacker-adjacent input that ends up in a prompt — enforce shape and size hard.
+   *
+   *   - default (`mode: 'deleted'`): the delete flow's follow-up offer over the dangling
+   *     references the named deletions left behind;
+   *   - `mode: 'gap'`: Home's "Worth a run" panel resolving a gap by unlinking it (SPEC.md
+   *     §12.4, 2026-09-05). Every title must be an open gap of the LIVE graph - no free-text
+   *     targets - and one unknown title rejects the whole request, exactly like `repair`:
+   *     the user picked specific gaps, and silently dropping one would resolve less than
+   *     they asked for.
    */
   app.post('/api/v1/maintenance/cleanup', async (req, reply) => {
     if (credentialMissing(reply)) return reply
-    const body = (req.body ?? {}) as { pages?: unknown }
+    const body = (req.body ?? {}) as { pages?: unknown; mode?: unknown }
     const raw = Array.isArray(body.pages) ? body.pages : []
     const pages = raw
       .filter((p): p is string => typeof p === 'string')
@@ -105,7 +112,19 @@ export function registerMaintenanceRoute(
       .filter((p) => p !== '' && p.length <= 200)
       .slice(0, 20)
     if (pages.length === 0) {
-      return reply.code(400).send({ error: 'provide "pages": the deleted page titles to clean up after' })
+      return reply.code(400).send({ error: 'provide "pages": the page titles to clean up after' })
+    }
+    if (body.mode === 'gap') {
+      if (graph === undefined) return reply.code(409).send({ error: 'graph unavailable' })
+      const open = new Set(graph.build().gaps.map((g) => g.title))
+      const unknown = pages.filter((p) => !open.has(p))
+      if (unknown.length > 0) {
+        return reply.code(400).send({ error: `not an open gap of the vault graph: ${unknown.join(', ')}` })
+      }
+      return reply.code(202).send(maintenance.startGapCleanup(pages))
+    }
+    if (body.mode !== undefined && body.mode !== 'deleted') {
+      return reply.code(400).send({ error: 'mode must be "deleted" (default) or "gap"' })
     }
     return reply.code(202).send(maintenance.startReferenceCleanup(pages))
   })

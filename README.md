@@ -692,6 +692,8 @@ POST   /domains                  create a domain: append to the registry page, o
 GET    /domains/candidates       themes among `unassigned` pages worth a domain (free)
 POST   /domains/candidates/:key/dismiss     stop proposing this theme (DELETE undoes it)
 POST   /maintenance/{lint,lint-fix,research,hot-cache,domain-backfill,domain-review,cleanup,repair}
+                                 (cleanup takes {pages, mode: 'deleted'|'gap'}: after a deletion,
+                                 or to unlink open graph gaps picked on Home)
                                  starts an async run → { id, channel }; lint-fix 409s without a
                                  report, backfill 409s without a registry, review 409s with no
                                  candidates; repair validates its task paths against the live graph
