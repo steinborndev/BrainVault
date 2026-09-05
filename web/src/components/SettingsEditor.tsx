@@ -174,6 +174,17 @@ export function SettingsEditor({ section = 'all' }: { section?: SettingsSection 
         )}
 
         {row(
+          'doiDedupe',
+          'DOI dedupe',
+          'Skip a paper whose DOI a source page already declares, before any agent run. Off: ingest it anyway (switch off and drop the file again if a match was wrong).',
+          <input
+            type="checkbox"
+            checked={draft.doiDedupe}
+            onChange={(e) => setDraft({ ...draft, doiDedupe: e.target.checked })}
+          />,
+        )}
+
+        {row(
           'dailyBudget',
           'Daily budget',
           budgetUnit === 'jobs'

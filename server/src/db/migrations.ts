@@ -343,6 +343,18 @@ const V13 = `
 ALTER TABLE agent_runs ADD COLUMN commit_hash TEXT;
 `
 
+/**
+ * v14 - how a `done` run ended, when "done" would mislead (SPEC.md §12.9).
+ *
+ * A run that finishes cleanly but writes no wiki page - the agent found the source already
+ * ingested and stopped - was indistinguishable from a successful ingest except by a "-" in
+ * the pages column. `outcome = 'no-changes'` names it. Additive and nullable: every ordinary
+ * run keeps NULL, and rows from before this migration are simply not classified.
+ */
+const V14 = `
+ALTER TABLE jobs ADD COLUMN outcome TEXT;
+`
+
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, up: V1 },
   { version: 2, up: V2 },
@@ -357,4 +369,5 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 11, up: V11 },
   { version: 12, up: V12 },
   { version: 13, up: V13 },
+  { version: 14, up: V14 },
 ]

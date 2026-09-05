@@ -306,6 +306,16 @@ export function registerMaintenanceRoute(
     return reply.send({ runs: runs?.list({ ...(kind !== undefined ? { kind } : {}), limit: capped }) ?? [] })
   })
 
+  // Drops one settled run from the history - the per-row "clear" the activity stream offers
+  // for agent runs (SPEC.md §6.2 amendment 2026-09-05). Operational rows only; the pages the
+  // run wrote stay in the vault, as does its commit.
+  app.delete('/api/v1/maintenance/history/:id', async (req, reply) => {
+    const { id } = req.params as { id: string }
+    if (runs === undefined || !runs.remove(id)) return reply.code(404).send({ error: 'no such run in the history' })
+    ctx.events.publish({ kind: 'stats' })
+    return reply.send({ deleted: true })
+  })
+
   // Per-kind last-settle state (SPEC.md §12.7 Stufe b) — restart-proof "zuletzt erledigt"
   // for the status head. Areas whose outcome lives in the vault (lint report, hot.md mtime,
   // index artifacts) additionally keep their vault facts; this fills the gaps and failures.

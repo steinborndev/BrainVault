@@ -228,19 +228,29 @@ export function registerJobsRoute(app: FastifyInstance, ctx: AppContext): void {
     }
   })
 
-  // Cancel a queued job (→ cancelled). A job already being preprocessed/ingested is left to
-  // finish — we never kill an agent mid-write, which could leave the vault half-written
-  // (hard rule 1). Emits an SSE `job` update via the transition.
+  // One verb, two outcomes, both meaning "take this out of my way":
+  //   - a QUEUED job is cancelled (→ cancelled; it stays in the history as such);
+  //   - a SETTLED job (done/failed/deferred/duplicate/cancelled) is deleted from the history,
+  //     the per-row form of "clear history" (SPEC.md §6.2 amendment 2026-09-05).
+  // A job being preprocessed/ingested is left to finish - we never kill an agent mid-write,
+  // which could leave the vault half-written (hard rule 1). The vault is untouched either
+  // way: a delete prunes operational rows only.
   app.delete('/api/v1/jobs/:id', async (req, reply) => {
     const { id } = req.params as { id: string }
     const job = store.get(id)
     if (job === undefined) return reply.code(404).send({ error: 'no such job' })
-    if (job.status !== 'queued') {
+    if (job.status === 'queued') {
+      const updated = store.transition(id, 'cancelled', { log: 'cancelled by user (SPEC.md §6.2)' })
+      return reply.code(200).send({ job: updated })
+    }
+    if (!JobStore.CLEARABLE_STATUSES.includes(job.status)) {
       return reply
         .code(409)
-        .send({ error: `job is ${job.status}; only a queued job can be cancelled (a running ingest is left to finish)` })
+        .send({ error: `job is ${job.status}; a running ingest is left to finish (cancel applies to queued jobs only)` })
     }
-    const updated = store.transition(id, 'cancelled', { log: 'cancelled by user (SPEC.md §6.2)' })
-    return reply.code(200).send({ job: updated })
+    store.remove(id)
+    // No per-job delete event exists; a stats signal nudges connected clients to refetch.
+    events.publish({ kind: 'stats' })
+    return reply.code(200).send({ deleted: true })
   })
 }

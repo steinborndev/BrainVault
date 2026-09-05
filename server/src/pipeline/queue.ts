@@ -26,6 +26,7 @@ import type { AgentAuth, AgentRunResult } from './agent-runner.js'
 import { runAgent, DEFAULT_TIMEOUT_MS } from './agent-runner.js'
 import { formatMessage } from './format-message.js'
 import { sha256File } from './hash.js'
+import { DedupeIndex, extractDoi } from './dedupe.js'
 import {
   preprocess,
   detectTools,
@@ -41,6 +42,7 @@ import {
   commitPaths,
   commitTouching,
   dirtyPaths,
+  discardUntrackedDir,
   newWikiPaths,
   BOOKKEEPING_PATHS,
   type CommitResult,
@@ -136,6 +138,23 @@ export interface IngestQueueOptions {
    * job's outcome. Omitted (e.g. in the CLI) means no validation.
    */
   readonly validate?: Validator
+  /**
+   * The vault-backed dedupe memory (SPEC.md §12.9): content hashes from `.raw/` manifests and
+   * DOIs from source pages. Defaults to one over `vaultRoot`; tests inject a stub.
+   */
+  readonly dedupe?: DedupeIndex
+  /**
+   * Removes a job's never-committed `.raw/<job-id>/` staging once the job turns out to be a
+   * duplicate after preprocessing. The default refuses anything git already tracks, so a
+   * committed original can never be removed by this path. Returns whether it removed the dir.
+   */
+  readonly discardStaging?: (vaultRoot: string, relDir: string) => Promise<boolean>
+  /**
+   * Whether the post-preprocessing DOI check runs (settings `doiDedupe`, SPEC.md §12.9). A
+   * provider like `autoCommit`, so switching it off applies to the next job without a
+   * restart - it is the escape hatch for a document wrongly matched to a source page.
+   */
+  readonly doiDedupe?: () => boolean
 }
 
 /**
@@ -239,6 +258,9 @@ export class IngestQueue {
   private readonly commitMutex: Mutex
   private readonly runRegistry: RunRegistry
   private readonly validate: Validator | undefined
+  private readonly dedupe: DedupeIndex
+  private readonly discardStaging: (vaultRoot: string, relDir: string) => Promise<boolean>
+  private readonly doiDedupe: () => boolean
   private running = false
   private paused = false
   /**
@@ -286,6 +308,9 @@ export class IngestQueue {
     this.commitMutex = opts.commitMutex ?? new Mutex()
     this.runRegistry = opts.runRegistry ?? new RunRegistry()
     this.validate = opts.validate
+    this.dedupe = opts.dedupe ?? new DedupeIndex(opts.vaultRoot)
+    this.discardStaging = opts.discardStaging ?? discardUntrackedDir
+    this.doiDedupe = opts.doiDedupe ?? ((): boolean => true)
   }
 
   /**
@@ -559,6 +584,7 @@ export class IngestQueue {
       type: guessType(originalName),
       originalName,
       sha256,
+      ...this.vaultKnows(sha256),
       ...(input.batchId ? { batchId: input.batchId } : {}),
       ...(input.notifyChannel ? { notifyChannel: input.notifyChannel } : {}),
     })
@@ -579,6 +605,108 @@ export class IngestQueue {
     }
     this.pump()
     return created
+  }
+
+  /**
+   * Stage one of dedupe (SPEC.md §12.9): the vault's own memory of this hash. `jobs.sha256`
+   * forgets when history is cleared; `.raw/<job-id>/manifest.json` does not. A hit becomes a
+   * `duplicate` row at creation, exactly like a hash still present in `jobs`.
+   */
+  private vaultKnows(sha256: string): { duplicateOf: string; duplicateNote: string } | Record<never, never> {
+    const known = this.dedupe.byHash(sha256)
+    if (known === undefined) return {}
+    const what = known.originalName !== null ? `"${known.originalName}"` : 'an original'
+    return {
+      duplicateOf: known.jobId,
+      duplicateNote: `already in the vault: .raw/${known.jobId}/ holds ${what} with the same content`,
+    }
+  }
+
+  /**
+   * Stage two of dedupe (SPEC.md §12.9), after preprocessing: the document identifies itself
+   * by a DOI that a source page in the vault already declares. Bytes differ between two
+   * downloads of the same paper (publisher watermarks), so only the normalized text can
+   * answer this - and it has to be answered BEFORE an agent run is paid for.
+   *
+   * Guarded against a job recognising its own earlier attempt: a page this job created (by
+   * the delta tracker) or one written after the job was created is not evidence of a prior
+   * ingest. Returns undefined when the job proceeds to ingest.
+   */
+  private contentDuplicate(
+    job: JobRow,
+    pre: PreprocessResult,
+  ): { readonly page: string; readonly jobId: string | null; readonly doi: string } | undefined {
+    if (!this.doiDedupe()) return undefined
+    const normalized = pre.manifest.normalized
+    if (normalized === undefined) return undefined
+    let text: string
+    try {
+      text = fs.readFileSync(path.join(this.vaultRoot, '.raw', job.id, normalized), 'utf8')
+    } catch {
+      return undefined
+    }
+    const doi = extractDoi(text)
+    if (doi === undefined) return undefined
+    const match = this.dedupe.byDoi(doi)
+    if (match === undefined) return undefined
+    if (match.jobId === job.id) return undefined
+    if (match.jobId === null && match.pageMtimeMs >= Date.parse(job.created_at)) return undefined
+    return { page: match.page, jobId: match.jobId, doi }
+  }
+
+  /**
+   * Settles a job the DOI check caught: `preprocessing → duplicate`, and its staged copy goes
+   * - the original is already in `.raw/` under the job that ingested it, and an untracked
+   * second copy would sit dirty in the vault forever. Only a never-committed dir is removed
+   * (the default `discardStaging` refuses tracked paths), so nothing versioned is touched.
+   */
+  private async settleContentDuplicate(
+    job: JobRow,
+    dup: { readonly page: string; readonly jobId: string | null; readonly doi: string },
+  ): Promise<void> {
+    const via = dup.jobId !== null ? `job ${dup.jobId}` : 'an earlier ingest'
+    this.store.transition(job.id, 'duplicate', {
+      patch: {
+        error: `already in the vault as ${dup.page} (DOI ${dup.doi}, ingested by ${via})`,
+        ...(dup.jobId !== null ? { duplicateOf: dup.jobId } : {}),
+      },
+      log: `duplicate by DOI ${dup.doi}: ${dup.page} already covers this document (${via}) - no agent run`,
+      level: 'warn',
+    })
+    const relDir = path.posix.join('.raw', job.id)
+    try {
+      const removed = await this.discardStaging(this.vaultRoot, relDir)
+      this.store.log(
+        job.id,
+        'info',
+        removed ? `staged copy ${relDir}/ removed (never committed)` : `staged copy ${relDir}/ kept: git already tracks it`,
+      )
+    } catch (err) {
+      this.store.log(job.id, 'warn', `could not remove staged copy ${relDir}/: ${(err as Error).message}`)
+    }
+  }
+
+  /**
+   * A `done` run that wrote no wiki page gets `outcome = 'no-changes'` (SPEC.md §12.9): the
+   * agent finished cleanly and found nothing to add - typically a source it recognised as
+   * already ingested by means the two dedupe stages do not cover. Said in the log too, so the
+   * row and its record agree.
+   */
+  private markNoChanges(jobId: string, committedWiki: number): void {
+    if (committedWiki > 0) return
+    const row = this.store.get(jobId)
+    if (row === undefined || row.status !== 'done') return
+    // Only a run whose commit LANDED and carried no page is a no-change run. A skipped or
+    // failed commit says nothing about what the run wrote - those pages are on disk.
+    if (row.commit_hash === null) return
+    const recorded = row.created_pages !== null && row.created_pages !== '' && row.created_pages !== '[]'
+    if (recorded) return
+    this.store.setOutcome(jobId, 'no-changes')
+    this.store.log(
+      jobId,
+      'warn',
+      'no changes: the run finished but wrote no wiki page (the agent found nothing to add - usually a source it recognised as already ingested)',
+    )
   }
 
   /** Copies an original into its `.raw/<job-id>/` dir where preprocessing expects it. */
@@ -620,7 +748,15 @@ export class IngestQueue {
       let created: CreateJobResult | undefined
       try {
         const sha256 = await sha256File(item.sourcePath)
-        created = this.store.create({ source, type: guessType(originalName), originalName, sha256, batchId, ...notify })
+        created = this.store.create({
+          source,
+          type: guessType(originalName),
+          originalName,
+          sha256,
+          ...this.vaultKnows(sha256),
+          batchId,
+          ...notify,
+        })
         if (created.duplicateOf === undefined) this.stageFile(created.job.id, item.sourcePath, originalName)
         jobs.push(created)
       } catch (err) {
@@ -800,6 +936,12 @@ export class IngestQueue {
       return
     }
 
+    const dup = this.contentDuplicate(job, pre)
+    if (dup !== undefined) {
+      await this.settleContentDuplicate(job, dup)
+      return
+    }
+
     this.store.transition(job.id, 'ingesting', { log: `preprocessed as ${pre.type}` })
     await this.ingestStep(job, pre)
   }
@@ -882,6 +1024,7 @@ export class IngestQueue {
         extra: [path.posix.join('.raw', job.id)],
       })
       endRun()
+      this.markNoChanges(job.id, committed.length)
       this.validateStep(job.id, [...written, ...committed])
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(job.id, 'info', note)
@@ -1103,6 +1246,11 @@ export class IngestQueue {
           })
           continue
         }
+        const dup = this.contentDuplicate(job, pre)
+        if (dup !== undefined) {
+          await this.settleContentDuplicate(job, dup)
+          continue
+        }
         ready.push({ id, artifact: pre.primaryArtifact })
         names.push(job.original_name ?? job.url ?? id)
       } catch (err) {
@@ -1172,6 +1320,7 @@ export class IngestQueue {
         extra: ready.map((r) => path.posix.join('.raw', r.id)),
       })
       endRun()
+      for (const r of ready) this.markNoChanges(r.id, committed.length)
       this.validateStep(lead, [...written, ...committed])
       const note = await this.refreshHotCache(this.vaultRoot)
       this.store.log(lead, 'info', note)

@@ -57,6 +57,8 @@ export interface AgentRunQuery {
 export interface AgentRunStore {
   record(run: AgentRunRecord): void
   list(query?: AgentRunQuery): AgentRunRecord[]
+  /** Drops one settled run from the history; false when no such run is recorded. */
+  remove(id: string): boolean
 }
 
 /** Non-persistent fallback: history lasts as long as the process. */
@@ -72,6 +74,10 @@ export class MemoryAgentRunStore implements AgentRunStore {
       .filter((r) => query.kind === undefined || r.kind === query.kind)
       .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
     return query.limit === undefined ? rows : rows.slice(0, query.limit)
+  }
+
+  remove(id: string): boolean {
+    return this.runs.delete(id)
   }
 }
 
@@ -179,6 +185,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
       )
       .all(...params) as Row[]
     return rows.map(toRecord)
+  }
+
+  remove(id: string): boolean {
+    return this.db.prepare('DELETE FROM agent_runs WHERE id = ? AND user_id = ?').run(id, this.userId).changes > 0
   }
 
   /** Keeps the newest `keep` rows for this user; older history is not worth a query plan. */

@@ -82,7 +82,7 @@ Windows 11
 ### 3.2 Datenfluss Ingestion (happy path)
 
 1. Datei landet per Drop (HTTP-Upload) oder im Watch-Ordner.
-2. Service berechnet SHA-256; existiert der Hash bereits in `jobs`, wird der Job als Duplikat markiert und übersprungen (im Verlauf sichtbar).
+2. Service berechnet SHA-256; existiert der Hash bereits in `jobs` **oder in einem `.raw/<job-id>/manifest.json` des Vaults**, wird der Job als Duplikat markiert und übersprungen (im Verlauf sichtbar, mit Verweis auf den Ursprungs-Job). Nach dem Preprocessing folgt eine zweite, inhaltliche Stufe über die DOI (12.9, ergänzt 2026-09-05).
 3. Job `queued` → Preprocessing (Normalisierung, `.raw/<job-id>/`) → `ingesting` (Agent-Run) → `done`.
 4. Agent erzeugt/aktualisiert Wiki-Seiten, Index, Log, Hot Cache; Service committet; Dashboard aktualisiert Statistiken via SSE.
 
@@ -95,6 +95,7 @@ Windows 11
 - Dropzone akzeptiert Dateien (Mehrfach-Drop) **und** Text/URLs (Drop oder Einfügen einer URL startet einen URL-Job).
 - Upload via `multipart/form-data` an `POST /api/jobs`; Limit 200 MB pro Datei (konfigurierbar).
 - Mehrere gleichzeitig gedroppte Dateien werden als **Batch** gruppiert: erst alle einzeln vorverarbeitet, dann ein gemeinsamer `ingest all of these`-Run, damit der Agent quer-referenzieren kann (Verhalten des Repos für Batch-Ingestion).
+- Seit dem Redesign gibt es zwei Drop-Flächen (die Dropzone der Steuerspalte und das ganze Fenster). Ein Drop auf die Dropzone wird **nur** von ihr verarbeitet; der fensterweite Handler überlässt ihn ihr (`data-drop-target`). Bis 2026-09-05 nahmen beide denselben Drop an, und jede Datei kam doppelt beim Server an, die zweite als "Duplikat" der ersten.
 
 ### 4.2 Watch-Ordner
 
@@ -166,6 +167,8 @@ Herzstück der Bedienung. Oben die Dropzone (Dateien + URLs), darunter drei Bere
 
 **Ist-Stand 2026-08-26:** Der Tab ist in **Home** aufgegangen. Dropzone und URL-Feld sitzen in der Steuerspalte, die drei Bereiche (Aktiv / Warteschlange / Verlauf) sind zu **einem** Strom verschmolzen, in dem der Zustand eine Filterdimension ist statt eines eigenen Bereichs - Jobs, Agent-Runs und Vault-Commits stehen darin nebeneinander, weil sie aus Sicht des Lesers dasselbe sind: was mit dem Vault passiert ist. Nicht gebaut: die Warteschlange ist **nicht** umsortierbar (kein Endpunkt, keine Bedienung); Abbrechen, Retry und Revert gibt es.
 
+**Ergänzt 2026-09-05:** Einzelne Zeilen des Stroms sind aus dem Verlauf entfernbar (Zeilen-Aktion in der Tabelle und in der Detailansicht, zweistufig bestätigt): abgeschlossene Jobs über `DELETE /api/v1/jobs/:id`, persistierte Agent-Runs über `DELETE /api/v1/maintenance/history/:id`. Beides löscht nur Betriebszeilen; Vault, Seiten und Commits bleiben. Vault-Commits ohne eigene Zeile (rekonstruierte Ereignisse) haben keine Lösch-Aktion. Ein `done`-Job, dessen Run keine Wiki-Seite geschrieben hat, trägt das Ergebnis `no changes` als Badge und Erklärzeile; Duplikate zeigen ihre Erklärung ("already in the vault as …") als Zeile unter dem Namen (12.9).
+
 ### 6.3 Tab "Query/Chat"
 
 Chat-Oberfläche gegen den Query-Runner. Antworten enthalten die vom wiki-query-Skill gelieferten Seiten-Zitate; zitierte Seiten werden als klickbare Chips gerendert (Obsidian-Deep-Link + Inline-Preview des Seiteninhalts). Mehrere Chat-Sessions parallel, Sessions benennbar; Button "Session in Vault sichern" löst den `/save`-Flow des Repos aus.
@@ -190,7 +193,7 @@ Alle Endpunkte sind ab v1 unter `/api/v1/` versioniert und laufen durch eine Aut
 POST   /api/v1/jobs                 Datei-Upload oder URL-Job anlegen
 GET    /api/v1/jobs?status=&type=   Jobliste (paginiert)
 POST   /api/v1/jobs/:id/retry       Retry
-DELETE /api/v1/jobs/:id             Abbrechen/Entfernen aus Queue
+DELETE /api/v1/jobs/:id             Abbrechen (queued) bzw. aus dem Verlauf entfernen (settled; ergänzt 2026-09-05)
 GET    /api/v1/stats                Übersichts-Kennzahlen
 POST   /api/v1/query                Frage an Query-Runner (Session-ID optional)
 POST   /api/v1/maintenance/lint     Lint-Run starten
@@ -218,6 +221,7 @@ POST   /api/v1/maintenance/…        Die Wartungs-Runs: lint, lint-fix, hot-cac
                                     tag-fix, domain-backfill, domain-review, retrieve-index
 GET    /api/v1/maintenance/state    Turnus-Status je Bereich (12.7 Stufe b)
 GET    /api/v1/maintenance/history  Persistente Run-Historie (Schema v12)
+DELETE /api/v1/maintenance/history/:id  Einen Run aus der Historie entfernen (ergänzt 2026-09-05)
 GET    /api/v1/sessions[/:id]       Chat-Sessions; …/save löst den `/save`-Flow aus (6.3)
 GET    /api/v1/settings/telegram    Bot-Status + abgewiesene Absender (4.3); PUT/DELETE
                                     schreiben bzw. entfernen Token und Allowlist gemeinsam
@@ -275,8 +279,10 @@ jobs(
   notify_channel TEXT,            -- z. B. 'telegram:<chat_id>' — Abschluss-Meldung an den Eingangskanal (4.3; Migration v7)
   commit_hash TEXT,               -- der Commit dieses Ingests, Grundlage des Revert (§9; Migration v9)
   reverted_at TEXT,               -- gesetzt, wenn der Ingest zurückgenommen wurde; der Status bleibt unverändert (§9; Migration v9)
-  duplicate_of TEXT,              -- bei status='duplicate' der Job, den dieser dupliziert (Migration v11)
-  error TEXT, attempts INTEGER DEFAULT 0,
+  duplicate_of TEXT,              -- bei status='duplicate' der Job, den dieser dupliziert (Migration v11); auch ein
+                                  -- Job, dessen Zeile gelöscht ist, wenn der Vault ihn unter .raw/<job-id>/ noch kennt (12.9)
+  outcome TEXT,                   -- 'no-changes', wenn ein done-Run keine Wiki-Seite geschrieben hat; sonst NULL (12.9; Migration v14)
+  error TEXT, attempts INTEGER DEFAULT 0,   -- error trägt bei Duplikaten die Erklärung, nicht nur bei Fehlern
   tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL,
   created_at TEXT, started_at TEXT, finished_at TEXT
 );
@@ -552,3 +558,20 @@ Ein Betriebsmodus für eine öffentlich gehostete, strikt lesende Instanz (`DEMO
 **Oberfläche:** `GET /api/v1/health` meldet `demoMode: true`. Das Dashboard zeigt statt des Setup-Banners einen Read-only-Hinweis; Research und System bleiben als Tabs sichtbar, rendern aber eine Erklärfläche (Feature existiert, ist in der gehosteten Demo abgeschaltet, Verweis auf lokalen Betrieb); Intake-Flächen (Dropzone, globales Drag-and-drop) entfallen. `GET /api/v1/settings` nennt im Demo-Modus weder Vault-Pfad noch Watch-Ordner noch Bind-Adresse - eine öffentliche Instanz hat keinen Grund, ihr Dateisystem-Layout preiszugeben.
 
 **Abgrenzung:** Der Demo-Modus ändert nichts an Hard Rule 2 (Bind-Policy) - eine öffentliche Demo steht hinter einem Reverse Proxy, der Dienst selbst bindet weiter `127.0.0.1`. Er ist orthogonal zum Setup-Modus und zu `HTTP_AUTH_MODE`.
+
+---
+
+### 12.9 Dedupe in drei Stufen und das Ergebnis "no changes" (ergänzt 2026-09-05)
+
+Anlass: Ein bereits ingestiertes Paper wurde erneut gedroppt und lief trotzdem durch einen vollen Agent-Run, der nach elf Turns selbst feststellte, dass es nichts zu tun gab. Zwei unabhängige Lücken: die `jobs`-Zeile der ersten Ingestion war durch "Verlauf leeren" gelöscht (und mit ihr der Hash), und das neu heruntergeladene PDF hatte ohnehin andere Bytes, weil der Verlag ein Download-Wasserzeichen mit Datum einbettet. Ein Byte-Hash kann diese Klasse prinzipiell nicht erkennen.
+
+**Stufe 1 - Hash, im Vault erinnert.** Beim Enqueue wird der SHA-256 nicht nur gegen `jobs.sha256` geprüft, sondern auch gegen die `sha256`-Felder aller `.raw/<job-id>/manifest.json`, die der Service selbst beim Preprocessing schreibt. Ein Treffer erzeugt die `duplicate`-Zeile genau wie ein Treffer in `jobs`, mit `duplicate_of` = Verzeichnisname (die Job-ID). Damit überlebt Dedupe das Leeren des Verlaufs und sogar den Verlust der DB (Hard Rule 1, §8). Existiert die `jobs`-Zeile noch, gewinnt sie als Verweis, weil das Dashboard sie öffnen kann. Lesend, ohne Vault-Schreibzugriff; der Index liest nur, was sich seit dem letzten Aufruf geändert hat.
+
+**Stufe 2 - DOI, nach dem Preprocessing, vor dem Run.** Aus dem normalisierten Text wird die DOI bestimmt, mit der sich das Dokument selbst bezeichnet (Kandidaten aus dem Kopf des whitespace-kollabierten Textes, bei mehreren die im Dokument häufigste, weil Verlags-Wasserzeichen die eigene DOI auf jeder Seite wiederholen; Referenzlisten liegen außerhalb des Kopfes). Deklariert eine Source-Seite unter `wiki/sources/` diese DOI in ihrem Frontmatter (`url:`/`doi:`), geht der Job `preprocessing → duplicate` (neuer, einziger Übergang zu `duplicate`), `error` trägt die Erklärung mit Seite und DOI, `duplicate_of` den Job aus `.raw/.manifest.json`, wenn die Delta-Historie des Skills die Seite einem Raw-Pfad zuordnet. Schutz gegen Selbsterkennung: eine Seite, die dieser Job selbst erzeugt hat oder die jünger ist als der Job, gilt nicht als Vorläufer. Batches: das Duplikat fällt aus dem kombinierten Run, die übrigen Mitglieder laufen. Die nie committete Staging-Kopie `.raw/<job-id>/` wird entfernt, aber nur, wenn Git nichts darunter kennt (sanktionierte Ausnahme in CLAUDE.md Hard Rule 1); ein versioniertes Original bleibt unangetastet. Telegram meldet ein spät erkanntes Duplikat in den Chat wie einen Abschluss. Der Seitenkörper wird bewusst **nicht** durchsucht: ein Review zitiert Dutzende fremde DOIs. **Notausgang** für eine Fehlzuordnung: Einstellung `doiDedupe` (Standard an, live wirksam, System → Service) ausschalten und die Datei erneut droppen.
+
+**Stufe 3 - Ergebnis "no changes".** Ein `done`-Run, dessen eigener Commit gelandet ist und keine Wiki-Seite trug, und für den auch die Nachschau (`recoverPageRecord`) keine Seiten findet, erhält `outcome = 'no-changes'` (Migration v14) plus eine Warnzeile im Log. Das Dashboard zeigt das als Badge und Erklärzeile; die Telegram-Meldung sagt es ebenfalls. Der Commit bleibt (er trägt das gestagte Original und die Manifest-Notiz des Skills), damit der Run nachvollziehbar ist. Ein übersprungener oder fehlgeschlagener Commit sagt nichts über den Run aus und markiert nichts.
+
+**Kompatibilität mit claude-obsidian:** Alle drei Stufen sind lesend gegenüber dem Vault-Inhalt. Sie nutzen ausschließlich Artefakte, die das Repo ohnehin vorsieht (Source-Frontmatter mit `url:`, die Delta-Historie `.raw/.manifest.json` des `wiki-ingest`-Skills) oder die der Service selbst schreibt (`.raw/<job-id>/manifest.json`). Der Skill-eigene Manifest-Check (Pfad + Hash) bleibt unverändert; er greift bei Service-Ingests nie, weil jeder Job einen neuen Raw-Pfad bekommt, weshalb der Service die Prüfung vor dem Run übernimmt.
+
+**Abgrenzung:** URL-Jobs bleiben unadressiert (kein Hash), Textnotizen werden über den Hash des Textes dedupliziert. Eine inhaltliche Dedupe ohne DOI (Titel-Ähnlichkeit, whitespace-normalisierter Text-Hash) ist bewusst nicht gebaut: zu fragil für den Preis einer Fehlzuordnung.
+

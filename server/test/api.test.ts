@@ -618,9 +618,11 @@ describe('DELETE /api/v1/jobs/:id', () => {
     expect(res.status).toBe(200)
     expect(store.getOrThrow(job.id).status).toBe('cancelled')
 
-    // Once cancelled (terminal) a second cancel is a 409.
+    // Once cancelled (settled) a second DELETE removes the row from the history.
     const again = await fetch(`${baseUrl}/api/v1/jobs/${job.id}`, { method: 'DELETE' })
-    expect(again.status).toBe(409)
+    expect(again.status).toBe(200)
+    expect(await again.json()).toEqual({ deleted: true })
+    expect(store.get(job.id)).toBeUndefined()
   })
 })
 

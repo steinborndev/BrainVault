@@ -88,6 +88,7 @@ describe('validation (hard rules 2/3)', () => {
       concurrency: 3,
       maxUploadBytes: 1024,
       gitAutoCommit: false,
+      doiDedupe: false,
     })
     expect(ok.success).toBe(true)
   })

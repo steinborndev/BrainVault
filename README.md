@@ -291,7 +291,7 @@ arrived, what you go and find out, the two ways of browsing what is there, then 
   - **Vault stats** - pages, links, orphans, stubs, gaps and unfiled pages as figures; growth
     over 30 days; pages by type; the vault's own commit history; the retrieval index and its
     rebuild; and a check that every page under `wiki/` actually made it into git.
-  - **Service & config** - watch folder, concurrency, upload limit, git auto-commit, daily budget.
+  - **Service & config** - watch folder, concurrency, upload limit, git auto-commit, DOI dedupe, daily budget.
   - **Integrations** - the Anthropic credential, the Telegram bot, and the Obsidian vault name.
 
   ![System: vault stats - size, shape, growth and what is still unfiled](docs/img/system.png)
@@ -673,7 +673,7 @@ POST   /jobs/:id/retry           retry a failed or deferred job
 POST   /jobs/:id/revert          undo one ingest: reverts its vault commit as a new commit
                                  (409 on a dirty tree, on conflict, or if already reverted;
                                  a batch shares one commit, so this undoes the batch)
-DELETE /jobs/:id, /jobs          cancel; clear history
+DELETE /jobs/:id, /jobs          cancel a queued job / remove a settled one from history; clear history
 GET    /events                   SSE: job updates, log streams, stats + vault invalidation
 GET    /stats                    dashboard numbers, usage totals, budget
 POST   /query                    read-only question against the vault (+ citations)
@@ -705,6 +705,7 @@ GET    /maintenance/research/profiles   the closed lens list for the composer + 
 GET    /maintenance/runs         runs the process still holds - "what is happening now"
 GET    /maintenance/runs/:id     poll one run's result
 GET    /maintenance/history      the persistent run log, newest first - "what has happened"
+DELETE /maintenance/history/:id  remove one settled run from the history
                                  (`?kind=research`, `?limit=`)
 GET    /maintenance/state        per-kind last-settle state behind the status head
 GET    /sources                  page → the ingested document it came from (built from the

@@ -30,6 +30,8 @@ import type { Config } from '../config.js'
 export const DEFAULT_CONCURRENCY = 2
 /** Whether the service commits after each ingest by default (SPEC.md §7 "Git-Auto-Commit"). */
 export const DEFAULT_GIT_AUTO_COMMIT = true
+/** The post-preprocessing DOI dedupe (SPEC.md §12.9) is on unless switched off. */
+export const DEFAULT_DOI_DEDUPE = true
 
 /**
  * The settable keys. `null` clears an override (falls back to the baseline). `.strict()` makes
@@ -50,6 +52,12 @@ export const SETTINGS_SCHEMA = z
       .nullable(),
     /** Whether an ingest auto-commits to the vault. Applied live. */
     gitAutoCommit: z.boolean().nullable(),
+    /**
+     * Whether a document whose DOI a source page already declares is settled as a duplicate
+     * after preprocessing instead of being ingested (SPEC.md §12.9). The escape hatch for a
+     * wrong match: switch it off, drop the file again. Applied live.
+     */
+    doiDedupe: z.boolean().nullable(),
     /**
      * Per-day ceiling before the queue pauses (SPEC.md §7.1, §11.3). The UNIT depends on the
      * auth mode — ingests/day in oauth (subscription) mode, USD/day with an API key — see
@@ -74,6 +82,7 @@ export interface EffectiveSettings {
   readonly concurrency: number
   readonly maxUploadBytes: number
   readonly gitAutoCommit: boolean
+  readonly doiDedupe: boolean
   /** null = no daily budget (the default). Unit depends on auth mode — see pipeline/budget.ts. */
   readonly dailyBudget: number | null
 }
@@ -85,6 +94,7 @@ export function baselineSettings(config: Config): EffectiveSettings {
     concurrency: DEFAULT_CONCURRENCY,
     maxUploadBytes: config.server.maxUploadBytes,
     gitAutoCommit: DEFAULT_GIT_AUTO_COMMIT,
+    doiDedupe: DEFAULT_DOI_DEDUPE,
     // No env baseline: a budget is opt-in, so "unset" means unlimited. Clearing the override
     // therefore lands back on null, which reads the same as never having set one.
     dailyBudget: null,
@@ -99,6 +109,7 @@ export function effectiveSettings(config: Config, overrides: SettingsOverrides):
     concurrency: overrides.concurrency ?? base.concurrency,
     maxUploadBytes: overrides.maxUploadBytes ?? base.maxUploadBytes,
     gitAutoCommit: overrides.gitAutoCommit ?? base.gitAutoCommit,
+    doiDedupe: overrides.doiDedupe ?? base.doiDedupe,
     dailyBudget: overrides.dailyBudget ?? base.dailyBudget,
   }
 }

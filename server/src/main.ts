@@ -86,6 +86,7 @@ export async function startService(config: Config = loadConfig()): Promise<Runni
     runRegistry,
     // A provider, not a value: a settings change takes effect on the next commit, no restart.
     autoCommit: () => settings.effective(config).gitAutoCommit,
+    doiDedupe: () => settings.effective(config).doiDedupe,
     // Same pattern for the daily budget — evaluated through the shared budget module so the
     // queue's pause decision and the dashboard's display can never disagree (SPEC.md §11.3).
     budgetExceeded: () => budgetStatus(config, settings.effective(config), store).exceeded,

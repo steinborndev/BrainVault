@@ -213,9 +213,10 @@ describe('incrementAttempts', () => {
 })
 
 describe('ALLOWED_TRANSITIONS', () => {
-  it('never lists duplicate as a reachable target', () => {
-    for (const targets of Object.values(ALLOWED_TRANSITIONS)) {
-      expect(targets).not.toContain('duplicate')
+  it('lists duplicate as a target of preprocessing only (the post-preprocess DOI check)', () => {
+    for (const [from, targets] of Object.entries(ALLOWED_TRANSITIONS)) {
+      if (from === 'preprocessing') expect(targets).toContain('duplicate')
+      else expect(targets).not.toContain('duplicate')
     }
   })
 })
