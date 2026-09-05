@@ -155,6 +155,21 @@ describe('GraphBuilder', () => {
     expect(g.gaps[1]!.refBy).toHaveLength(1)
   })
 
+  it('never lets the journal or the hot cache nominate a gap', () => {
+    // The append-only log keeps naming pages that were deleted or deliberately unlinked, and
+    // the hot cache is rewritten from scratch; a link there is a record, not a missing page.
+    page('wiki/log.md', '- created [[Espresso Basics]] and [[Osmosis]]')
+    page('wiki/hot.md', 'recent: [[Espresso Basics]]')
+    page('wiki/concepts/A.md', 'content gap [[Osmosis]]')
+
+    const g = new GraphBuilder(vaultRoot).build()
+    expect(g.unresolved).toBe(4) // every dangling link still counts
+    expect(g.gaps).toHaveLength(1) // but only the content page's want is a gap
+    expect(g.gaps[0]!.title).toBe('Osmosis')
+    const a = g.nodes.findIndex((n) => n.path === 'wiki/concepts/A.md')
+    expect(g.gaps[0]!.refBy).toEqual([a])
+  })
+
   it('counts dangling path-qualified links as unresolved but excludes them from gaps', () => {
     // Path targets whose page really doesn't exist stay dangling — and stay out of the
     // gap list (navigation/staging references, not missing content pages).
