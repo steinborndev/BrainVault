@@ -399,7 +399,18 @@ deep-linkbaren Routen (`/vault` = Graph, `/vault/page/<pfad>` = Seite), strikt l
   Web Worker, die abkühlt und stoppt; Label-Level-of-Detail nach Zoom und Knotengrad,
   Viewport-Culling, Pan/Zoom/Touch, Nachbarschafts-Hervorhebung. Suche, Typ-Filter und ein
   lokaler Graph-Modus (BFS-Tiefe 1/2 um eine fokussierte Seite) halten die Ansicht auch bei
-  großem Vault handhabbar. Seitenansicht mit Backlinks-/Ausgehend-Panel, Frontmatter als
+  großem Vault handhabbar. **Zoom-Mechanik "Anker und Leine" (ergänzt 2026-09-05,
+  `web/src/lib/graphZoom.ts`, getestet):** Beim Hineinzoomen zielt das Rad auf den
+  Schwerpunkt der Community in Reichweite (160 px oder innerhalb ihrer Hülle) statt auf den
+  Cursor, solange sie unter etwa 35 % der kürzeren Bildseite füllt; danach gehorcht der Zoom
+  wieder dem Cursor. Nach jedem Zoom und Ziehen hält eine Leine Graph-Box und Bild je Achse
+  auf mindestens 60 % Überlappung, sodass das Bild nie leer wird. Rad-Deltas werden auf Pixel
+  normiert und auf 120 px je Event gekappt (1,10× je 100 px statt 1,16×), der Schritt läuft
+  als kurze Animation nach (bei `prefers-reduced-motion` sofort). Oben rechts eine Minimap
+  (nur sichtbar, wenn der Graph nicht ganz im Bild ist; Klick versetzt das Bild), und wenn
+  kein Knoten im Bild ist, mittig eine Schaltfläche "Go to nearest cluster". Vorher hielt der
+  Zoom nur den Punkt unter dem Cursor fest: neben einem Cluster hineingezoomt, war das Bild
+  nach fünf Rasten leer. Seitenansicht mit Backlinks-/Ausgehend-Panel, Frontmatter als
   Eigenschaften-Panel und klickbaren `[[Wikilinks]]` (gleiche Auflösungsregel wie serverseitig).
 - **Skalierung** ist bewusstes Entwurfskriterium: der Vault wächst kontinuierlich, und die
   ruckelnde Obsidian-Graph-View (Abschnitt 3/11) ist genau das, was hier nicht reproduziert

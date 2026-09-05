@@ -3040,7 +3040,36 @@ details.hot-cache[open] summary {
   width: 100%;
   height: 100%;
 }
-/* Bottom-right: top-left belongs to the zoom controls, top-right to the search overlay. */
+/* Top-right: the corner the in-bar search freed (2026-08-26) holds the overview since
+   2026-09-05 - the whole graph with the picture as a frame. Hidden by the draw loop while
+   the whole graph is on screen anyway; the width/height pair must agree with MINI_W/MINI_H
+   in GraphCanvas.tsx, which sizes the bitmap. */
+.graph-minimap {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  width: 150px;
+  height: 96px;
+  z-index: 5;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  cursor: crosshair;
+}
+.graph-minimap[hidden] {
+  display: none;
+}
+/* The way back (2026-09-05): rendered only while no node is on screen, dead center where
+   the eye already is. One verb, no preamble - the empty canvas IS the explanation. */
+.graph-offmap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  box-shadow: var(--shadow);
+}
+/* Bottom-right: the legend's corner; the transient layout status shares it. */
 .graph-status {
   position: absolute;
   bottom: 10px;
